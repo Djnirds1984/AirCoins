@@ -45,7 +45,7 @@ echo -e "${NC}"
 # ============================================
 # STEP 1: Update system
 # ============================================
-echo -e "${YELLOW}[1/8]${NC} Updating system packages..."
+echo -e "${YELLOW}[1/10]${NC} Updating system packages..."
 apt-get update -qq
 apt-get upgrade -y -qq
 echo -e "${GREEN}  ✓ System updated${NC}"
@@ -53,7 +53,7 @@ echo -e "${GREEN}  ✓ System updated${NC}"
 # ============================================
 # STEP 2: Install required packages
 # ============================================
-echo -e "${YELLOW}[2/8]${NC} Installing required packages..."
+echo -e "${YELLOW}[2/10]${NC} Installing required packages..."
 apt-get install -y -qq \
     hostapd \
     dnsmasq \
@@ -67,14 +67,60 @@ apt-get install -y -qq \
     wget \
     curl \
     jq \
-    bc
+    bc \
+    postgresql \
+    postgresql-contrib \
+    golang-go
 
 echo -e "${GREEN}  ✓ Packages installed${NC}"
 
 # ============================================
-# STEP 3: Install WiringOP (GPIO library)
+# STEP 3: Setup PostgreSQL Database
 # ============================================
-echo -e "${YELLOW}[3/8]${NC} Installing WiringOP (GPIO library)..."
+echo -e "${YELLOW}[3/10]${NC} Setting up PostgreSQL database..."
+
+# Start PostgreSQL
+systemctl start postgresql
+systemctl enable postgresql
+
+# Create database user and database
+sudo -u postgres psql -c "CREATE USER aircoins WITH PASSWORD 'aircoins123';" 2>/dev/null || true
+sudo -u postgres psql -c "CREATE DATABASE aircoins OWNER aircoins;" 2>/dev/null || true
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE aircoins TO aircoins;" 2>/dev/null || true
+
+# Run schema
+psql -U aircoins -d aircoins -h localhost -f "$SYSTEM_DIR/database/schema.sql" 2>/dev/null || {
+    echo -e "${YELLOW}  ⚠ Schema may already exist, continuing...${NC}"
+}
+
+echo -e "${GREEN}  ✓ PostgreSQL database ready${NC}"
+
+# ============================================
+# STEP 4: Build and Deploy Go API
+# ============================================
+echo -e "${YELLOW}[4/10]${NC} Building Go API server..."
+
+cd "$SYSTEM_DIR/usr/local/bin/aircoins-api"
+
+# Download dependencies
+go mod download
+
+# Build the binary
+go build -o aircoins-api .
+
+# Deploy
+mkdir -p /usr/local/bin/aircoins-api
+cp aircoins-api /usr/local/bin/aircoins-api/
+chmod +x /usr/local/bin/aircoins-api/aircoins-api
+
+echo -e "${GREEN}  ✓ Go API built and deployed${NC}"
+
+cd "$SCRIPT_DIR"
+
+# ============================================
+# STEP 5: Install WiringOP (GPIO library)
+# ============================================
+echo -e "${YELLOW}[5/10]${NC} Installing WiringOP (GPIO library)..."
 
 if command -v gpio &> /dev/null; then
     echo -e "${GREEN}  ✓ WiringOP already installed${NC}"
@@ -107,9 +153,9 @@ else
 fi
 
 # ============================================
-# STEP 4: Deploy configuration files
+# STEP 6: Deploy configuration files
 # ============================================
-echo -e "${YELLOW}[4/8]${NC} Deploying configuration files..."
+echo -e "${YELLOW}[6/10]${NC} Deploying configuration files..."
 
 # hostapd
 cp "$SYSTEM_DIR/etc/hostapd/hostapd.conf" /etc/hostapd/hostapd.conf
@@ -131,9 +177,9 @@ echo "  ✓ iptables rules"
 echo -e "${GREEN}  ✓ All configs deployed${NC}"
 
 # ============================================
-# STEP 5: Deploy web portal files
+# STEP 7: Deploy web portal files
 # ============================================
-echo -e "${YELLOW}[5/8]${NC} Deploying web portal..."
+echo -e "${YELLOW}[7/10]${NC} Deploying web portal..."
 
 mkdir -p /var/www/html
 mkdir -p /var/www/html/api
@@ -167,9 +213,9 @@ fi
 echo -e "${GREEN}  ✓ Portal deployed to /var/www/html/${NC}"
 
 # ============================================
-# STEP 6: Deploy scripts
+# STEP 8: Deploy scripts
 # ============================================
-echo -e "${YELLOW}[6/8]${NC} Deploying scripts..."
+echo -e "${YELLOW}[8/10]${NC} Deploying scripts..."
 
 # GPIO coin listener
 cp "$SYSTEM_DIR/usr/local/bin/gpio-coin-listener" /usr/local/bin/gpio-coin-listener
@@ -194,9 +240,9 @@ echo "  ✓ pisowifi-api-update"
 echo -e "${GREEN}  ✓ All scripts deployed${NC}"
 
 # ============================================
-# STEP 7: Deploy systemd services
+# STEP 9: Deploy systemd services
 # ============================================
-echo -e "${YELLOW}[7/8]${NC} Deploying systemd services..."
+echo -e "${YELLOW}[9/10]${NC} Deploying systemd services..."
 
 # Create directories
 mkdir -p /var/lib/pisowifi/sessions
@@ -205,20 +251,22 @@ mkdir -p /var/log/pisowifi
 # Service files
 cp "$SYSTEM_DIR/etc/systemd/system/gpio-coin-listener.service" /etc/systemd/system/
 cp "$SYSTEM_DIR/etc/systemd/system/pisowifi-session.service" /etc/systemd/system/
+cp "$SYSTEM_DIR/etc/systemd/system/aircoins-api.service" /etc/systemd/system/
 
 # Reload systemd
 systemctl daemon-reload
 
 # Enable services on boot
+systemctl enable aircoins-api.service
 systemctl enable gpio-coin-listener.service
 systemctl enable pisowifi-session.service
 
 echo -e "${GREEN}  ✓ Services deployed and enabled${NC}"
 
 # ============================================
-# STEP 8: Configure system
+# STEP 10: Configure system
 # ============================================
-echo -e "${YELLOW}[8/8]${NC} Configuring system..."
+echo -e "${YELLOW}[10/10]${NC} Configuring system..."
 
 # Enable IP forwarding
 echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-pisowifi.conf

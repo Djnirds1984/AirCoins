@@ -99,8 +99,10 @@ if command -v gpio &> /dev/null; then
 
             log "COIN DETECTED! Pulse #$COIN_COUNT | Value: ₱$COIN_VALUE"
 
-            # Write coin event for session manager
-            echo "$COIN_VALUE $(date +%s)" > "$EVENT_FILE"
+            # Send coin event to Go API
+            curl -s -X POST http://localhost:8080/api/gpio/coin \
+                -H "Content-Type: application/json" \
+                -d "{\"coin_value\": $COIN_VALUE}" > /dev/null 2>&1 &
 
             # Update state
             echo "$COIN_COUNT" > "$STATE_FILE"

@@ -323,26 +323,112 @@ EOF
 # ============================================
 log "Entering main loop (1-second tick)"
 
-API_UPDATE="/usr/local/bin/pisowifi-api-update"
+API_URL="http://localhost:8080"
 
 while true; do
-    # Process coin events
-    process_coin_event
+    # Process unprocessed coin events from database
+    process_coin_events
 
-    # Process pending coins (if client just connected)
-    process_pending_coins
-
-    # Tick all sessions (decrement 1 second)
+    # Tick all active sessions (decrement 1 second via API)
     tick_sessions
 
-    # Check for expired sessions
+    # Check for expired sessions and update iptables
     check_sessions
-
-    # Update API status JSON for frontend polling
-    if [ -x "$API_UPDATE" ]; then
-        $API_UPDATE
-    fi
 
     # Sleep 1 second
     sleep 1
 done
+
+# ============================================
+# PROCESS COIN EVENTS FROM DATABASE
+# ============================================
+process_coin_events() {
+    # Get unprocessed coin events
+    local events=$(curl -s "$API_URL/api/gpio/coin?unprocessed=true" 2>/dev/null)
+    
+    if [ -z "$events" ] || [ "$events" = "null" ]; then
+        return
+    fi
+
+    # Process each event
+    echo "$events" | while read -r event; do
+        local coin_value=$(echo "$event" | grep -o '"coin_value":[0-9]*' | cut -d: -f2)
+        local event_id=$(echo "$event" | grep -o '"id":[0-9]*' | cut -d: -f2)
+        
+        if [ -n "$coin_value" ] && [ "$coin_value" -gt 0 ]; then
+            # Get pricing for this coin
+            local minutes=$(curl -s "$API_URL/api/pricing?coin=$coin_value" | grep -o '"minutes":[0-9]*' | cut -d: -f2)
+            minutes=${minutes:-$((coin_value * 5))}
+            local seconds=$((minutes * 60))
+            
+            log "COIN EVENT: ₱$coin_value = $minutes minutes ($seconds seconds)"
+            
+            # Find or create session for latest client
+            local client_ip=$(get_latest_client_ip)
+            
+            if [ -n "$client_ip" ]; then
+                # Start or extend session
+                curl -s -X POST "$API_URL/api/session/start" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"client_ip\":\"$client_ip\",\"seconds\":$seconds,\"coins\":$coin_value}" > /dev/null 2>&1
+                
+                # Ensure client is allowed through iptables
+                allow_client "$client_ip"
+                
+                log "SESSION: $client_ip | ₱$coin_value | $minutes minutes"
+            else
+                log "WARNING: No client connected. Coin ₱$coin_value queued."
+            fi
+            
+            # Mark event as processed
+            curl -s -X POST "$API_URL/api/gpio/coin/$event_id/processed" > /dev/null 2>&1
+        fi
+    done
+}
+
+# ============================================
+# TICK SESSIONS (decrement remaining seconds)
+# ============================================
+tick_sessions() {
+    # Get all active sessions
+    local sessions=$(curl -s "$API_URL/api/admin/sessions?status=active" 2>/dev/null)
+    
+    if [ -z "$sessions" ]; then
+        return
+    fi
+
+    # Decrement each session
+    echo "$sessions" | while read -r session; do
+        local session_id=$(echo "$session" | grep -o '"id":[0-9]*' | cut -d: -f2)
+        local remaining=$(echo "$session" | grep -o '"remaining_seconds":[0-9]*' | cut -d: -f2)
+        
+        if [ -n "$session_id" ] && [ -n "$remaining" ] && [ "$remaining" -gt 0 ]; then
+            # Decrement via API
+            curl -s -X POST "$API_URL/api/session/tick" \
+                -H "Content-Type: application/json" \
+                -d "{\"session_id\":$session_id}" > /dev/null 2>&1
+        fi
+    done
+}
+
+# ============================================
+# CHECK SESSIONS (expire and block)
+# ============================================
+check_sessions() {
+    # Get expired sessions
+    local expired=$(curl -s "$API_URL/api/admin/sessions?status=expired" 2>/dev/null)
+    
+    if [ -z "$expired" ]; then
+        return
+    fi
+
+    # Block each expired client
+    echo "$expired" | while read -r session; do
+        local client_ip=$(echo "$session" | grep -o '"client_ip":"[^"]*"' | cut -d'"' -f4)
+        
+        if [ -n "$client_ip" ]; then
+            block_client "$client_ip"
+            log "SESSION EXPIRED: $client_ip"
+        fi
+    done
+}

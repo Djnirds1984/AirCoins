@@ -1,0 +1,34 @@
+[Unit]
+Description=AirCoins Go API Server
+After=postgresql.service network.target
+Wants=postgresql.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/aircoins-api/aircoins-api
+ExecStop=/bin/kill -TERM $MAINPID
+Restart=always
+RestartSec=5
+User=root
+WorkingDirectory=/usr/local/bin/aircoins-api
+
+# Environment variables for database connection
+Environment=DB_HOST=localhost
+Environment=DB_PORT=5432
+Environment=DB_USER=aircoins
+Environment=DB_PASSWORD=aircoins123
+Environment=DB_NAME=aircoins
+Environment=PORT=8080
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aircoins-api
+
+# Security
+NoNewPrivileges=no
+ProtectSystem=false
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

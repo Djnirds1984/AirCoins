@@ -94,25 +94,60 @@ apt-get install firmware-realtek    # For RTL8188/RTL8192 chipsets
 
 ---
 
-## 3. Transfer Project Files
+## 3. Quick Install (Auto Installation)
 
-### Option A: Git Clone (Recommended)
+### One-Line Install from Git
+
+```bash
+# Clone and install in one command
+sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/Djnirds1984/AirCoins/main/install.sh)"
+
+# Or if git is already installed on the Orange Pi:
+cd /opt
+sudo git clone https://github.com/Djnirds1984/AirCoins.git
+cd AirCoins
+sudo bash install.sh
+```
+
+### What the Installer Does
+
+The `install.sh` script automatically:
+1. Updates system packages
+2. Installs PostgreSQL, Go, hostapd, dnsmasq, lighttpd, iptables, WiringOP
+3. Creates PostgreSQL database and user
+4. Runs database schema migrations
+5. Builds and deploys the Go API server
+6. Deploys all configuration files
+7. Deploys the web portal (index.html, admin.html)
+8. Deploys GPIO listener and session manager
+9. Installs and enables systemd services
+10. Enables IP forwarding and configures firewall
+
+> **Note:** A reboot is recommended after installation before first use.
+
+---
+
+## 4. Manual Installation
+
+### Step 1: Transfer Project Files
+
+#### Option A: Git Clone (Recommended)
 
 ```bash
 # On Orange Pi
 cd /opt
-git clone https://github.com/YOUR_USERNAME/AirCoins.git
+git clone https://github.com/Djnirds1984/AirCoins.git
 cd AirCoins
 ```
 
-### Option B: SCP from your computer
+#### Option B: SCP from your computer
 
 ```bash
 # From your Windows/Mac/Linux machine
 scp -r ./AirCoins root@<orange-pi-ip>:/opt/AirCoins
 ```
 
-### Option C: USB Drive
+#### Option C: USB Drive
 
 ```bash
 # Copy AirCoins folder to USB drive (FAT32)
@@ -122,9 +157,7 @@ cp -r /mnt/AirCoins /opt/
 umount /mnt
 ```
 
----
-
-## 4. Installation
+### Step 2: Run Installer
 
 ```bash
 # Navigate to project directory
@@ -136,16 +169,6 @@ chmod +x install.sh
 # Run installer (must be root)
 sudo bash install.sh
 ```
-
-The installer will:
-- Update system packages
-- Install hostapd, dnsmasq, lighttpd, iptables, WiringOP
-- Deploy all configuration files
-- Deploy the web portal
-- Deploy GPIO listener, session manager, and API scripts
-- Install systemd services
-- Enable IP forwarding
-- Enable services on boot
 
 > **Note:** If WiringOP installation fails and no GPIO hardware is detected, the GPIO listener will exit with a fatal error. Ensure WiringOP is properly installed before deployment.
 
@@ -253,6 +276,11 @@ sudo pisowifi-ctl logs 200
 ### Individual Service Control
 
 ```bash
+# Go API Server (REST API backend)
+sudo systemctl start aircoins-api
+sudo systemctl status aircoins-api
+sudo journalctl -u aircoins-api -f
+
 # GPIO Coin Listener
 sudo systemctl start gpio-coin-listener
 sudo systemctl status gpio-coin-listener
@@ -271,6 +299,9 @@ sudo systemctl start dnsmasq
 
 # Web Server
 sudo systemctl start lighttpd
+
+# PostgreSQL Database
+sudo systemctl status postgresql
 ```
 
 ---
@@ -391,44 +422,60 @@ tail -f /var/log/pisowifi/gpio-coin.log
 ## 10. System Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   Orange Pi One                      │
-│                                                      │
-│  ┌──────────┐    ┌──────────┐    ┌──────────────┐   │
-│  │ hostapd  │    │ dnsmasq  │    │   lighttpd   │   │
-│  │ (WiFi AP)│    │(DHCP+DNS)│    │ (Web Server) │   │
-│  └────┬─────┘    └────┬─────┘    └──────┬───────┘   │
-│       │               │                  │           │
-│       │    ┌──────────┴────────┐         │           │
-│       │    │    iptables       │         │           │
-│       │    │ (NAT + Captive    │         │           │
-│       │    │  Portal + Auth)   │         │           │
-│       │    └──────────┬────────┘         │           │
-│       │               │                  │           │
-│  ┌────┴─────┐    ┌────┴──────────┐  ┌───┴────────┐  │
-│  │  wlan0   │    │     eth0      │  │  GPIO Pin 7│  │
-│  │ (WiFi AP)│    │  (Internet)   │  │ (Coin Slot)│  │
-│  └──────────┘    └───────────────┘  └─────┬──────┘  │
-│                                            │         │
-│  ┌──────────────────┐  ┌──────────────────┴───────┐  │
-│  │ GPIO Coin        │  │ Session Manager          │  │
-│  │ Listener         │──│ (time tracking, iptables │  │
-│  │ (gpio-coin-      │  │  client auth, stats)     │  │
-│  │  listener)       │  │                          │  │
-│  └──────────────────┘  └──────────────────────────┘  │
-│                              │                       │
-│                    ┌─────────┴─────────┐             │
-│                    │ API Status Update │             │
-│                    │ (status.json)     │             │
-│                    └─────────┬─────────┘             │
-│                              │                       │
-│                    ┌─────────┴─────────┐             │
-│                    │  index.html       │             │
-│                    │ (Portal Frontend) │             │
-│                    │ (polls status.json│             │
-│                    │  every 2 seconds) │             │
-│                    └───────────────────┘             │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        Orange Pi One                            │
+│                                                                  │
+│  ┌──────────┐    ┌──────────┐    ┌──────────────────────────┐   │
+│  │ hostapd  │    │ dnsmasq  │    │        lighttpd          │   │
+│  │ (WiFi AP)│    │(DHCP+DNS)│    │   (Web Server + Proxy)   │   │
+│  └────┬─────┘    └────┬─────┘    └──────────┬───────────────┘   │
+│       │               │                      │                   │
+│       │    ┌──────────┴────────┐             │                   │
+│       │    │     iptables      │             │                   │
+│       │    │  (NAT + Captive   │             │                   │
+│       │    │   Portal + Auth)  │             │                   │
+│       │    └──────────┬────────┘             │                   │
+│       │               │                      │                   │
+│  ┌────┴─────┐    ┌────┴──────────┐    ┌──────┴──────────────┐   │
+│  │  wlan0   │    │     eth0      │    │  /api/* → Go :8080  │   │
+│  │ (WiFi AP)│    │  (Internet)   │    │  (reverse proxy)    │   │
+│  └──────────┘    └───────────────┘    └──────────┬──────────┘   │
+│                                                   │              │
+│  ┌──────────────────┐    ┌────────────────────────┴──────────┐   │
+│  │ GPIO Coin        │    │     Go API Server (:8080)         │   │
+│  │ Listener         │───▶│  ┌─────────────────────────────┐  │   │
+│  │ (gpio-coin-      │    │  │  REST API Endpoints:        │  │   │
+│  │  listener)       │    │  │  /api/admin/*               │  │   │
+│  └──────────────────┘    │  │  /api/session/*             │  │   │
+│                          │  │  /api/gpio/*                │  │   │
+│  ┌──────────────────┐    │  │  /api/pricing/*             │  │   │
+│  │ Session Manager  │───▶│  │  /api/system/*              │  │   │
+│  │ (pisowifi-       │    │  └─────────────────────────────┘  │   │
+│  │  session-manager)│    └──────────────────┬────────────────┘   │
+│  └──────────────────┘                       │                    │
+│                                             │                    │
+│                          ┌──────────────────┴────────────────┐   │
+│                          │       PostgreSQL Database         │   │
+│                          │  ┌─────────────────────────────┐  │   │
+│                          │  │  Tables:                    │  │   │
+│                          │  │  - admin_users              │  │   │
+│                          │  │  - sessions                 │  │   │
+│                          │  │  - coin_events              │  │   │
+│                          │  │  - gpio_config              │  │   │
+│                          │  │  - pricing                  │  │   │
+│                          │  │  - system_settings          │  │   │
+│                          │  │  - daily_stats              │  │   │
+│                          │  │  - system_logs              │  │   │
+│                          │  └─────────────────────────────┘  │   │
+│                          └───────────────────────────────────┘   │
+│                                                                  │
+│                          ┌───────────────────────────────────┐   │
+│                          │  Frontend (HTML/JS)               │   │
+│                          │  - index.html (Customer Portal)   │   │
+│                          │  - admin.html (Admin Dashboard)   │   │
+│                          │  (polls /api/* endpoints)         │   │
+│                          └───────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---

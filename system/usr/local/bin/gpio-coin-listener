@@ -9,13 +9,14 @@
 # Runs as: systemd service
 #
 # GPIO PIN CONFIGURATION:
-#   COIN_PULSE_PIN = Physical pin 7 (wiringPi 7 / GPIO PA6)
-#   Connect coin acceptor pulse wire to this GPIO pin
+#   Configurable via Admin Panel or /var/lib/pisowifi/gpio_config
+#   Default: Physical pin 7 (wiringPi 7 / GPIO PA6)
+#   Connect coin acceptor pulse wire to selected GPIO pin
 #   Connect coin acceptor GND to Orange Pi GND
 #
 # HOW IT WORKS:
-#   1. Coin acceptor sends a pulse (HIGH→LOW→HIGH) per coin
-#   2. This script detects the pulse edge (falling edge)
+#   1. Coin acceptor sends a pulse per coin
+#   2. This script detects the pulse edge
 #   3. Writes coin event to the session manager
 #   4. Session manager adds time to the client's session
 # ============================================
@@ -23,8 +24,19 @@
 # ============================================
 # CONFIGURATION
 # ============================================
-COIN_PULSE_PIN=7                    # WiringPi pin number (Physical pin 7 on Orange Pi)
-COIN_VALUE=1                        # Peso value per pulse (1 = ₱1 per pulse)
+# Default values (overridden by config file)
+COIN_PULSE_PIN=7                    # WiringPi pin number
+COIN_VALUE=1                        # Peso value per pulse
+PULSE_MODE="falling"                # falling, rising, or both
+
+# Config file (written by admin panel / API)
+CONFIG_FILE="/var/lib/pisowifi/gpio_config"
+
+# Load config from file if exists
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+fi
+
 EVENT_FILE="/var/lib/pisowifi/coin_event"
 LOG_FILE="/var/log/pisowifi/gpio-coin.log"
 PID_FILE="/var/run/gpio-coin-listener.pid"
@@ -47,6 +59,7 @@ cleanup() {
     rm -f "$PID_FILE"
     exit 0
 }
+
 
 trap cleanup SIGTERM SIGINT EXIT
 

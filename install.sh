@@ -136,9 +136,30 @@ echo -e "${GREEN}  ✓ All configs deployed${NC}"
 echo -e "${YELLOW}[5/8]${NC} Deploying web portal..."
 
 mkdir -p /var/www/html
+mkdir -p /var/www/html/api
 cp "$SCRIPT_DIR/index.html" /var/www/html/index.html
+cp "$SCRIPT_DIR/admin.html" /var/www/html/admin.html
 chown -R www-data:www-data /var/www/html
 chmod -R 755 /var/www/html
+
+# Deploy CGI scripts for admin API
+mkdir -p /usr/lib/cgi-bin
+cp "$SYSTEM_DIR/usr/lib/cgi-bin/set_gpio_config" /usr/lib/cgi-bin/set_gpio_config
+chmod +x /usr/lib/cgi-bin/set_gpio_config
+chown root:www-data /usr/lib/cgi-bin/set_gpio_config
+
+# Enable CGI in lighttpd
+if ! grep -q "mod_cgi" /etc/lighttpd/lighttpd.conf 2>/dev/null; then
+    cat >> /etc/lighttpd/lighttpd.conf << 'CGIEOF'
+
+# CGI support (for admin API)
+server.modules += ( "mod_cgi" )
+cgi.assign = ( "" => "" )
+$HTTP["url"] =~ "^/api/" {
+    cgi.assign = ( "" => "/bin/bash" )
+}
+CGIEOF
+fi
 
 echo -e "${GREEN}  ✓ Portal deployed to /var/www/html/${NC}"
 

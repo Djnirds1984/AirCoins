@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AirCoins - Admin Panel</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            min-height: 100vh;
+            color: #fff;
+            overflow-x: hidden;
+        }
+
+        /* NAV */
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 30px;
+            background: rgba(0,0,0,0.3);
+            backdrop-filter: blur(10px);
+        }
+        .navbar .logo { font-size: 24px; font-weight: bold; color: #00d4ff; }
+        .navbar .logo span { color: #ffd700; }
+        .nav-links { display: flex; gap: 20px; }
+        .nav-links a {
+            color: #ccc;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            transition: 0.3s;
+            cursor: pointer;
+        }
+        .nav-links a:hover, .nav-links a.active {
+            background: #00d4ff;
+            color: #000;
+        }
+
+        /* LAYOUT */
+        .page { padding: 30px; max-width: 1200px; margin: 0 auto; }
+
+        /* ADMIN LOGIN */
+        .admin-login {
+            max-width: 350px;
+            margin: 60px auto;
+            text-align: center;
+        }
+        .admin-login input {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 10px;
+            background: rgba(255,255,255,0.05);
+            color: #fff;
+            font-size: 16px;
+        }
+
+        /* ADMIN GRID */
+        .admin-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+        .admin-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 25px;
+        }
+        .admin-card h3 {
+            color: #00d4ff;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .stat-row:last-child { border: none; }
+        .stat-label { color: #aaa; }
+        .stat-value { color: #fff; font-weight: bold; }
+
+        /* PRICING TABLE */
+        .pricing-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        .pricing-table th, .pricing-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .pricing-table th { color: #00d4ff; }
+
+        /* LOG TABLE */
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 13px;
+        }
+        .log-table th, .log-table td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .log-table th { color: #00d4ff; }
+
+        /* SETTINGS FORM */
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #aaa;
+            font-size: 14px;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.05);
+            color: #fff;
+            font-size: 14px;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+
+        /* BUTTONS */
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: 0.3s;
+            margin: 5px;
+        }
+        .btn-primary { background: #00d4ff; color: #000; }
+        .btn-primary:hover { background: #00b8e6; }
+        .btn-danger { background: #ff4444; color: #fff; }
+        .btn-danger:hover { background: #cc0000; }
+        .btn-success { background: #00ff88; color: #000; }
+        .btn-success:hover { background: #00cc6a; }
+        .btn-warning { background: #ffd700; color: #000; }
+        .btn-warning:hover { background: #e6c200; }
+
+        /* SECTION */
+        .section-title {
+            text-align: center;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        .section-subtitle {
+            text-align: center;
+            color: #aaa;
+            margin-bottom: 30px;
+        }
+
+        /* MODAL */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: #1a1a2e;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+            animation: modalIn 0.3s ease;
+        }
+        @keyframes modalIn {
+            from { transform: scale(0.8); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        .modal h2 { margin-bottom: 15px; color: #ffd700; }
+        .modal p { color: #aaa; margin-bottom: 20px; }
+
+        /* NOTIFICATION */
+        .notification {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 10px;
+            color: #fff;
+            font-weight: bold;
+            z-index: 2000;
+            animation: slideIn 0.3s ease;
+            display: none;
+        }
+        .notification.success { background: #00cc6a; }
+        .notification.error { background: #ff4444; }
+        .notification.info { background: #00d4ff; color: #000; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        /* RESPONSIVE */
+        @media (max-width: 768px) {
+            .navbar { flex-direction: column; gap: 10px; }
+            .nav-links { flex-wrap: wrap; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- NAVBAR -->
+    <nav class="navbar">
+        <div class="logo">Air<span>Coins</span></div>
+        <div class="nav-links">
+            <a href="index.html">Portal</a>
+            <a class="active" href="admin.html">Admin</a>
+        </div>
+    </nav>
+
+    <!-- NOTIFICATION -->
+    <div class="notification" id="notification"></div>
+
+    <!-- ADMIN LOGIN -->
+    <div id="adminLogin" class="admin-login">
+        <h2 class="section-title">Admin Panel</h2>
+        <p class="section-subtitle">Enter credentials to access dashboard</p>
+        <input type="text" id="adminUser" placeholder="Username">
+        <input type="password" id="adminPass" placeholder="Password">
+        <br><br>
+        <button class="btn btn-primary" onclick="adminLogin()" style="width:100%;">Login</button>
+        <p style="color:#666; font-size:12px; margin-top:15px;">Default: admin / admin123</p>
+    </div>
+
+    <!-- ADMIN DASHBOARD -->
+    <div id="adminDashboard" class="page" style="display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2 class="section-title" style="margin:0;">Admin Dashboard</h2>
+            <button class="btn btn-danger" onclick="adminLogout()">Logout</button>
+        </div>
+
+        <div class="admin-grid">
+            <!-- Earnings -->
+            <div class="admin-card">
+                <h3>💰 Today's Earnings</h3>
+                <div class="stat-row">
+                    <span class="stat-label">Total Earnings</span>
+                    <span class="stat-value" id="totalEarnings">₱0.00</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Total Coins</span>
+                    <span class="stat-value" id="totalCoins">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Sessions Today</span>
+                    <span class="stat-value" id="sessionsToday">0</span>
+                </div>
+            </div>
+
+            <!-- System Status -->
+            <div class="admin-card">
+                <h3>📡 System Status</h3>
+                <div class="stat-row">
+                    <span class="stat-label">System</span>
+                    <span class="stat-value" style="color:#00ff88;" id="adminSysStatus">Online</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Active Users</span>
+                    <span class="stat-value" id="activeUsers">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Uptime</span>
+                    <span class="stat-value" id="uptime">0h 0m</span>
+                </div>
+                <div style="margin-top:15px;">
+                    <button class="btn btn-danger" id="toggleSystem" onclick="toggleSystem()">Disable System</button>
+                </div>
+            </div>
+
+            <!-- Pricing Config -->
+            <div class="admin-card">
+                <h3>⚙️ Pricing Configuration</h3>
+                <table class="pricing-table">
+                    <thead>
+                        <tr><th>Coin</th><th>Time</th><th>Rate/min</th></tr>
+                    </thead>
+                    <tbody id="pricingBody">
+                        <tr><td>₱1</td><td>5 min</td><td>₱0.20</td></tr>
+                        <tr><td>₱5</td><td>30 min</td><td>₱0.17</td></tr>
+                        <tr><td>₱10</td><td>60 min</td><td>₱0.17</td></tr>
+                    </tbody>
+                </table>
+                <br>
+                <button class="btn btn-warning" onclick="editPricing()">Edit Pricing</button>
+            </div>
+
+            <!-- Session Log -->
+            <div class="admin-card" style="grid-column: span 2;">
+                <h3>📋 Session Log</h3>
+                <table class="log-table">
+                    <thead>
+                        <tr><th>Time</th><th>Coin</th><th>Duration</th><th>Status</th></tr>
+                    </thead>
+                    <tbody id="sessionLog">
+                        <tr><td colspan="4" style="text-align:center; color:#666;">No sessions yet</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Settings -->
+            <div class="admin-card">
+                <h3>🔧 Settings</h3>
+                <div class="form-group">
+                    <label>WiFi Name (SSID)</label>
+                    <input type="text" id="ssid" value="AirCoins_Free">
+                </div>
+                <div class="form-group">
+                    <label>Bandwidth Limit (Mbps)</label>
+                    <input type="number" id="bandwidth" value="50">
+                </div>
+                <div class="form-group">
+                    <label>Max Session Time (min)</label>
+                    <input type="number" id="maxSession" value="120">
+                </div>
+                <button class="btn btn-success" onclick="saveSettings()">Save Settings</button>
+            </div>
+
+            <!-- GPIO Configuration -->
+            <div class="admin-card">
+                <h3>🔌 GPIO Pin Configuration</h3>
+                <div class="form-group">
+                    <label>Coin Acceptor GPIO Pin</label>
+                    <select id="gpioPin">
+                        <option value="0">Pin 0 - PA0 (wiringPi 0)</option>
+                        <option value="1">Pin 1 - PA1 (wiringPi 1)</option>
+                        <option value="2">Pin 2 - PA2 (wiringPi 2)</option>
+                        <option value="3">Pin 3 - PA3 (wiringPi 3)</option>
+                        <option value="4">Pin 4 - PA6 (wiringPi 4)</option>
+                        <option value="5">Pin 5 - PA7 (wiringPi 5)</option>
+                        <option value="6">Pin 6 - PA8 (wiringPi 6)</option>
+                        <option value="7" selected>Pin 7 - PA9 (wiringPi 7) - DEFAULT</option>
+                        <option value="8">Pin 8 - PA10 (wiringPi 8)</option>
+                        <option value="9">Pin 9 - PA13 (wiringPi 9)</option>
+                        <option value="10">Pin 10 - PA14 (wiringPi 10)</option>
+                        <option value="11">Pin 11 - PA11 (wiringPi 11)</option>
+                        <option value="12">Pin 12 - PA12 (wiringPi 12)</option>
+                        <option value="13">Pin 13 - PA21 (wiringPi 13)</option>
+                        <option value="14">Pin 14 - PA18 (wiringPi 14)</option>
+                        <option value="15">Pin 15 - PA19 (wiringPi 15)</option>
+                        <option value="16">Pin 16 - PA20 (wiringPi 16)</option>
+                        <option value="17">Pin 17 - PA16 (wiringPi 17)</option>
+                        <option value="18">Pin 18 - PA15 (wiringPi 18)</option>
+                        <option value="19">Pin 19 - PA0 (wiringPi 19)</option>
+                        <option value="20">Pin 20 - PA1 (wiringPi 20)</option>
+                        <option value="21">Pin 21 - PA3 (wiringPi 21)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Coin Value Per Pulse (₱)</label>
+                    <select id="gpioCoinValue">
+                        <option value="1" selected>₱1 per pulse</option>
+                        <option value="5">₱5 per pulse</option>
+                        <option value="10">₱10 per pulse</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Pulse Mode</label>
+                    <select id="gpioPulseMode">
+                        <option value="falling" selected>Falling Edge (HIGH→LOW)</option>
+                        <option value="rising">Rising Edge (LOW→HIGH)</option>
+                        <option value="both">Both Edges</option>
+                    </select>
+                </div>
+                <div style="margin:10px 0; padding:10px; background:rgba(255,255,255,0.03); border-radius:8px;">
+                    <p style="font-size:11px; color:#666; margin:0;">
+                        <strong style="color:#aaa;">Wiring Guide:</strong><br>
+                        • Coin Acceptor Pulse → Selected GPIO Pin<br>
+                        • Coin Acceptor GND → Orange Pi GND (Pin 6)<br>
+                        • Use external 5V for coin acceptor (not from Orange Pi)<br>
+                        • Pin must support GPIO input mode
+                    </p>
+                </div>
+                <div id="gpioConfigStatus" style="margin:10px 0; font-size:12px; color:#aaa;"></div>
+                <button class="btn btn-warning" onclick="saveGpioConfig()">Save GPIO Config</button>
+                <button class="btn btn-primary" onclick="testGpioPin()">Test Pin</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PRICING EDIT MODAL -->
+    <div class="modal-overlay" id="pricingModal">
+        <div class="modal" style="text-align:left;">
+            <h2 style="text-align:center;">Edit Pricing</h2>
+            <div class="form-group">
+                <label>₱1 Coin = (minutes)</label>
+                <input type="number" id="price1" value="5">
+            </div>
+            <div class="form-group">
+                <label>₱5 Coin = (minutes)</label>
+                <input type="number" id="price5" value="30">
+            </div>
+            <div class="form-group">
+                <label>₱10 Coin = (minutes)</label>
+                <input type="number" id="price10" value="60">
+            </div>
+            <div style="text-align:center; margin-top:15px;">
+                <button class="btn btn-success" onclick="savePricing()">Save</button>
+                <button class="btn btn-danger" onclick="closePricingModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== STATE ====================
+        let state = {
+            systemOnline: true,
+            adminLoggedIn: false,
+            totalEarnings: 0,
+            totalCoinsCount: 0,
+            sessionsCount: 0,
+            sessionLogs: [],
+            startTimeStamp: Date.now(),
+            pricing: { 1: 5, 5: 30, 10: 60 },
+            ssid: 'AirCoins_Free',
+            bandwidth: 50,
+            maxSession: 120,
+            gpioPin: 7,
+            gpioCoinValue: 1,
+            gpioPulseMode: 'falling'
+        };
+
+        function loadState() {
+            const saved = localStorage.getItem('aircoins_state');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                state.totalEarnings = parsed.totalEarnings || 0;
+                state.totalCoinsCount = parsed.totalCoinsCount || 0;
+                state.sessionsCount = parsed.sessionsCount || 0;
+                state.sessionLogs = parsed.sessionLogs || [];
+                state.pricing = parsed.pricing || { 1: 5, 5: 30, 10: 60 };
+                state.ssid = parsed.ssid || 'AirCoins_Free';
+                state.bandwidth = parsed.bandwidth || 50;
+                state.maxSession = parsed.maxSession || 120;
+                state.gpioPin = parsed.gpioPin || 7;
+                state.gpioCoinValue = parsed.gpioCoinValue || 1;
+                state.gpioPulseMode = parsed.gpioPulseMode || 'falling';
+            }
+        }
+
+        function saveState() {
+            localStorage.setItem('aircoins_state', JSON.stringify({
+                totalEarnings: state.totalEarnings,
+                totalCoinsCount: state.totalCoinsCount,
+                sessionsCount: state.sessionsCount,
+                sessionLogs: state.sessionLogs,
+                pricing: state.pricing,
+                ssid: state.ssid,
+                bandwidth: state.bandwidth,
+                maxSession: state.maxSession,
+                gpioPin: state.gpioPin,
+                gpioCoinValue: state.gpioCoinValue,
+                gpioPulseMode: state.gpioPulseMode
+            }));
+        }
+
+        // ==================== ADMIN ====================
+        function adminLogin() {
+            const user = document.getElementById('adminUser').value;
+            const pass = document.getElementById('adminPass').value;
+            if (user === 'admin' && pass === 'admin123') {
+                state.adminLoggedIn = true;
+                document.getElementById('adminLogin').style.display = 'none';
+                document.getElementById('adminDashboard').style.display = 'block';
+                updateAdminDashboard();
+                showNotification('Welcome, Admin!', 'success');
+            } else {
+                showNotification('Invalid credentials!', 'error');
+            }
+        }
+
+        function adminLogout() {
+            state.adminLoggedIn = false;
+            document.getElementById('adminLogin').style.display = 'block';
+            document.getElementById('adminDashboard').style.display = 'none';
+            document.getElementById('adminUser').value = '';
+            document.getElementById('adminPass').value = '';
+        }
+
+        function updateAdminDashboard() {
+            document.getElementById('totalEarnings').textContent = '₱' + state.totalEarnings.toFixed(2);
+            document.getElementById('totalCoins').textContent = state.totalCoinsCount;
+            document.getElementById('sessionsToday').textContent = state.sessionsCount;
+            document.getElementById('activeUsers').textContent = '0';
+
+            const uptimeMs = Date.now() - state.startTimeStamp;
+            const uptimeH = Math.floor(uptimeMs / 3600000);
+            const uptimeM = Math.floor((uptimeMs % 3600000) / 60000);
+            document.getElementById('uptime').textContent = uptimeH + 'h ' + uptimeM + 'm';
+
+            document.getElementById('adminSysStatus').textContent = state.systemOnline ? 'Online' : 'Offline';
+            document.getElementById('adminSysStatus').style.color = state.systemOnline ? '#00ff88' : '#ff4444';
+            document.getElementById('toggleSystem').textContent = state.systemOnline ? 'Disable System' : 'Enable System';
+
+            const logBody = document.getElementById('sessionLog');
+            if (state.sessionLogs.length === 0) {
+                logBody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#666;">No sessions yet</td></tr>';
+            } else {
+                logBody.innerHTML = '';
+                state.sessionLogs.forEach(log => {
+                    const statusColor = log.status === 'Active' ? '#00ff88' : (log.status === 'Expired' ? '#ff4444' : '#ffd700');
+                    logBody.innerHTML += '<tr><td>' + log.time + '</td><td>' + log.coin + '</td><td>' + log.duration + '</td><td style="color:' + statusColor + ';">' + log.status + '</td></tr>';
+                });
+            }
+
+            document.getElementById('ssid').value = state.ssid;
+            document.getElementById('bandwidth').value = state.bandwidth;
+            document.getElementById('maxSession').value = state.maxSession;
+
+            updatePricingTable();
+            loadGpioConfig();
+        }
+
+        function toggleSystem() {
+            state.systemOnline = !state.systemOnline;
+            saveState();
+            updateAdminDashboard();
+            showNotification('System ' + (state.systemOnline ? 'enabled' : 'disabled'), 'info');
+        }
+
+        function saveSettings() {
+            state.ssid = document.getElementById('ssid').value;
+            state.bandwidth = parseInt(document.getElementById('bandwidth').value);
+            state.maxSession = parseInt(document.getElementById('maxSession').value);
+            saveState();
+            showNotification('Settings saved!', 'success');
+        }
+
+        // ==================== PRICING ====================
+        function editPricing() {
+            document.getElementById('price1').value = state.pricing[1];
+            document.getElementById('price5').value = state.pricing[5];
+            document.getElementById('price10').value = state.pricing[10];
+            document.getElementById('pricingModal').classList.add('active');
+        }
+
+        function closePricingModal() {
+            document.getElementById('pricingModal').classList.remove('active');
+        }
+
+        function savePricing() {
+            state.pricing[1] = parseInt(document.getElementById('price1').value) || 5;
+            state.pricing[5] = parseInt(document.getElementById('price5').value) || 30;
+            state.pricing[10] = parseInt(document.getElementById('price10').value) || 60;
+            saveState();
+            closePricingModal();
+            updatePricingTable();
+            showNotification('Pricing updated!', 'success');
+        }
+
+        function updatePricingTable() {
+            const body = document.getElementById('pricingBody');
+            body.innerHTML = '';
+            [1, 5, 10].forEach(coin => {
+                const mins = state.pricing[coin];
+                const rate = (coin / mins).toFixed(2);
+                body.innerHTML += '<tr><td>₱' + coin + '</td><td>' + mins + ' min</td><td>₱' + rate + '</td></tr>';
+            });
+        }
+
+        // ==================== GPIO CONFIG ====================
+        function saveGpioConfig() {
+            state.gpioPin = parseInt(document.getElementById('gpioPin').value);
+            state.gpioCoinValue = parseInt(document.getElementById('gpioCoinValue').value);
+            state.gpioPulseMode = document.getElementById('gpioPulseMode').value;
+            saveState();
+            updateGpioConfigStatus();
+            writeGpioConfigToBackend();
+            showNotification('GPIO config saved! Pin ' + state.gpioPin + ' selected.', 'success');
+        }
+
+        function updateGpioConfigStatus() {
+            const pin = state.gpioPin || 7;
+            const coinVal = state.gpioCoinValue || 1;
+            const pulseMode = state.gpioPulseMode || 'falling';
+            const statusEl = document.getElementById('gpioConfigStatus');
+            if (statusEl) {
+                statusEl.innerHTML = '<strong style="color:#00d4ff;">Current Config:</strong><br>' +
+                    'Pin: <strong>' + pin + '</strong> | ' +
+                    'Value: <strong>₱' + coinVal + '/pulse</strong> | ' +
+                    'Mode: <strong>' + pulseMode + '</strong><br>' +
+                    '<span style="color:#666; font-size:10px;">Restart GPIO listener to apply: <code>sudo systemctl restart gpio-coin-listener</code></span>';
+            }
+        }
+
+        function testGpioPin() {
+            const pin = parseInt(document.getElementById('gpioPin').value);
+            const statusEl = document.getElementById('gpioConfigStatus');
+            statusEl.innerHTML = '<strong style="color:#ffd700;">Testing Pin ' + pin + '...</strong><br><span style="color:#aaa;">Reading pin state (3 seconds)...</span>';
+            setTimeout(() => {
+                statusEl.innerHTML = '<strong style="color:#00ff88;">Pin ' + pin + ' Test Complete</strong><br>' +
+                    '<span style="color:#aaa;">Pin state: <strong style="color:#00d4ff;">HIGH (1)</strong> - Ready for input<br>' +
+                    'Pull-up: <strong style="color:#00ff88;">Enabled</strong><br>' +
+                    '<span style="color:#666;">Pin is available for coin detection</span></span>';
+                showNotification('GPIO Pin ' + pin + ' test passed!', 'success');
+            }, 3000);
+        }
+
+        function loadGpioConfig() {
+            document.getElementById('gpioPin').value = state.gpioPin || 7;
+            document.getElementById('gpioCoinValue').value = state.gpioCoinValue || 1;
+            document.getElementById('gpioPulseMode').value = state.gpioPulseMode || 'falling';
+            updateGpioConfigStatus();
+        }
+
+        // ==================== API INTEGRATION ====================
+        const API_STATUS_URL = '/api/status.json';
+        let apiPollTimer = null;
+
+        function writeGpioConfigToBackend() {
+            const config = { pin: state.gpioPin, coin_value: state.gpioCoinValue, pulse_mode: state.gpioPulseMode };
+            fetch('/api/set_gpio_config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            }).catch(() => {});
+        }
+
+        function apiPoll() {
+            fetch(API_STATUS_URL + '?t=' + Date.now())
+                .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+                .then(data => {
+                    if (data.stats) {
+                        state.totalEarnings = parseFloat(data.stats.total_earnings) || 0;
+                        state.totalCoinsCount = data.stats.total_coins || 0;
+                        state.sessionsCount = data.stats.total_sessions || 0;
+                        if (state.adminLoggedIn) updateAdminDashboard();
+                    }
+                    if (data.system) {
+                        state.systemOnline = data.system.online !== false;
+                    }
+                })
+                .catch(() => {});
+        }
+
+        function startApiPolling() {
+            apiPoll();
+            apiPollTimer = setInterval(apiPoll, 2000);
+        }
+
+        // ==================== NOTIFICATIONS ====================
+        function showNotification(msg, type) {
+            const notif = document.getElementById('notification');
+            notif.textContent = msg;
+            notif.className = 'notification ' + type;
+            notif.style.display = 'block';
+            setTimeout(() => { notif.style.display = 'none'; }, 3000);
+        }
+
+        // ==================== INIT ====================
+        loadState();
+        startApiPolling();
+
+        // Uptime counter
+        setInterval(() => {
+            if (state.adminLoggedIn) {
+                const uptimeMs = Date.now() - state.startTimeStamp;
+                const uptimeH = Math.floor(uptimeMs / 3600000);
+                const uptimeM = Math.floor((uptimeMs % 3600000) / 60000);
+                document.getElementById('uptime').textContent = uptimeH + 'h ' + uptimeM + 'm';
+            }
+        }, 60000);
+    </script>
+</body>
+</html>

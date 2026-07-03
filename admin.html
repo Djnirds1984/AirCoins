@@ -449,6 +449,7 @@
             const saved = localStorage.getItem('aircoins_state');
             if (saved) {
                 const parsed = JSON.parse(saved);
+                state.adminLoggedIn = parsed.adminLoggedIn || false;
                 state.totalEarnings = parsed.totalEarnings || 0;
                 state.totalCoinsCount = parsed.totalCoinsCount || 0;
                 state.sessionsCount = parsed.sessionsCount || 0;
@@ -465,6 +466,7 @@
 
         function saveState() {
             localStorage.setItem('aircoins_state', JSON.stringify({
+                adminLoggedIn: state.adminLoggedIn,
                 totalEarnings: state.totalEarnings,
                 totalCoinsCount: state.totalCoinsCount,
                 sessionsCount: state.sessionsCount,
@@ -611,14 +613,33 @@
         function testGpioPin() {
             const pin = parseInt(document.getElementById('gpioPin').value);
             const statusEl = document.getElementById('gpioConfigStatus');
-            statusEl.innerHTML = '<strong style="color:#ffd700;">Testing Pin ' + pin + '...</strong><br><span style="color:#aaa;">Reading pin state (3 seconds)...</span>';
-            setTimeout(() => {
-                statusEl.innerHTML = '<strong style="color:#00ff88;">Pin ' + pin + ' Test Complete</strong><br>' +
-                    '<span style="color:#aaa;">Pin state: <strong style="color:#00d4ff;">HIGH (1)</strong> - Ready for input<br>' +
-                    'Pull-up: <strong style="color:#00ff88;">Enabled</strong><br>' +
-                    '<span style="color:#666;">Pin is available for coin detection</span></span>';
-                showNotification('GPIO Pin ' + pin + ' test passed!', 'success');
-            }, 3000);
+            statusEl.innerHTML = '<strong style="color:#ffd700;">Testing Pin ' + pin + '...</strong><br><span style="color:#aaa;">Reading real GPIO pin state...</span>';
+
+            fetch('/cgi-bin/test_gpio', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin: pin })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    statusEl.innerHTML = '<strong style="color:#00ff88;">Pin ' + data.pin + ' Test Complete</strong><br>' +
+                        '<span style="color:#aaa;">Method: <strong style="color:#00d4ff;">' + data.method + '</strong><br>' +
+                        'Pin state: <strong style="color:' + data.state_color + ';">' + data.state_text + '</strong><br>' +
+                        'Pull-up: <strong style="color:#00ff88;">' + data.pull_up + '</strong><br>' +
+                        '<span style="color:#666;">Pin is ready for coin detection</span></span>';
+                    showNotification('GPIO Pin ' + data.pin + ' test passed!', 'success');
+                } else {
+                    statusEl.innerHTML = '<strong style="color:#ff4444;">Test Failed</strong><br>' +
+                        '<span style="color:#aaa;">' + data.message + '</span>';
+                    showNotification('GPIO test failed: ' + data.message, 'error');
+                }
+            })
+            .catch(err => {
+                statusEl.innerHTML = '<strong style="color:#ff4444;">Connection Error</strong><br>' +
+                    '<span style="color:#aaa;">Cannot reach GPIO CGI endpoint. Is the backend running?</span>';
+                showNotification('Cannot connect to GPIO backend', 'error');
+            });
         }
 
         function loadGpioConfig() {
@@ -634,7 +655,7 @@
 
         function writeGpioConfigToBackend() {
             const config = { pin: state.gpioPin, coin_value: state.gpioCoinValue, pulse_mode: state.gpioPulseMode };
-            fetch('/api/set_gpio_config', {
+            fetch('/cgi-bin/set_gpio_config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(config)
@@ -674,6 +695,14 @@
 
         // ==================== INIT ====================
         loadState();
+        
+        // Restore admin session if logged in
+        if (state.adminLoggedIn) {
+            document.getElementById('adminLogin').style.display = 'none';
+            document.getElementById('adminDashboard').style.display = 'block';
+            updateAdminDashboard();
+        }
+        
         startApiPolling();
 
         // Uptime counter

@@ -89,7 +89,7 @@ else
         cd /tmp
         if [ ! -d "WiringOP" ]; then
             git clone https://github.com/orangepi-xunlong/wiringOP.git 2>/dev/null || {
-                echo -e "${YELLOW}  ⚠ WiringOP source not available. GPIO will run in simulation mode.${NC}"
+                echo -e "${RED}  ✘ WiringOP source not available. GPIO listener will fail without GPIO hardware.${NC}"
                 echo "  To install manually later:"
                 echo "    git clone https://github.com/orangepi-xunlong/wiringOP.git"
                 echo "    cd wiringOP && ./build && sudo ./build install"
@@ -148,14 +148,17 @@ cp "$SYSTEM_DIR/usr/lib/cgi-bin/set_gpio_config" /usr/lib/cgi-bin/set_gpio_confi
 chmod +x /usr/lib/cgi-bin/set_gpio_config
 chown root:www-data /usr/lib/cgi-bin/set_gpio_config
 
-# Enable CGI in lighttpd
+cp "$SYSTEM_DIR/usr/lib/cgi-bin/test_gpio" /usr/lib/cgi-bin/test_gpio
+chmod +x /usr/lib/cgi-bin/test_gpio
+chown root:www-data /usr/lib/cgi-bin/test_gpio
+
+# Enable CGI in lighttpd (fallback if not already in config)
 if ! grep -q "mod_cgi" /etc/lighttpd/lighttpd.conf 2>/dev/null; then
     cat >> /etc/lighttpd/lighttpd.conf << 'CGIEOF'
 
 # CGI support (for admin API)
 server.modules += ( "mod_cgi" )
-cgi.assign = ( "" => "" )
-$HTTP["url"] =~ "^/api/" {
+$HTTP["url"] =~ "^/cgi-bin/" {
     cgi.assign = ( "" => "/bin/bash" )
 }
 CGIEOF

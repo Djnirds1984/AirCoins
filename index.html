@@ -352,20 +352,6 @@
             font-family: 'Courier New', monospace;
             margin: 10px 0;
         }
-        .gpio-sim-btn {
-            background: linear-gradient(145deg, #ffd700, #ffaa00);
-            color: #000;
-            border: none;
-            border-radius: 25px;
-            padding: 12px 25px;
-            font-size: 15px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: 0.3s;
-            margin: 5px;
-        }
-        .gpio-sim-btn:hover { transform: scale(1.05); box-shadow: 0 5px 20px rgba(255,215,0,0.4); }
-        .gpio-sim-btn:active { transform: scale(0.95); }
 
         /* MAIN SCREEN RUNNING TIMER */
         .running-timer-bar {
@@ -628,15 +614,12 @@
                 <div class="gpio-coin-list" id="gpioCoinList"></div>
             </div>
 
-            <!-- Simulate GPIO Coin (for testing - replace with real GPIO in production) -->
-            <div style="margin:15px 0;">
-                <p style="font-size:11px; color:#555; margin-bottom:8px;">Simulate GPIO pulse (test):</p>
-                <button class="gpio-sim-btn" onclick="simulateGpioCoin(1)">₱1 Coin</button>
-                <button class="gpio-sim-btn" onclick="simulateGpioCoin(5)">₱5 Coin</button>
-                <button class="gpio-sim-btn" onclick="simulateGpioCoin(10)">₱10 Coin</button>
-            </div>
+            <!-- Cancel Button (always visible) -->
+            <button class="btn btn-danger" onclick="gpioCancel()" style="width:100%; margin-top:10px;">
+                Cancel
+            </button>
 
-            <!-- Done Paying Button -->
+            <!-- Done Paying Button (shown after coins inserted) -->
             <button class="btn btn-success" id="gpioDoneBtn" onclick="gpioDonePaying()" style="width:100%; margin-top:10px; display:none;">
                 Done Paying
             </button>
@@ -974,8 +957,8 @@
             }
         }
 
-        // Simulate GPIO coin detection (replace with real GPIO event in production)
-        function simulateGpioCoin(amount) {
+        // Handle real GPIO coin detection from backend API
+        function handleGpioCoin(amount) {
             if (!gpio.active) return;
 
             // Reset 60s countdown
@@ -1078,6 +1061,17 @@
             clearInterval(gpio.countdownInterval);
             gpio.active = false;
             document.getElementById('gpioModal').classList.remove('active');
+        }
+
+        function gpioCancel() {
+            // Reset GPIO state - discard any coins inserted
+            gpio.coins = [];
+            gpio.totalAmount = 0;
+            gpio.totalSeconds = 0;
+            clearInterval(gpio.countdownInterval);
+            gpio.active = false;
+            document.getElementById('gpioModal').classList.remove('active');
+            showNotification('Coin insertion cancelled', 'info');
         }
 
         function startSessionFromGpio() {
@@ -1216,9 +1210,9 @@
                         lastCoinTimestamp = data.last_coin_time;
                         const coinVal = parseInt(data.last_coin_value) || 1;
 
-                        // If GPIO modal is open, simulate the coin detection
+                        // If GPIO modal is open, process the coin detection
                         if (gpio.active) {
-                            simulateGpioCoin(coinVal);
+                            handleGpioCoin(coinVal);
                         }
 
                         showNotification('GPIO: ₱' + coinVal + ' coin detected!', 'success');
@@ -1240,8 +1234,7 @@
                     }
                 })
                 .catch(err => {
-                    // API not available (running in browser test mode)
-                    // Silently fail - frontend-only mode works without backend
+                    // API not available - backend not yet deployed
                 });
         }
 

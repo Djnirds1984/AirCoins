@@ -147,7 +147,7 @@ The installer will:
 - Enable IP forwarding
 - Enable services on boot
 
-> **Note:** If WiringOP installation fails (no GPIO hardware), the GPIO listener will run in **simulation mode** automatically.
+> **Note:** If WiringOP installation fails and no GPIO hardware is detected, the GPIO listener will exit with a fatal error. Ensure WiringOP is properly installed before deployment.
 
 ---
 
@@ -199,10 +199,11 @@ sudo iptables -L -n -v
 
 1. Connect to WiFi network: **AirCoins_Free**
 2. Open a browser - you should be redirected to the portal
-3. Click **INSERT COIN** button
-4. In the GPIO modal, click a coin button to simulate
-5. Click **Done Paying**
-6. Verify the countdown timer appears
+3. Click **INSERT COIN** button - GPIO modal opens with 60-second countdown
+4. Insert a real coin into the coin acceptor
+5. The modal detects the coin, resets the 60s countdown, and shows the amount
+6. Insert more coins or click **Done Paying**
+7. Verify the countdown timer appears on the main screen
 
 ### Test GPIO (with real coin acceptor)
 
@@ -217,15 +218,13 @@ tail -f /var/log/pisowifi/gpio-coin.log
 tail -f /var/log/pisowifi/session.log
 ```
 
-### Simulate GPIO (without hardware)
+### Test GPIO Pin from Admin Panel
 
-```bash
-# Trigger a simulated coin event
-echo "1" > /var/lib/pisowifi/simulate_coin
-
-# Check it was detected
-tail -n 5 /var/log/pisowifi/gpio-coin.log
-```
+1. Go to **http://192.168.42.1/admin.html**
+2. Login with **admin / admin123**
+3. Select the GPIO pin in the **GPIO Pin Configuration** section
+4. Click **Test Pin** to read the real pin state
+5. The result shows the actual GPIO state (HIGH/LOW) and detection method
 
 ---
 

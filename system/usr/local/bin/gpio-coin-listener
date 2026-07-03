@@ -165,27 +165,12 @@ elif [ -d /sys/class/gpio ]; then
     done
 
 # ============================================
-# METHOD 3: SIMULATION MODE (for testing without hardware)
+# NO GPIO AVAILABLE - FATAL ERROR
 # ============================================
 else
-    log "WARNING: No GPIO hardware found! Running in SIMULATION mode."
-    log "In production, install WiringOP: apt-get install wiringop"
-
-    COIN_COUNT=0
-
-    while true; do
-        # Check for manual coin trigger file (for testing)
-        if [ -f "/var/lib/pisowifi/simulate_coin" ]; then
-            SIM_VALUE=$(cat /var/lib/pisowifi/simulate_coin)
-            rm -f /var/lib/pisowifi/simulate_coin
-
-            COIN_COUNT=$((COIN_COUNT + 1))
-            log "SIMULATED COIN! Pulse #$COIN_COUNT | Value: ₱$SIM_VALUE"
-
-            echo "$SIM_VALUE $(date +%s)" > "$EVENT_FILE"
-            echo "$COIN_COUNT" > "$STATE_FILE"
-        fi
-
-        sleep 0.1
-    done
+    log "FATAL: No GPIO interface available!"
+    log "Ensure WiringOP is installed: apt-get install wiringop"
+    log "Or sysfs GPIO is available at /sys/class/gpio"
+    echo "FATAL: No GPIO hardware found. Cannot start coin listener." >&2
+    exit 1
 fi

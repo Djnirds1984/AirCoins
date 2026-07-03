@@ -1,0 +1,178 @@
+#!/bin/bash
+# ============================================
+# AirCoins PisoWiFi - GPIO Coin Listener Daemon
+# ============================================
+# Listens for coin pulses on GPIO pin
+# Orange Pi One uses WiringOP (wiringPi) library
+#
+# Install to: /usr/local/bin/gpio-coin-listener
+# Runs as: systemd service
+#
+# GPIO PIN CONFIGURATION:
+#   COIN_PULSE_PIN = Physical pin 7 (wiringPi 7 / GPIO PA6)
+#   Connect coin acceptor pulse wire to this GPIO pin
+#   Connect coin acceptor GND to Orange Pi GND
+#
+# HOW IT WORKS:
+#   1. Coin acceptor sends a pulse (HIGH→LOW→HIGH) per coin
+#   2. This script detects the pulse edge (falling edge)
+#   3. Writes coin event to the session manager
+#   4. Session manager adds time to the client's session
+# ============================================
+
+# ============================================
+# CONFIGURATION
+# ============================================
+COIN_PULSE_PIN=7                    # WiringPi pin number (Physical pin 7 on Orange Pi)
+COIN_VALUE=1                        # Peso value per pulse (1 = ₱1 per pulse)
+EVENT_FILE="/var/lib/pisowifi/coin_event"
+LOG_FILE="/var/log/pisowifi/gpio-coin.log"
+PID_FILE="/var/run/gpio-coin-listener.pid"
+STATE_FILE="/var/lib/pisowifi/gpio_state"
+
+# ============================================
+# LOGGING
+# ============================================
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+# ============================================
+# CLEANUP ON EXIT
+# ============================================
+cleanup() {
+    log "GPIO Coin Listener stopping..."
+    # Unexport GPIO if using sysfs
+    echo "$COIN_PULSE_PIN" > /sys/class/gpio/unexport 2>/dev/null
+    rm -f "$PID_FILE"
+    exit 0
+}
+
+trap cleanup SIGTERM SIGINT EXIT
+
+# ============================================
+# WRITE PID
+# ============================================
+echo $$ > "$PID_FILE"
+log "GPIO Coin Listener started (PID: $$)"
+log "Listening on WiringPi pin: $COIN_PULSE_PIN"
+log "Coin value per pulse: ₱$COIN_VALUE"
+
+# ============================================
+# METHOD 1: Using WiringOP (gpio command)
+# ============================================
+# Check if gpio command is available
+if command -v gpio &> /dev/null; then
+    log "Using WiringOP (gpio command) for GPIO detection"
+
+    # Set pin mode to input with pull-up
+    gpio mode $COIN_PULSE_PIN up
+    gpio mode $COIN_PULSE_PIN input
+
+    # Initialize state file
+    echo "0" > "$STATE_FILE"
+
+    # Main loop - poll for coin pulses
+    PREV_STATE=1  # Start HIGH (pull-up, no coin)
+    COIN_COUNT=0
+
+    while true; do
+        # Read current pin state
+        CURRENT_STATE=$(gpio read $COIN_PULSE_PIN)
+
+        # Detect falling edge (HIGH → LOW = coin inserted)
+        if [ "$PREV_STATE" = "1" ] && [ "$CURRENT_STATE" = "0" ]; then
+            COIN_COUNT=$((COIN_COUNT + 1))
+
+            log "COIN DETECTED! Pulse #$COIN_COUNT | Value: ₱$COIN_VALUE"
+
+            # Write coin event for session manager
+            echo "$COIN_VALUE $(date +%s)" > "$EVENT_FILE"
+
+            # Update state
+            echo "$COIN_COUNT" > "$STATE_FILE"
+
+            # Debounce - wait for pulse to end (coin mechanism takes ~50-100ms)
+            sleep 0.15
+
+            # Wait for pin to go HIGH again (pulse ended)
+            TIMEOUT=0
+            while [ "$(gpio read $COIN_PULSE_PIN)" = "0" ] && [ $TIMEOUT -lt 100 ]; do
+                sleep 0.01
+                TIMEOUT=$((TIMEOUT + 1))
+            done
+        fi
+
+        PREV_STATE=$CURRENT_STATE
+
+        # Small delay to prevent CPU hogging (10ms poll interval)
+        sleep 0.01
+    done
+
+# ============================================
+# METHOD 2: Using sysfs GPIO (fallback)
+# ============================================
+elif [ -d /sys/class/gpio ]; then
+    log "Using sysfs GPIO for coin detection"
+
+    # Map WiringPi pin to BCM GPIO (Orange Pi specific)
+    # Physical pin 7 = PA6 = GPIO 6
+    BCM_GPIO=6
+
+    # Export GPIO pin
+    echo "$BCM_GPIO" > /sys/class/gpio/export 2>/dev/null
+    sleep 0.1
+
+    # Set direction to input
+    echo "in" > /sys/class/gpio/gpio${BCM_GPIO}/direction
+
+    # Set edge detection to falling (HIGH→LOW)
+    echo "falling" > /sys/class/gpio/gpio${BCM_GPIO}/edge
+
+    COIN_COUNT=0
+
+    # Use poll on the GPIO value file
+    while true; do
+        # Read value (blocking with timeout using select)
+        VALUE=$(cat /sys/class/gpio/gpio${BCM_GPIO}/value 2>/dev/null)
+
+        if [ "$VALUE" = "0" ]; then
+            COIN_COUNT=$((COIN_COUNT + 1))
+            log "COIN DETECTED! Pulse #$COIN_COUNT | Value: ₱$COIN_VALUE"
+
+            # Write coin event
+            echo "$COIN_VALUE $(date +%s)" > "$EVENT_FILE"
+            echo "$COIN_COUNT" > "$STATE_FILE"
+
+            # Debounce
+            sleep 0.15
+        fi
+
+        sleep 0.01
+    done
+
+# ============================================
+# METHOD 3: SIMULATION MODE (for testing without hardware)
+# ============================================
+else
+    log "WARNING: No GPIO hardware found! Running in SIMULATION mode."
+    log "In production, install WiringOP: apt-get install wiringop"
+
+    COIN_COUNT=0
+
+    while true; do
+        # Check for manual coin trigger file (for testing)
+        if [ -f "/var/lib/pisowifi/simulate_coin" ]; then
+            SIM_VALUE=$(cat /var/lib/pisowifi/simulate_coin)
+            rm -f /var/lib/pisowifi/simulate_coin
+
+            COIN_COUNT=$((COIN_COUNT + 1))
+            log "SIMULATED COIN! Pulse #$COIN_COUNT | Value: ₱$SIM_VALUE"
+
+            echo "$SIM_VALUE $(date +%s)" > "$EVENT_FILE"
+            echo "$COIN_COUNT" > "$STATE_FILE"
+        fi
+
+        sleep 0.1
+    done
+fi

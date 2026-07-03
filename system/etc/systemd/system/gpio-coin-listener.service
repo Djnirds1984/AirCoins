@@ -1,0 +1,22 @@
+[Unit]
+Description=AirCoins PisoWiFi - GPIO Coin Listener
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gpio-coin-listener
+ExecStop=/bin/kill -TERM $MAINPID
+Restart=always
+RestartSec=5
+StandardOutput=null
+StandardError=journal
+PIDFile=/var/run/gpio-coin-listener.pid
+
+# Security hardening
+NoNewPrivileges=no
+ProtectSystem=false
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

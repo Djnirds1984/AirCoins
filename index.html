@@ -1,0 +1,1651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AirCoins - PisoWiFi System</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            min-height: 100vh;
+            color: #fff;
+            overflow-x: hidden;
+        }
+
+        /* NAV */
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 30px;
+            background: rgba(0,0,0,0.3);
+            backdrop-filter: blur(10px);
+        }
+        .navbar .logo { font-size: 24px; font-weight: bold; color: #00d4ff; }
+        .navbar .logo span { color: #ffd700; }
+        .nav-links { display: flex; gap: 20px; }
+        .nav-links a {
+            color: #ccc;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            transition: 0.3s;
+            cursor: pointer;
+        }
+        .nav-links a:hover, .nav-links a.active {
+            background: #00d4ff;
+            color: #000;
+        }
+
+        /* PAGES */
+        .page { display: none; padding: 30px; max-width: 1200px; margin: 0 auto; }
+        .page.active { display: block; }
+
+        /* HOME PAGE */
+        .hero {
+            text-align: center;
+            padding: 60px 20px;
+        }
+        .hero h1 { font-size: 48px; margin-bottom: 10px; }
+        .hero h1 span { color: #ffd700; }
+        .hero p { font-size: 18px; color: #aaa; margin-bottom: 40px; }
+
+        .status-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 500px;
+            margin: 0 auto 40px;
+            text-align: center;
+        }
+        .status-indicator {
+            width: 20px; height: 20px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+        .status-online { background: #00ff88; box-shadow: 0 0 10px #00ff88; }
+        .status-offline { background: #ff4444; box-shadow: 0 0 10px #ff4444; animation: none; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* COIN SLOT */
+        .coin-section {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            max-width: 700px;
+            margin: 30px auto;
+        }
+        .coin-btn {
+            background: linear-gradient(145deg, #1a1a2e, #16213e);
+            border: 2px solid #ffd700;
+            border-radius: 15px;
+            padding: 30px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .coin-btn:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(255, 215, 0, 0.3);
+        }
+        .coin-btn:active { transform: scale(0.95); }
+        .coin-icon {
+            width: 60px; height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(145deg, #ffd700, #ffaa00);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 15px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        .coin-btn h3 { color: #ffd700; font-size: 20px; }
+        .coin-btn p { color: #aaa; font-size: 14px; margin-top: 5px; }
+
+        /* TIMER PAGE */
+        .timer-container {
+            text-align: center;
+            padding: 40px 20px;
+        }
+        .timer-display {
+            font-size: 80px;
+            font-weight: bold;
+            color: #00d4ff;
+            text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+            margin: 30px 0;
+            font-family: 'Courier New', monospace;
+        }
+        .timer-info {
+            background: rgba(255,255,255,0.05);
+            border-radius: 15px;
+            padding: 20px;
+            max-width: 400px;
+            margin: 20px auto;
+        }
+        .timer-info p { margin: 8px 0; color: #aaa; }
+        .timer-info span { color: #fff; font-weight: bold; }
+
+        .progress-bar {
+            width: 100%;
+            max-width: 400px;
+            height: 10px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 5px;
+            margin: 20px auto;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4ff, #00ff88);
+            border-radius: 5px;
+            transition: width 1s linear;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: 0.3s;
+            margin: 5px;
+        }
+        .btn-primary { background: #00d4ff; color: #000; }
+        .btn-primary:hover { background: #00b8e6; }
+        .btn-danger { background: #ff4444; color: #fff; }
+        .btn-danger:hover { background: #cc0000; }
+        .btn-success { background: #00ff88; color: #000; }
+        .btn-success:hover { background: #00cc6a; }
+        .btn-warning { background: #ffd700; color: #000; }
+        .btn-warning:hover { background: #e6c200; }
+
+        /* ADMIN PAGE */
+        .admin-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+        .admin-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 25px;
+        }
+        .admin-card h3 {
+            color: #00d4ff;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .stat-row:last-child { border: none; }
+        .stat-label { color: #aaa; }
+        .stat-value { color: #fff; font-weight: bold; }
+
+        /* PRICING TABLE */
+        .pricing-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        .pricing-table th, .pricing-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .pricing-table th { color: #00d4ff; }
+
+        /* LOG TABLE */
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 13px;
+        }
+        .log-table th, .log-table td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .log-table th { color: #00d4ff; }
+
+        /* SETTINGS FORM */
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #aaa;
+            font-size: 14px;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.05);
+            color: #fff;
+            font-size: 14px;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+
+        /* MODAL */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: #1a1a2e;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+            animation: modalIn 0.3s ease;
+        }
+        @keyframes modalIn {
+            from { transform: scale(0.8); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        .modal h2 { margin-bottom: 15px; color: #ffd700; }
+        .modal p { color: #aaa; margin-bottom: 20px; }
+
+        /* COIN ANIMATION */
+        .coin-drop {
+            animation: coinDrop 0.6s ease-in;
+        }
+        @keyframes coinDrop {
+            0% { transform: translateY(-100px) rotate(0deg); opacity: 0; }
+            50% { transform: translateY(10px) rotate(180deg); opacity: 1; }
+            100% { transform: translateY(0) rotate(360deg); opacity: 1; }
+        }
+
+        /* RESPONSIVE */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 32px; }
+            .timer-display { font-size: 50px; }
+            .navbar { flex-direction: column; gap: 10px; }
+            .nav-links { flex-wrap: wrap; justify-content: center; }
+        }
+
+        /* WIFI ANIMATION */
+        .wifi-icon {
+            width: 80px; height: 80px;
+            margin: 0 auto 20px;
+            position: relative;
+        }
+        .wifi-wave {
+            position: absolute;
+            border: 3px solid #00d4ff;
+            border-radius: 50%;
+            border-bottom: none;
+            border-left: none;
+            border-right: none;
+            animation: wifiPulse 2s infinite;
+        }
+        .wifi-wave:nth-child(1) { width: 30px; height: 30px; top: 35px; left: 25px; animation-delay: 0s; }
+        .wifi-wave:nth-child(2) { width: 50px; height: 50px; top: 25px; left: 15px; animation-delay: 0.3s; }
+        .wifi-wave:nth-child(3) { width: 70px; height: 70px; top: 15px; left: 5px; animation-delay: 0.6s; }
+        .wifi-dot { width: 8px; height: 8px; background: #00d4ff; border-radius: 50%; position: absolute; bottom: 10px; left: 36px; }
+        @keyframes wifiPulse {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 1; }
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        .section-subtitle {
+            text-align: center;
+            color: #aaa;
+            margin-bottom: 30px;
+        }
+
+        /* ADMIN LOGIN */
+        .admin-login {
+            max-width: 350px;
+            margin: 60px auto;
+            text-align: center;
+        }
+        .admin-login input {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 10px;
+            background: rgba(255,255,255,0.05);
+            color: #fff;
+            font-size: 16px;
+        }
+
+        /* NOTIFICATION */
+        .notification {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 10px;
+            color: #fff;
+            font-weight: bold;
+            z-index: 2000;
+            animation: slideIn 0.3s ease, slideOut 0.3s ease 2.7s;
+            display: none;
+        }
+        .notification.success { background: #00cc6a; }
+        .notification.error { background: #ff4444; }
+        .notification.info { background: #00d4ff; color: #000; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes slideOut { from { opacity: 1; } to { opacity: 0; } }
+
+        /* GPIO LISTENER MODAL */
+        .gpio-modal .modal {
+            max-width: 480px;
+            padding: 30px;
+        }
+        .gpio-countdown-ring {
+            width: 120px; height: 120px;
+            border-radius: 50%;
+            border: 5px solid rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            position: relative;
+        }
+        .gpio-countdown-ring svg {
+            position: absolute;
+            top: -5px; left: -5px;
+            width: 120px; height: 120px;
+            transform: rotate(-90deg);
+        }
+        .gpio-countdown-ring svg circle {
+            fill: none;
+            stroke-width: 5;
+            stroke-linecap: round;
+        }
+        .gpio-countdown-ring svg circle.bg { stroke: rgba(255,255,255,0.1); }
+        .gpio-countdown-ring svg circle.fg {
+            stroke: #00d4ff;
+            stroke-dasharray: 345.58;
+            stroke-dashoffset: 0;
+            transition: stroke-dashoffset 1s linear;
+        }
+        .gpio-countdown-number {
+            font-size: 36px;
+            font-weight: bold;
+            color: #00d4ff;
+            z-index: 1;
+        }
+        .gpio-status {
+            font-size: 14px;
+            color: #aaa;
+            margin-bottom: 15px;
+            min-height: 20px;
+        }
+        .gpio-status.detecting { color: #ffd700; }
+        .gpio-status.detected { color: #00ff88; }
+        .gpio-coin-display {
+            background: rgba(255,215,0,0.1);
+            border: 1px solid rgba(255,215,0,0.3);
+            border-radius: 12px;
+            padding: 15px;
+            margin: 15px 0;
+            display: none;
+        }
+        .gpio-coin-display.active { display: block; }
+        .gpio-coin-list {
+            max-height: 120px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        .gpio-coin-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 14px;
+            animation: coinSlideIn 0.3s ease;
+        }
+        @keyframes coinSlideIn {
+            from { transform: translateX(-20px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .gpio-total-time {
+            font-size: 28px;
+            font-weight: bold;
+            color: #ffd700;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+        }
+        .gpio-sim-btn {
+            background: linear-gradient(145deg, #ffd700, #ffaa00);
+            color: #000;
+            border: none;
+            border-radius: 25px;
+            padding: 12px 25px;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+            margin: 5px;
+        }
+        .gpio-sim-btn:hover { transform: scale(1.05); box-shadow: 0 5px 20px rgba(255,215,0,0.4); }
+        .gpio-sim-btn:active { transform: scale(0.95); }
+
+        /* MAIN SCREEN RUNNING TIMER */
+        .running-timer-bar {
+            display: none;
+            background: rgba(0,212,255,0.1);
+            border: 1px solid rgba(0,212,255,0.3);
+            border-radius: 12px;
+            padding: 12px 25px;
+            max-width: 500px;
+            margin: 20px auto;
+            text-align: center;
+        }
+        .running-timer-bar.active { display: block; }
+        .running-timer-label {
+            font-size: 12px;
+            color: #aaa;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .running-timer-value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #00d4ff;
+            font-family: 'Courier New', monospace;
+            text-shadow: 0 0 15px rgba(0,212,255,0.4);
+        }
+        .running-timer-value span { color: #ffd700; }
+
+        /* INSERT COIN MAIN BUTTON */
+        .insert-coin-main-btn {
+            background: linear-gradient(145deg, #ffd700, #ff8c00);
+            color: #000;
+            border: none;
+            border-radius: 30px;
+            padding: 18px 50px;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin: 20px auto;
+            animation: glowPulse 2s infinite;
+        }
+        .insert-coin-main-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 10px 40px rgba(255,215,0,0.5);
+        }
+        .insert-coin-main-btn:active { transform: scale(0.95); }
+        @keyframes glowPulse {
+            0%, 100% { box-shadow: 0 0 10px rgba(255,215,0,0.3); }
+            50% { box-shadow: 0 0 30px rgba(255,215,0,0.6); }
+        }
+        .coin-slot-icon {
+            width: 30px; height: 30px;
+            border: 3px solid #000;
+            border-radius: 4px;
+            position: relative;
+            display: inline-block;
+        }
+        .coin-slot-icon::after {
+            content: '';
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 14px; height: 3px;
+            background: #000;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- NAVBAR -->
+    <nav class="navbar">
+        <div class="logo">Air<span>Coins</span></div>
+        <div class="nav-links">
+            <a class="active" onclick="showPage('home')">Home</a>
+            <a onclick="showPage('connect')">Connect</a>
+            <a onclick="showPage('status')">My Session</a>
+            <a onclick="showPage('admin')">Admin</a>
+        </div>
+    </nav>
+
+    <!-- NOTIFICATION -->
+    <div class="notification" id="notification"></div>
+
+    <!-- HOME PAGE -->
+    <div class="page active" id="page-home">
+        <div class="hero">
+            <div class="wifi-icon">
+                <div class="wifi-wave"></div>
+                <div class="wifi-wave"></div>
+                <div class="wifi-wave"></div>
+                <div class="wifi-dot"></div>
+            </div>
+            <h1>Welcome to <span>AirCoins</span></h1>
+            <p>Fast & affordable PisoWiFi. Insert coins and get connected instantly!</p>
+        </div>
+
+        <div class="status-card">
+            <p><span class="status-indicator status-online" id="systemStatus"></span> <strong id="statusText">System Online</strong></p>
+            <p style="margin-top:10px; color:#aaa;">WiFi Network: <strong style="color:#00d4ff;">AirCoins_Free</strong></p>
+            <p style="color:#aaa;">Speed: <strong style="color:#00ff88;">Up to 50 Mbps</strong></p>
+        </div>
+
+        <!-- RUNNING TIMER ON MAIN SCREEN -->
+        <div class="running-timer-bar" id="runningTimerBar">
+            <div class="running-timer-label">Time Remaining</div>
+            <div class="running-timer-value" id="runningTimerValue">00:00:00:00</div>
+            <div style="font-size:12px; color:#aaa; margin-top:5px;">
+                <span style="color:#ffd700;">DD</span>:HH:MM:SS &nbsp;|&nbsp; Total Paid: <span id="runningTotalCoins" style="color:#00ff88;">₱0</span>
+            </div>
+        </div>
+
+        <!-- INSERT COIN BUTTON -->
+        <div style="text-align:center;">
+            <button class="insert-coin-main-btn" id="insertCoinBtn" onclick="openGpioModal()">
+                <span class="coin-slot-icon"></span>
+                INSERT COIN
+            </button>
+        </div>
+
+        <h2 class="section-title">Pricing</h2>
+        <p class="section-subtitle">Choose your preferred coin denomination</p>
+
+        <div class="coin-section">
+            <div class="coin-btn" onclick="insertCoin(1)">
+                <div class="coin-icon">₱1</div>
+                <h3>1 Peso</h3>
+                <p>5 Minutes</p>
+            </div>
+            <div class="coin-btn" onclick="insertCoin(5)">
+                <div class="coin-icon">₱5</div>
+                <h3>5 Pesos</h3>
+                <p>30 Minutes</p>
+            </div>
+            <div class="coin-btn" onclick="insertCoin(10)">
+                <div class="coin-icon">₱10</div>
+                <h3>10 Pesos</h3>
+                <p>1 Hour</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- CONNECT PAGE -->
+    <div class="page" id="page-connect">
+        <h2 class="section-title">Connect to WiFi</h2>
+        <p class="section-subtitle">Insert coins to start your session</p>
+
+        <div class="status-card">
+            <div id="coinSlotArea">
+                <p style="color:#aaa; margin-bottom:20px;">Select a coin to insert:</p>
+                <div class="coin-section">
+                    <div class="coin-btn" onclick="insertCoin(1)">
+                        <div class="coin-icon">₱1</div>
+                        <h3>1 Peso</h3>
+                        <p>5 Minutes</p>
+                    </div>
+                    <div class="coin-btn" onclick="insertCoin(5)">
+                        <div class="coin-icon">₱5</div>
+                        <h3>5 Pesos</h3>
+                        <p>30 Minutes</p>
+                    </div>
+                    <div class="coin-btn" onclick="insertCoin(10)">
+                        <div class="coin-icon">₱10</div>
+                        <h3>10 Pesos</h3>
+                        <p>1 Hour</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- STATUS / SESSION PAGE -->
+    <div class="page" id="page-status">
+        <div class="timer-container">
+            <h2 class="section-title" id="sessionTitle">No Active Session</h2>
+
+            <div id="noSession">
+                <p style="color:#aaa; margin:30px 0;">Insert coins to start browsing the internet.</p>
+                <button class="btn btn-primary" onclick="showPage('connect')">Insert Coins Now</button>
+            </div>
+
+            <div id="activeSession" style="display:none;">
+                <div class="wifi-icon" style="margin-top:20px;">
+                    <div class="wifi-wave"></div>
+                    <div class="wifi-wave"></div>
+                    <div class="wifi-wave"></div>
+                    <div class="wifi-dot"></div>
+                </div>
+
+                <div class="timer-display" id="timerDisplay">00:00:00:00</div>
+
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width:100%"></div>
+                </div>
+
+                <div class="timer-info">
+                    <p>Coin Inserted: <span id="coinInserted">₱0</span></p>
+                    <p>Total Time: <span id="totalTime">0 min</span></p>
+                    <p>Time Remaining: <span id="timeRemaining">0 min</span></p>
+                    <p>Status: <span id="sessionStatus" style="color:#00ff88;">Connected</span></p>
+                </div>
+
+                <div style="margin-top:20px;">
+                    <button class="btn btn-success" onclick="addMoreTime()">Add More Coins</button>
+                    <button class="btn btn-danger" onclick="endSession()">End Session</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADMIN PAGE -->
+    <div class="page" id="page-admin">
+        <!-- Admin Login -->
+        <div id="adminLogin" class="admin-login">
+            <h2 class="section-title">Admin Panel</h2>
+            <p class="section-subtitle">Enter credentials to access dashboard</p>
+            <input type="text" id="adminUser" placeholder="Username">
+            <input type="password" id="adminPass" placeholder="Password">
+            <br><br>
+            <button class="btn btn-primary" onclick="adminLogin()" style="width:100%;">Login</button>
+            <p style="color:#666; font-size:12px; margin-top:15px;">Default: admin / admin123</p>
+        </div>
+
+        <!-- Admin Dashboard -->
+        <div id="adminDashboard" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2 class="section-title" style="margin:0;">Admin Dashboard</h2>
+                <button class="btn btn-danger" onclick="adminLogout()">Logout</button>
+            </div>
+
+            <div class="admin-grid">
+                <!-- Earnings -->
+                <div class="admin-card">
+                    <h3>💰 Today's Earnings</h3>
+                    <div class="stat-row">
+                        <span class="stat-label">Total Earnings</span>
+                        <span class="stat-value" id="totalEarnings">₱0.00</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Total Coins</span>
+                        <span class="stat-value" id="totalCoins">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Sessions Today</span>
+                        <span class="stat-value" id="sessionsToday">0</span>
+                    </div>
+                </div>
+
+                <!-- System Status -->
+                <div class="admin-card">
+                    <h3>📡 System Status</h3>
+                    <div class="stat-row">
+                        <span class="stat-label">System</span>
+                        <span class="stat-value" style="color:#00ff88;" id="adminSysStatus">Online</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Active Users</span>
+                        <span class="stat-value" id="activeUsers">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Uptime</span>
+                        <span class="stat-value" id="uptime">0h 0m</span>
+                    </div>
+                    <div style="margin-top:15px;">
+                        <button class="btn btn-danger" id="toggleSystem" onclick="toggleSystem()">Disable System</button>
+                    </div>
+                </div>
+
+                <!-- Pricing Config -->
+                <div class="admin-card">
+                    <h3>⚙️ Pricing Configuration</h3>
+                    <table class="pricing-table">
+                        <thead>
+                            <tr><th>Coin</th><th>Time</th><th>Rate/min</th></tr>
+                        </thead>
+                        <tbody id="pricingBody">
+                            <tr><td>₱1</td><td>5 min</td><td>₱0.20</td></tr>
+                            <tr><td>₱5</td><td>30 min</td><td>₱0.17</td></tr>
+                            <tr><td>₱10</td><td>60 min</td><td>₱0.17</td></tr>
+                        </tbody>
+                    </table>
+                    <br>
+                    <button class="btn btn-warning" onclick="editPricing()">Edit Pricing</button>
+                </div>
+
+                <!-- Session Log -->
+                <div class="admin-card" style="grid-column: span 2;">
+                    <h3>📋 Session Log</h3>
+                    <table class="log-table">
+                        <thead>
+                            <tr><th>Time</th><th>Coin</th><th>Duration</th><th>Status</th></tr>
+                        </thead>
+                        <tbody id="sessionLog">
+                            <tr><td colspan="4" style="text-align:center; color:#666;">No sessions yet</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Settings -->
+                <div class="admin-card">
+                    <h3>🔧 Settings</h3>
+                    <div class="form-group">
+                        <label>WiFi Name (SSID)</label>
+                        <input type="text" id="ssid" value="AirCoins_Free">
+                    </div>
+                    <div class="form-group">
+                        <label>Bandwidth Limit (Mbps)</label>
+                        <input type="number" id="bandwidth" value="50">
+                    </div>
+                    <div class="form-group">
+                        <label>Max Session Time (min)</label>
+                        <input type="number" id="maxSession" value="120">
+                    </div>
+                    <button class="btn btn-success" onclick="saveSettings()">Save Settings</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- COIN INSERT MODAL -->
+    <div class="modal-overlay" id="coinModal">
+        <div class="modal">
+            <div class="coin-icon coin-drop" id="modalCoinIcon" style="width:80px;height:80px;font-size:32px;margin:0 auto 20px;">₱1</div>
+            <h2 id="modalTitle">Coin Accepted!</h2>
+            <p id="modalDesc">Your session has started. Enjoy browsing!</p>
+            <button class="btn btn-primary" onclick="closeModal()">Start Browsing</button>
+        </div>
+    </div>
+
+    <!-- PRICING EDIT MODAL -->
+    <div class="modal-overlay" id="pricingModal">
+        <div class="modal" style="text-align:left;">
+            <h2 style="text-align:center;">Edit Pricing</h2>
+            <div class="form-group">
+                <label>₱1 Coin = (minutes)</label>
+                <input type="number" id="price1" value="5">
+            </div>
+            <div class="form-group">
+                <label>₱5 Coin = (minutes)</label>
+                <input type="number" id="price5" value="30">
+            </div>
+            <div class="form-group">
+                <label>₱10 Coin = (minutes)</label>
+                <input type="number" id="price10" value="60">
+            </div>
+            <div style="text-align:center; margin-top:15px;">
+                <button class="btn btn-success" onclick="savePricing()">Save</button>
+                <button class="btn btn-danger" onclick="closePricingModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TIME WARNING MODAL -->
+    <div class="modal-overlay" id="warningModal">
+        <div class="modal">
+            <h2 style="color:#ff4444;">⏰ Time Running Out!</h2>
+            <p id="warningText">You have less than 1 minute remaining. Insert more coins to continue.</p>
+            <button class="btn btn-warning" onclick="closeWarningModal()">Insert More Coins</button>
+        </div>
+    </div>
+
+    <!-- GPIO COIN LISTENER MODAL -->
+    <div class="modal-overlay gpio-modal" id="gpioModal">
+        <div class="modal">
+            <h2 style="margin-bottom:5px;">GPIO Coin Listener</h2>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">Waiting for coin insertion...</p>
+
+            <!-- 60s Countdown Ring -->
+            <div class="gpio-countdown-ring">
+                <svg viewBox="0 0 120 120">
+                    <circle class="bg" cx="60" cy="60" r="55"></circle>
+                    <circle class="fg" id="gpioCountdownCircle" cx="60" cy="60" r="55"></circle>
+                </svg>
+                <span class="gpio-countdown-number" id="gpioCountdownNum">60</span>
+            </div>
+
+            <!-- Status -->
+            <div class="gpio-status detecting" id="gpioStatus">Listening for coin...</div>
+
+            <!-- Coin Display -->
+            <div class="gpio-coin-display" id="gpioCoinDisplay">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="color:#aaa; font-size:13px;">Coins Inserted</span>
+                    <span style="color:#ffd700; font-weight:bold; font-size:18px;" id="gpioCoinTotal">₱0</span>
+                </div>
+                <div class="gpio-total-time" id="gpioTotalTime">00:00:00</div>
+                <div style="font-size:11px; color:#aaa;">Total Time (HH:MM:SS)</div>
+                <div class="gpio-coin-list" id="gpioCoinList"></div>
+            </div>
+
+            <!-- Simulate GPIO Coin (for testing - replace with real GPIO in production) -->
+            <div style="margin:15px 0;">
+                <p style="font-size:11px; color:#555; margin-bottom:8px;">Simulate GPIO pulse (test):</p>
+                <button class="gpio-sim-btn" onclick="simulateGpioCoin(1)">₱1 Coin</button>
+                <button class="gpio-sim-btn" onclick="simulateGpioCoin(5)">₱5 Coin</button>
+                <button class="gpio-sim-btn" onclick="simulateGpioCoin(10)">₱10 Coin</button>
+            </div>
+
+            <!-- Done Paying Button -->
+            <button class="btn btn-success" id="gpioDoneBtn" onclick="gpioDonePaying()" style="width:100%; margin-top:10px; display:none;">
+                Done Paying
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // ==================== STATE ====================
+        let state = {
+            systemOnline: true,
+            sessionActive: false,
+            totalSeconds: 0,
+            remainingSeconds: 0,
+            coinsInserted: 0,
+            timerInterval: null,
+            startTime: null,
+            // Admin
+            adminLoggedIn: false,
+            totalEarnings: 0,
+            totalCoinsCount: 0,
+            sessionsCount: 0,
+            sessionLogs: [],
+            startTimeStamp: Date.now(),
+            // Pricing
+            pricing: { 1: 5, 5: 30, 10: 60 },
+            // Settings
+            ssid: 'AirCoins_Free',
+            bandwidth: 50,
+            maxSession: 120
+        };
+
+        // Load state from localStorage
+        function loadState() {
+            const saved = localStorage.getItem('aircoins_state');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                state.totalEarnings = parsed.totalEarnings || 0;
+                state.totalCoinsCount = parsed.totalCoinsCount || 0;
+                state.sessionsCount = parsed.sessionsCount || 0;
+                state.sessionLogs = parsed.sessionLogs || [];
+                state.pricing = parsed.pricing || { 1: 5, 5: 30, 10: 60 };
+                state.ssid = parsed.ssid || 'AirCoins_Free';
+                state.bandwidth = parsed.bandwidth || 50;
+                state.maxSession = parsed.maxSession || 120;
+            }
+        }
+
+        function saveState() {
+            localStorage.setItem('aircoins_state', JSON.stringify({
+                totalEarnings: state.totalEarnings,
+                totalCoinsCount: state.totalCoinsCount,
+                sessionsCount: state.sessionsCount,
+                sessionLogs: state.sessionLogs,
+                pricing: state.pricing,
+                ssid: state.ssid,
+                bandwidth: state.bandwidth,
+                maxSession: state.maxSession
+            }));
+        }
+
+        // ==================== NAVIGATION ====================
+        function showPage(pageId) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.nav-links a').forEach(a => a.classList.remove('active'));
+            document.getElementById('page-' + pageId).classList.add('active');
+            event.target.classList.add('active');
+
+            if (pageId === 'status') updateSessionView();
+            if (pageId === 'admin' && state.adminLoggedIn) {
+                document.getElementById('adminLogin').style.display = 'none';
+                document.getElementById('adminDashboard').style.display = 'block';
+                updateAdminDashboard();
+            }
+        }
+
+        // ==================== COIN INSERT ====================
+        function insertCoin(amount) {
+            if (!state.systemOnline) {
+                showNotification('System is currently offline!', 'error');
+                return;
+            }
+
+            const minutes = state.pricing[amount];
+            const seconds = minutes * 60;
+
+            if (state.sessionActive) {
+                // Add time to existing session
+                state.totalSeconds += seconds;
+                state.remainingSeconds += seconds;
+                state.coinsInserted += amount;
+            } else {
+                // New session
+                state.sessionActive = true;
+                state.totalSeconds = seconds;
+                state.remainingSeconds = seconds;
+                state.coinsInserted = amount;
+                state.startTime = new Date();
+                startTimer();
+            }
+
+            // Update stats
+            state.totalEarnings += amount;
+            state.totalCoinsCount++;
+            state.sessionsCount++;
+
+            // Add log
+            const logEntry = {
+                time: new Date().toLocaleTimeString(),
+                coin: '₱' + amount,
+                duration: minutes + ' min',
+                status: 'Active'
+            };
+            state.sessionLogs.unshift(logEntry);
+            if (state.sessionLogs.length > 20) state.sessionLogs.pop();
+
+            saveState();
+
+            // Show modal
+            document.getElementById('modalCoinIcon').textContent = '₱' + amount;
+            document.getElementById('modalTitle').textContent = state.sessionActive && state.totalSeconds > seconds
+                ? 'Coins Added!' : 'Coin Accepted!';
+            document.getElementById('modalDesc').textContent = state.sessionActive && state.totalSeconds > seconds
+                ? minutes + ' minutes added to your session!' : 'Your session has started. Enjoy browsing!';
+            document.getElementById('coinModal').classList.add('active');
+
+            showNotification('₱' + amount + ' inserted! +' + minutes + ' minutes', 'success');
+        }
+
+        // ==================== TIMER ====================
+        function startTimer() {
+            if (state.timerInterval) clearInterval(state.timerInterval);
+            state.timerInterval = setInterval(() => {
+                if (state.remainingSeconds <= 0) {
+                    clearInterval(state.timerInterval);
+                    endSession(true);
+                    return;
+                }
+                state.remainingSeconds--;
+
+                // Warning at 60 seconds
+                if (state.remainingSeconds === 60) {
+                    document.getElementById('warningModal').classList.add('active');
+                }
+
+                updateTimerDisplay();
+            }, 1000);
+            updateTimerDisplay();
+        }
+
+        function updateTimerDisplay() {
+            const days = Math.floor(state.remainingSeconds / 86400);
+            const hrs = Math.floor((state.remainingSeconds % 86400) / 3600);
+            const mins = Math.floor((state.remainingSeconds % 3600) / 60);
+            const secs = state.remainingSeconds % 60;
+
+            const display = String(days).padStart(2, '0') + ':' +
+                           String(hrs).padStart(2, '0') + ':' +
+                           String(mins).padStart(2, '0') + ':' +
+                           String(secs).padStart(2, '0');
+
+            document.getElementById('timerDisplay').textContent = display;
+
+            // Progress bar
+            const progress = (state.remainingSeconds / state.totalSeconds) * 100;
+            document.getElementById('progressFill').style.width = progress + '%';
+
+            // Change color when low time
+            if (state.remainingSeconds <= 60) {
+                document.getElementById('timerDisplay').style.color = '#ff4444';
+                document.getElementById('progressFill').style.background = '#ff4444';
+            } else if (state.remainingSeconds <= 300) {
+                document.getElementById('timerDisplay').style.color = '#ffd700';
+                document.getElementById('progressFill').style.background = 'linear-gradient(90deg, #ffd700, #ffaa00)';
+            }
+
+            // Update session info
+            const remainMin = Math.ceil(state.remainingSeconds / 60);
+            const totalMin = Math.ceil(state.totalSeconds / 60);
+            document.getElementById('coinInserted').textContent = '₱' + state.coinsInserted;
+            document.getElementById('totalTime').textContent = totalMin + ' min';
+            document.getElementById('timeRemaining').textContent = remainMin + ' min';
+
+            // Sync running timer on home screen
+            if (state.sessionActive) {
+                updateRunningTimerDisplay();
+            }
+        }
+
+        function updateSessionView() {
+            if (state.sessionActive && state.remainingSeconds > 0) {
+                document.getElementById('noSession').style.display = 'none';
+                document.getElementById('activeSession').style.display = 'block';
+                document.getElementById('sessionTitle').textContent = 'Session Active';
+            } else {
+                document.getElementById('noSession').style.display = 'block';
+                document.getElementById('activeSession').style.display = 'none';
+                document.getElementById('sessionTitle').textContent = 'No Active Session';
+            }
+        }
+
+        function endSession(autoEnd) {
+            if (state.timerInterval) clearInterval(state.timerInterval);
+            if (gpio.sessionInterval) clearInterval(gpio.sessionInterval);
+
+            // Update log
+            if (state.sessionLogs.length > 0) {
+                state.sessionLogs[0].status = autoEnd ? 'Expired' : 'Ended';
+            }
+
+            state.sessionActive = false;
+            state.remainingSeconds = 0;
+            state.totalSeconds = 0;
+            state.coinsInserted = 0;
+            state.startTime = null;
+
+            saveState();
+            updateSessionView();
+
+            // Hide running timer
+            document.getElementById('runningTimerBar').classList.remove('active');
+
+            if (autoEnd) {
+                showNotification('Session expired. Insert coins to continue.', 'info');
+            }
+        }
+
+        function addMoreTime() {
+            openGpioModal();
+        }
+
+        // ==================== MODALS ====================
+        function closeModal() {
+            document.getElementById('coinModal').classList.remove('active');
+            updateSessionView();
+        }
+
+        function closeWarningModal() {
+            document.getElementById('warningModal').classList.remove('active');
+            addMoreTime();
+        }
+
+        function editPricing() {
+            document.getElementById('price1').value = state.pricing[1];
+            document.getElementById('price5').value = state.pricing[5];
+            document.getElementById('price10').value = state.pricing[10];
+            document.getElementById('pricingModal').classList.add('active');
+        }
+
+        function closePricingModal() {
+            document.getElementById('pricingModal').classList.remove('active');
+        }
+
+        function savePricing() {
+            state.pricing[1] = parseInt(document.getElementById('price1').value) || 5;
+            state.pricing[5] = parseInt(document.getElementById('price5').value) || 30;
+            state.pricing[10] = parseInt(document.getElementById('price10').value) || 60;
+            saveState();
+            closePricingModal();
+            updatePricingTable();
+            updateCoinButtons();
+            showNotification('Pricing updated!', 'success');
+        }
+
+        function updatePricingTable() {
+            const body = document.getElementById('pricingBody');
+            body.innerHTML = '';
+            [1, 5, 10].forEach(coin => {
+                const mins = state.pricing[coin];
+                const rate = (coin / mins).toFixed(2);
+                body.innerHTML += '<tr><td>₱' + coin + '</td><td>' + mins + ' min</td><td>₱' + rate + '</td></tr>';
+            });
+        }
+
+        function updateCoinButtons() {
+            // Update all coin button descriptions
+            document.querySelectorAll('.coin-btn').forEach(btn => {
+                const text = btn.querySelector('h3').textContent;
+                const coinVal = parseInt(text.replace(/[^0-9]/g, ''));
+                if (state.pricing[coinVal]) {
+                    const p = btn.querySelector('p');
+                    const mins = state.pricing[coinVal];
+                    p.textContent = mins >= 60 ? (mins / 60) + ' Hour' + (mins > 60 ? 's' : '') : mins + ' Minutes';
+                }
+            });
+        }
+
+        // ==================== ADMIN ====================
+        function adminLogin() {
+            const user = document.getElementById('adminUser').value;
+            const pass = document.getElementById('adminPass').value;
+
+            if (user === 'admin' && pass === 'admin123') {
+                state.adminLoggedIn = true;
+                document.getElementById('adminLogin').style.display = 'none';
+                document.getElementById('adminDashboard').style.display = 'block';
+                updateAdminDashboard();
+                showNotification('Welcome, Admin!', 'success');
+            } else {
+                showNotification('Invalid credentials!', 'error');
+            }
+        }
+
+        function adminLogout() {
+            state.adminLoggedIn = false;
+            document.getElementById('adminLogin').style.display = 'block';
+            document.getElementById('adminDashboard').style.display = 'none';
+            document.getElementById('adminUser').value = '';
+            document.getElementById('adminPass').value = '';
+        }
+
+        function updateAdminDashboard() {
+            document.getElementById('totalEarnings').textContent = '₱' + state.totalEarnings.toFixed(2);
+            document.getElementById('totalCoins').textContent = state.totalCoinsCount;
+            document.getElementById('sessionsToday').textContent = state.sessionsCount;
+            document.getElementById('activeUsers').textContent = state.sessionActive ? '1' : '0';
+
+            // Uptime
+            const uptimeMs = Date.now() - state.startTimeStamp;
+            const uptimeH = Math.floor(uptimeMs / 3600000);
+            const uptimeM = Math.floor((uptimeMs % 3600000) / 60000);
+            document.getElementById('uptime').textContent = uptimeH + 'h ' + uptimeM + 'm';
+
+            // System status
+            document.getElementById('adminSysStatus').textContent = state.systemOnline ? 'Online' : 'Offline';
+            document.getElementById('adminSysStatus').style.color = state.systemOnline ? '#00ff88' : '#ff4444';
+            document.getElementById('toggleSystem').textContent = state.systemOnline ? 'Disable System' : 'Enable System';
+
+            // Session log
+            const logBody = document.getElementById('sessionLog');
+            if (state.sessionLogs.length === 0) {
+                logBody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#666;">No sessions yet</td></tr>';
+            } else {
+                logBody.innerHTML = '';
+                state.sessionLogs.forEach(log => {
+                    const statusColor = log.status === 'Active' ? '#00ff88' : (log.status === 'Expired' ? '#ff4444' : '#ffd700');
+                    logBody.innerHTML += '<tr><td>' + log.time + '</td><td>' + log.coin + '</td><td>' + log.duration + '</td><td style="color:' + statusColor + ';">' + log.status + '</td></tr>';
+                });
+            }
+
+            // Settings
+            document.getElementById('ssid').value = state.ssid;
+            document.getElementById('bandwidth').value = state.bandwidth;
+            document.getElementById('maxSession').value = state.maxSession;
+
+            updatePricingTable();
+        }
+
+        function toggleSystem() {
+            state.systemOnline = !state.systemOnline;
+
+            const indicator = document.getElementById('systemStatus');
+            const statusText = document.getElementById('statusText');
+
+            if (state.systemOnline) {
+                indicator.className = 'status-indicator status-online';
+                statusText.textContent = 'System Online';
+            } else {
+                indicator.className = 'status-indicator status-offline';
+                statusText.textContent = 'System Offline';
+            }
+
+            updateAdminDashboard();
+            showNotification('System ' + (state.systemOnline ? 'enabled' : 'disabled'), 'info');
+        }
+
+        function saveSettings() {
+            state.ssid = document.getElementById('ssid').value;
+            state.bandwidth = parseInt(document.getElementById('bandwidth').value);
+            state.maxSession = parseInt(document.getElementById('maxSession').value);
+            saveState();
+            showNotification('Settings saved!', 'success');
+        }
+
+        // ==================== NOTIFICATIONS ====================
+        function showNotification(msg, type) {
+            const notif = document.getElementById('notification');
+            notif.textContent = msg;
+            notif.className = 'notification ' + type;
+            notif.style.display = 'block';
+            setTimeout(() => { notif.style.display = 'none'; }, 3000);
+        }
+
+        // ==================== INIT ====================
+        // GPIO state (declared early so init can reference it)
+        let gpio = {
+            countdownInterval: null,
+            countdown: 60,
+            coins: [],
+            totalAmount: 0,
+            totalSeconds: 0,
+            active: false,
+            sessionStartTime: null,
+            sessionInterval: null
+        };
+
+        loadState();
+        updateCoinButtons();
+
+        // Restore running timer if session was active
+        if (state.sessionActive && state.remainingSeconds > 0) {
+            document.getElementById('runningTimerBar').classList.add('active');
+            document.getElementById('runningTotalCoins').textContent = '₱' + state.coinsInserted;
+            startRunningTimer();
+            startTimer();
+        }
+
+        // ==================== GPIO COIN LISTENER ====================
+
+        function openGpioModal() {
+            if (!state.systemOnline) {
+                showNotification('System is currently offline!', 'error');
+                return;
+            }
+
+            // Reset GPIO state
+            gpio.countdown = 60;
+            gpio.coins = [];
+            gpio.totalAmount = 0;
+            gpio.totalSeconds = 0;
+            gpio.active = true;
+
+            // Reset UI
+            document.getElementById('gpioCountdownNum').textContent = '60';
+            document.getElementById('gpioCountdownCircle').style.strokeDashoffset = '0';
+            document.getElementById('gpioStatus').textContent = 'Listening for coin...';
+            document.getElementById('gpioStatus').className = 'gpio-status detecting';
+            document.getElementById('gpioCoinDisplay').classList.remove('active');
+            document.getElementById('gpioCoinList').innerHTML = '';
+            document.getElementById('gpioCoinTotal').textContent = '₱0';
+            document.getElementById('gpioTotalTime').textContent = '00:00:00';
+            document.getElementById('gpioDoneBtn').style.display = 'none';
+
+            // Open modal
+            document.getElementById('gpioModal').classList.add('active');
+
+            // Start 60s countdown
+            startGpioCountdown();
+        }
+
+        function startGpioCountdown() {
+            if (gpio.countdownInterval) clearInterval(gpio.countdownInterval);
+
+            gpio.countdown = 60;
+            updateGpioCountdownUI();
+
+            gpio.countdownInterval = setInterval(() => {
+                gpio.countdown--;
+                updateGpioCountdownUI();
+
+                if (gpio.countdown <= 0) {
+                    clearInterval(gpio.countdownInterval);
+                    closeGpioModal();
+                    showNotification('GPIO listener timed out. No coin detected.', 'info');
+                }
+            }, 1000);
+        }
+
+        function updateGpioCountdownUI() {
+            document.getElementById('gpioCountdownNum').textContent = gpio.countdown;
+
+            // Update ring progress (circumference = 2 * PI * 55 = 345.58)
+            const circumference = 345.58;
+            const offset = circumference - (gpio.countdown / 60) * circumference;
+            document.getElementById('gpioCountdownCircle').style.strokeDashoffset = offset;
+
+            // Change color when low
+            if (gpio.countdown <= 10) {
+                document.getElementById('gpioCountdownNum').style.color = '#ff4444';
+                document.getElementById('gpioCountdownCircle').style.stroke = '#ff4444';
+            } else {
+                document.getElementById('gpioCountdownNum').style.color = '#00d4ff';
+                document.getElementById('gpioCountdownCircle').style.stroke = '#00d4ff';
+            }
+        }
+
+        // Simulate GPIO coin detection (replace with real GPIO event in production)
+        function simulateGpioCoin(amount) {
+            if (!gpio.active) return;
+
+            // Reset 60s countdown
+            gpio.countdown = 60;
+            updateGpioCountdownUI();
+
+            // Clear old interval and restart
+            clearInterval(gpio.countdownInterval);
+            startGpioCountdown();
+
+            // Add coin
+            const minutes = state.pricing[amount];
+            gpio.coins.push({ amount: amount, minutes: minutes, time: new Date().toLocaleTimeString() });
+            gpio.totalAmount += amount;
+            gpio.totalSeconds += minutes * 60;
+
+            // Update coin display
+            document.getElementById('gpioCoinDisplay').classList.add('active');
+            document.getElementById('gpioCoinTotal').textContent = '₱' + gpio.totalAmount;
+
+            // Calculate and display total time in HH:MM:SS
+            const totalHrs = Math.floor(gpio.totalSeconds / 3600);
+            const totalMins = Math.floor((gpio.totalSeconds % 3600) / 60);
+            const totalSecs = gpio.totalSeconds % 60;
+            const timeStr = String(totalHrs).padStart(2, '0') + ':' +
+                           String(totalMins).padStart(2, '0') + ':' +
+                           String(totalSecs).padStart(2, '0');
+            document.getElementById('gpioTotalTime').textContent = timeStr;
+
+            // Add to coin list
+            const listItem = document.createElement('div');
+            listItem.className = 'gpio-coin-item';
+            listItem.innerHTML = '<span style="color:#ffd700;">₱' + amount + '</span><span style="color:#aaa;">+' + minutes + ' min</span><span style="color:#666;">' + new Date().toLocaleTimeString() + '</span>';
+            document.getElementById('gpioCoinList').prepend(listItem);
+
+            // Update status
+            document.getElementById('gpioStatus').textContent = 'Coin detected! ₱' + amount + ' inserted';
+            document.getElementById('gpioStatus').className = 'gpio-status detected';
+
+            // Show done paying button
+            document.getElementById('gpioDoneBtn').style.display = 'block';
+
+            // Flash notification
+            showNotification('Coin detected! ₱' + amount + ' (+' + minutes + ' min)', 'success');
+
+            // Brief status flash then back to listening
+            setTimeout(() => {
+                if (gpio.active) {
+                    document.getElementById('gpioStatus').textContent = 'Listening for next coin...';
+                    document.getElementById('gpioStatus').className = 'gpio-status detecting';
+                }
+            }, 2000);
+        }
+
+        function gpioDonePaying() {
+            if (gpio.totalAmount <= 0) {
+                showNotification('No coins inserted yet!', 'error');
+                return;
+            }
+
+            // Stop countdown
+            clearInterval(gpio.countdownInterval);
+            gpio.active = false;
+
+            // Close modal
+            closeGpioModal();
+
+            // If session already active, add time to it
+            if (state.sessionActive) {
+                state.totalSeconds += gpio.totalSeconds;
+                state.remainingSeconds += gpio.totalSeconds;
+                state.coinsInserted += gpio.totalAmount;
+
+                // Update stats
+                state.totalEarnings += gpio.totalAmount;
+                state.totalCoinsCount += gpio.coins.length;
+
+                // Add log
+                const logEntry = {
+                    time: new Date().toLocaleTimeString(),
+                    coin: '₱' + gpio.totalAmount,
+                    duration: Math.floor(gpio.totalSeconds / 60) + ' min',
+                    status: 'Active'
+                };
+                state.sessionLogs.unshift(logEntry);
+                if (state.sessionLogs.length > 20) state.sessionLogs.pop();
+
+                saveState();
+                updateTimerDisplay();
+                document.getElementById('runningTotalCoins').textContent = '₱' + state.coinsInserted;
+
+                showNotification('₱' + gpio.totalAmount + ' added! +' + Math.floor(gpio.totalSeconds / 60) + ' min', 'success');
+            } else {
+                // Start new session
+                startSessionFromGpio();
+            }
+        }
+
+        function closeGpioModal() {
+            clearInterval(gpio.countdownInterval);
+            gpio.active = false;
+            document.getElementById('gpioModal').classList.remove('active');
+        }
+
+        function startSessionFromGpio() {
+            // Set session state
+            state.sessionActive = true;
+            state.totalSeconds = gpio.totalSeconds;
+            state.remainingSeconds = gpio.totalSeconds;
+            state.coinsInserted = gpio.totalAmount;
+            state.startTime = new Date();
+
+            // Update stats
+            state.totalEarnings += gpio.totalAmount;
+            state.totalCoinsCount += gpio.coins.length;
+            state.sessionsCount++;
+
+            // Add log entry
+            const logEntry = {
+                time: new Date().toLocaleTimeString(),
+                coin: '₱' + gpio.totalAmount,
+                duration: Math.floor(gpio.totalSeconds / 60) + ' min',
+                status: 'Active'
+            };
+            state.sessionLogs.unshift(logEntry);
+            if (state.sessionLogs.length > 20) state.sessionLogs.pop();
+
+            saveState();
+
+            // Start countdown timer
+            startTimer();
+
+            // Start session running timer (dd:hh:mm:ss)
+            startRunningTimer();
+
+            // Show running timer bar on home
+            document.getElementById('runningTimerBar').classList.add('active');
+            document.getElementById('runningTotalCoins').textContent = '₱' + state.coinsInserted;
+
+            showNotification('Session started! Enjoy browsing.', 'success');
+        }
+
+        // Running timer on main screen (dd:hh:mm:ss) - COUNTDOWN
+        function startRunningTimer() {
+            if (gpio.sessionInterval) clearInterval(gpio.sessionInterval);
+
+            // Update immediately then every second
+            updateRunningTimerDisplay();
+
+            gpio.sessionInterval = setInterval(() => {
+                if (!state.sessionActive) {
+                    clearInterval(gpio.sessionInterval);
+                    document.getElementById('runningTimerBar').classList.remove('active');
+                    return;
+                }
+
+                updateRunningTimerDisplay();
+            }, 1000);
+        }
+
+        function updateRunningTimerDisplay() {
+            // Use remainingSeconds from the session countdown
+            const remaining = state.remainingSeconds;
+            const days = Math.floor(remaining / 86400);
+            const hours = Math.floor((remaining % 86400) / 3600);
+            const mins = Math.floor((remaining % 3600) / 60);
+            const secs = remaining % 60;
+
+            const display = String(days).padStart(2, '0') + ':' +
+                           String(hours).padStart(2, '0') + ':' +
+                           String(mins).padStart(2, '0') + ':' +
+                           String(secs).padStart(2, '0');
+
+            document.getElementById('runningTimerValue').textContent = display;
+
+            // Change color when low
+            if (remaining <= 60) {
+                document.getElementById('runningTimerValue').style.color = '#ff4444';
+            } else if (remaining <= 300) {
+                document.getElementById('runningTimerValue').style.color = '#ffd700';
+            } else {
+                document.getElementById('runningTimerValue').style.color = '#00d4ff';
+            }
+        }
+
+        // Update uptime counter every minute
+        setInterval(() => {
+            if (state.adminLoggedIn) {
+                const uptimeMs = Date.now() - state.startTimeStamp;
+                const uptimeH = Math.floor(uptimeMs / 3600000);
+                const uptimeM = Math.floor((uptimeMs % 3600000) / 60000);
+                document.getElementById('uptime').textContent = uptimeH + 'h ' + uptimeM + 'm';
+            }
+        }, 60000);
+
+        // ==================== ORANGE PI GPIO API INTEGRATION ====================
+        // When deployed on Orange Pi, the session manager writes status to
+        // /var/lib/pisowifi/status.json which lighttpd serves as a static file.
+        // This polling layer syncs the HTML frontend with the real GPIO backend.
+
+        const API_ENABLED = true;           // Set false to disable API polling
+        const API_POLL_INTERVAL = 2000;     // Poll every 2 seconds
+        const API_STATUS_URL = '/api/status.json';
+        const API_COIN_URL = '/api/coin_event.json';
+        let apiPollTimer = null;
+        let lastCoinTimestamp = 0;
+
+        // Poll backend for GPIO coin events and session status
+        function apiPoll() {
+            if (!API_ENABLED) return;
+
+            // Fetch status.json (written by session manager)
+            fetch(API_STATUS_URL + '?t=' + Date.now())
+                .then(r => {
+                    if (!r.ok) throw new Error('No API');
+                    return r.json();
+                })
+                .then(data => {
+                    // Sync session state from backend
+                    if (data.session && data.session.status === 'active') {
+                        const backendRemaining = parseInt(data.session.remaining) || 0;
+                        const backendCoins = parseInt(data.session.coins) || 0;
+
+                        // Update frontend state if backend has newer data
+                        if (backendRemaining > 0 && !state.sessionActive) {
+                            // Session started on backend, sync to frontend
+                            state.sessionActive = true;
+                            state.remainingSeconds = backendRemaining;
+                            state.totalSeconds = backendRemaining;
+                            state.coinsInserted = backendCoins;
+                            startTimer();
+                            startRunningTimer();
+                            document.getElementById('runningTimerBar').classList.add('active');
+                            document.getElementById('runningTotalCoins').textContent = '₱' + backendCoins;
+                        } else if (state.sessionActive) {
+                            // Sync remaining time from backend
+                            state.remainingSeconds = backendRemaining;
+                            state.coinsInserted = backendCoins;
+                            document.getElementById('runningTotalCoins').textContent = '₱' + backendCoins;
+                        }
+
+                        // Show running timer
+                        document.getElementById('runningTimerBar').classList.add('active');
+                    }
+
+                    // Check for new coin events
+                    if (data.last_coin_time && data.last_coin_time > lastCoinTimestamp) {
+                        lastCoinTimestamp = data.last_coin_time;
+                        const coinVal = parseInt(data.last_coin_value) || 1;
+
+                        // If GPIO modal is open, simulate the coin detection
+                        if (gpio.active) {
+                            simulateGpioCoin(coinVal);
+                        }
+
+                        showNotification('GPIO: ₱' + coinVal + ' coin detected!', 'success');
+                    }
+
+                    // Sync system status
+                    if (data.system) {
+                        const indicator = document.getElementById('systemStatus');
+                        const statusText = document.getElementById('statusText');
+                        if (data.system.online === false) {
+                            state.systemOnline = false;
+                            indicator.className = 'status-indicator status-offline';
+                            statusText.textContent = 'System Offline';
+                        } else {
+                            state.systemOnline = true;
+                            indicator.className = 'status-indicator status-online';
+                            statusText.textContent = 'System Online';
+                        }
+                    }
+
+                    // Sync admin stats
+                    if (data.stats && state.adminLoggedIn) {
+                        document.getElementById('totalEarnings').textContent = '₱' + (parseFloat(data.stats.total_earnings) || 0).toFixed(2);
+                        document.getElementById('totalCoins').textContent = data.stats.total_coins || 0;
+                        document.getElementById('sessionsToday').textContent = data.stats.total_sessions || 0;
+                        document.getElementById('activeUsers').textContent = data.stats.active_clients || 0;
+                    }
+                })
+                .catch(err => {
+                    // API not available (running in browser test mode)
+                    // Silently fail - frontend-only mode works without backend
+                });
+        }
+
+        // Start API polling
+        function startApiPolling() {
+            if (apiPollTimer) clearInterval(apiPollTimer);
+            apiPoll(); // Immediate first poll
+            apiPollTimer = setInterval(apiPoll, API_POLL_INTERVAL);
+        }
+
+        // Stop API polling
+        function stopApiPolling() {
+            if (apiPollTimer) {
+                clearInterval(apiPollTimer);
+                apiPollTimer = null;
+            }
+        }
+
+        // Auto-start API polling when page loads
+        startApiPolling();
+    </script>
+</body>
+</html>

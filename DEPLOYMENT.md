@@ -1,0 +1,473 @@
+# AirCoins PisoWiFi - Deployment Guide
+
+## Orange Pi One Setup & Installation Instructions
+
+---
+
+## 1. Required Hardware
+
+| Component | Specification |
+|-----------|--------------|
+| **Single Board Computer** | Orange Pi One (Allwinner H3, 512MB RAM) |
+| **WiFi Module** | Built-in or USB WiFi dongle (RTL8188CUS / RTL8192CU recommended) |
+| **Internet Connection** | Ethernet (eth0) connected to upstream internet |
+| **Coin Acceptor** | Multi-coin acceptor with pulse output (5V, programmable) |
+| **Power Supply** | 5V 3A micro USB (stable power required for WiFi AP) |
+| **MicroSD Card** | 16GB+ Class 10 (for OS) |
+| **Enclosure** | Metal/plastic case with coin slot cutout |
+
+### GPIO Wiring (Coin Acceptor → Orange Pi)
+
+```
+Coin Acceptor          Orange Pi One
+─────────────          ─────────────
+Pulse Output    →      Physical Pin 7 (PA6 / wiringPi 7)
+GND             →      Physical Pin 6 (GND)
+VCC (5V)        →      External 5V supply (do NOT power from Orange Pi 5V pin)
+```
+
+> **Important:** Use a separate 5V supply for the coin acceptor. Drawing too much current from the Orange Pi's 5V pin can cause instability.
+
+---
+
+## 2. Operating System
+
+### Recommended OS
+
+| OS | Version | Notes |
+|----|---------|-------|
+| **Armbian** | 23.x+ (Bookworm/Bullseye) | **RECOMMENDED** - Best community support |
+| Orange Pi OS | Official image | Works but less community support |
+| Raspbian (legacy) | Debian 11 | Compatible with H3-based boards |
+
+### Download Armbian for Orange Pi One
+
+1. Go to: https://www.armbian.com/orange-pi-one/
+2. Download the **Bookworm** (Debian 12) server image
+3. Flash to MicroSD card using:
+   - **Balena Etcher** (Windows/Mac/Linux): https://etcher.balena.io/
+   - **Rufus** (Windows): https://rufus.akeo.ie/
+   - **dd** (Linux): `sudo dd if=Armbian.img of=/dev/sdX bs=4M status=progress`
+
+### Initial OS Setup
+
+```bash
+# 1. Boot Orange Pi from MicroSD (first boot takes 1-2 minutes)
+
+# 2. Connect via SSH or serial console
+#    Default credentials:
+#    Username: root
+#    Password: 1234 (will prompt change on first login)
+
+# 3. Run initial setup
+armbian-config            # Or use nmtui for network config
+
+# 4. Set static IP for Ethernet (internet uplink)
+#    Edit /etc/network/interfaces or use NetworkManager
+nano /etc/network/interfaces
+```
+
+**/etc/network/interfaces** (Ethernet - internet uplink):
+```
+auto eth0
+iface eth0 inet dhcp
+```
+
+**/etc/network/interfaces** (WiFi - AP mode, managed by hostapd):
+```
+# wlan0 is managed by hostapd - do NOT configure here
+```
+
+```bash
+# 5. Update system
+apt-get update && apt-get upgrade -y
+
+# 6. Enable WiFi adapter (if using USB WiFi)
+# Check if WiFi is detected:
+iwconfig
+# or
+ip link show
+
+# If wlan0 is not visible, install firmware:
+apt-get install firmware-realtek    # For RTL8188/RTL8192 chipsets
+```
+
+---
+
+## 3. Transfer Project Files
+
+### Option A: Git Clone (Recommended)
+
+```bash
+# On Orange Pi
+cd /opt
+git clone https://github.com/YOUR_USERNAME/AirCoins.git
+cd AirCoins
+```
+
+### Option B: SCP from your computer
+
+```bash
+# From your Windows/Mac/Linux machine
+scp -r ./AirCoins root@<orange-pi-ip>:/opt/AirCoins
+```
+
+### Option C: USB Drive
+
+```bash
+# Copy AirCoins folder to USB drive (FAT32)
+# Mount on Orange Pi:
+mount /dev/sda1 /mnt
+cp -r /mnt/AirCoins /opt/
+umount /mnt
+```
+
+---
+
+## 4. Installation
+
+```bash
+# Navigate to project directory
+cd /opt/AirCoins
+
+# Make install script executable
+chmod +x install.sh
+
+# Run installer (must be root)
+sudo bash install.sh
+```
+
+The installer will:
+- Update system packages
+- Install hostapd, dnsmasq, lighttpd, iptables, WiringOP
+- Deploy all configuration files
+- Deploy the web portal
+- Deploy GPIO listener, session manager, and API scripts
+- Install systemd services
+- Enable IP forwarding
+- Enable services on boot
+
+> **Note:** If WiringOP installation fails (no GPIO hardware), the GPIO listener will run in **simulation mode** automatically.
+
+---
+
+## 5. Post-Installation
+
+### Reboot (Recommended)
+
+```bash
+sudo reboot
+```
+
+### Start Services
+
+```bash
+# Start all PisoWiFi services
+sudo pisowifi-ctl start
+
+# Check status
+sudo pisowifi-ctl status
+```
+
+### Verify Everything Works
+
+```bash
+# 1. Check WiFi AP is broadcasting
+sudo iwconfig wlan0
+# Should show: SSID=AirCoins_Free
+
+# 2. Check DHCP is serving IPs
+cat /var/lib/dnsmasq/dnsmasq.leases
+
+# 3. Check web portal is accessible
+curl -I http://192.168.42.1
+# Should return HTTP 200
+
+# 4. Check GPIO listener is running
+sudo pisowifi-ctl status
+# GPIO Coin Listener should show: RUNNING
+
+# 5. Check iptables rules
+sudo iptables -L -n -v
+```
+
+---
+
+## 6. Testing
+
+### Test from a Phone/Laptop
+
+1. Connect to WiFi network: **AirCoins_Free**
+2. Open a browser - you should be redirected to the portal
+3. Click **INSERT COIN** button
+4. In the GPIO modal, click a coin button to simulate
+5. Click **Done Paying**
+6. Verify the countdown timer appears
+
+### Test GPIO (with real coin acceptor)
+
+```bash
+# Monitor GPIO log in real-time
+tail -f /var/log/pisowifi/gpio-coin.log
+
+# Insert a real coin - you should see:
+# [2026-07-03 15:30:00] COIN DETECTED! Pulse #1 | Value: ₱1
+
+# Monitor session log
+tail -f /var/log/pisowifi/session.log
+```
+
+### Simulate GPIO (without hardware)
+
+```bash
+# Trigger a simulated coin event
+echo "1" > /var/lib/pisowifi/simulate_coin
+
+# Check it was detected
+tail -n 5 /var/log/pisowifi/gpio-coin.log
+```
+
+---
+
+## 7. Service Management
+
+```bash
+# Start all services
+sudo pisowifi-ctl start
+
+# Stop all services
+sudo pisowifi-ctl stop
+
+# Restart all services
+sudo pisowifi-ctl restart
+
+# View status
+sudo pisowifi-ctl status
+
+# View recent logs (last 50 lines)
+sudo pisowifi-ctl logs
+
+# View more logs
+sudo pisowifi-ctl logs 200
+```
+
+### Individual Service Control
+
+```bash
+# GPIO Coin Listener
+sudo systemctl start gpio-coin-listener
+sudo systemctl status gpio-coin-listener
+sudo journalctl -u gpio-coin-listener -f
+
+# Session Manager
+sudo systemctl start pisowifi-session
+sudo systemctl status pisowifi-session
+sudo journalctl -u pisowifi-session -f
+
+# WiFi AP
+sudo systemctl start hostapd
+
+# DHCP/DNS
+sudo systemctl start dnsmasq
+
+# Web Server
+sudo systemctl start lighttpd
+```
+
+---
+
+## 8. Configuration
+
+### Change WiFi SSID
+
+```bash
+sudo nano /etc/hostapd/hostapd.conf
+# Edit the line: ssid=YourNewName
+sudo pisowifi-ctl restart
+```
+
+### Change Pricing
+
+Edit in the **Admin Panel** (http://192.168.42.1 → Admin → Login)
+- Default credentials: `admin` / `admin123`
+- Click **Edit Pricing** to change minutes per coin
+
+Or edit directly:
+```bash
+sudo nano /var/www/html/index.html
+# Find: pricing: { 1: 5, 5: 30, 10: 60 }
+# Format: { coin_value: minutes }
+```
+
+### Change GPIO Pin
+
+```bash
+sudo nano /usr/local/bin/gpio-coin-listener
+# Edit: COIN_PULSE_PIN=7    (change to your wiringPi pin number)
+sudo systemctl restart gpio-coin-listener
+```
+
+### Change Network Range
+
+```bash
+# Edit DHCP range
+sudo nano /etc/dnsmasq/dnsmasq.conf
+# Change: dhcp-range=192.168.42.100,192.168.42.200,255.255.255.0,12h
+
+# Edit portal IP
+sudo nano /etc/iptables/pisowifi.rules.sh
+# Change: PORTAL_IP="192.168.42.1"
+
+sudo pisowifi-ctl restart
+```
+
+---
+
+## 9. Troubleshooting
+
+### WiFi AP Not Broadcasting
+
+```bash
+# Check if WiFi adapter is detected
+lsusb                          # USB adapters
+ip link show wlan0             # Interface exists?
+
+# Check hostapd logs
+sudo journalctl -u hostapd -n 50
+
+# Test hostapd manually
+sudo hostapd -d /etc/hostapd/hostapd.conf
+```
+
+### No Internet for Clients
+
+```bash
+# Check IP forwarding
+cat /proc/sys/net/ipv4/ip_forward    # Should be 1
+
+# Check iptables NAT
+sudo iptables -t nat -L -n
+
+# Check Ethernet has internet
+ping -c 3 8.8.8.8
+
+# Reapply iptables rules
+sudo bash /etc/iptables/pisowifi.rules.sh
+```
+
+### Portal Not Loading
+
+```bash
+# Check lighttpd is running
+sudo systemctl status lighttpd
+
+# Check portal files exist
+ls -la /var/www/html/
+
+# Check lighttpd error log
+tail -50 /var/log/lighttpd/error.log
+
+# Test locally on Orange Pi
+curl http://localhost/
+```
+
+### GPIO Not Detecting Coins
+
+```bash
+# Check WiringOP is installed
+gpio -v
+gpio readall        # Show all pin states
+
+# Check pin mode
+gpio mode 7 up      # Set pull-up
+gpio mode 7 input   # Set as input
+gpio read 7         # Should read 1 (HIGH) when no coin
+
+# Check log
+tail -f /var/log/pisowifi/gpio-coin.log
+```
+
+---
+
+## 10. System Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   Orange Pi One                      │
+│                                                      │
+│  ┌──────────┐    ┌──────────┐    ┌──────────────┐   │
+│  │ hostapd  │    │ dnsmasq  │    │   lighttpd   │   │
+│  │ (WiFi AP)│    │(DHCP+DNS)│    │ (Web Server) │   │
+│  └────┬─────┘    └────┬─────┘    └──────┬───────┘   │
+│       │               │                  │           │
+│       │    ┌──────────┴────────┐         │           │
+│       │    │    iptables       │         │           │
+│       │    │ (NAT + Captive    │         │           │
+│       │    │  Portal + Auth)   │         │           │
+│       │    └──────────┬────────┘         │           │
+│       │               │                  │           │
+│  ┌────┴─────┐    ┌────┴──────────┐  ┌───┴────────┐  │
+│  │  wlan0   │    │     eth0      │  │  GPIO Pin 7│  │
+│  │ (WiFi AP)│    │  (Internet)   │  │ (Coin Slot)│  │
+│  └──────────┘    └───────────────┘  └─────┬──────┘  │
+│                                            │         │
+│  ┌──────────────────┐  ┌──────────────────┴───────┐  │
+│  │ GPIO Coin        │  │ Session Manager          │  │
+│  │ Listener         │──│ (time tracking, iptables │  │
+│  │ (gpio-coin-      │  │  client auth, stats)     │  │
+│  │  listener)       │  │                          │  │
+│  └──────────────────┘  └──────────────────────────┘  │
+│                              │                       │
+│                    ┌─────────┴─────────┐             │
+│                    │ API Status Update │             │
+│                    │ (status.json)     │             │
+│                    └─────────┬─────────┘             │
+│                              │                       │
+│                    ┌─────────┴─────────┐             │
+│                    │  index.html       │             │
+│                    │ (Portal Frontend) │             │
+│                    │ (polls status.json│             │
+│                    │  every 2 seconds) │             │
+│                    └───────────────────┘             │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+## 11. File Locations Reference
+
+| File | Path | Purpose |
+|------|------|---------|
+| Web Portal | `/var/www/html/index.html` | Captive portal page |
+| hostapd config | `/etc/hostapd/hostapd.conf` | WiFi AP settings |
+| dnsmasq config | `/etc/dnsmasq.conf` | DHCP + DNS redirect |
+| lighttpd config | `/etc/lighttpd/lighttpd.conf` | Web server settings |
+| iptables rules | `/etc/iptables/pisowifi.rules.sh` | Firewall/NAT rules |
+| GPIO listener | `/usr/local/bin/gpio-coin-listener` | Coin detection daemon |
+| Session manager | `/usr/local/bin/pisowifi-session-manager` | Session + auth manager |
+| API updater | `/usr/local/bin/pisowifi-api-update` | JSON status generator |
+| Control script | `/usr/local/bin/pisowifi-ctl` | Service control |
+| Session data | `/var/lib/pisowifi/sessions/` | Active session files |
+| Statistics | `/var/lib/pisowifi/stats` | Earnings/coin counters |
+| GPIO log | `/var/log/pisowifi/gpio-coin.log` | Coin detection log |
+| Session log | `/var/log/pisowifi/session.log` | Session activity log |
+| API status | `/var/www/html/api/status.json` | Frontend polling endpoint |
+
+---
+
+## 12. Security Notes
+
+- **Change admin password** after first login (Admin → Settings)
+- **Client isolation** is enabled in hostapd (clients can't see each other)
+- **Firewall** blocks all inbound by default except portal services
+- **Rate limiting** prevents connection flooding (20 concurrent per client)
+- For production, change the default WiFi password in hostapd.conf if needed
+- Regularly update Armbian: `apt-get update && apt-get upgrade -y`
+
+---
+
+## 13. Support
+
+- Armbian Documentation: https://docs.armbian.com/
+- Orange Pi Wiki: http://www.orangepi.org/orangepiwiki/
+- WiringOP GPIO: https://github.com/orangepi-xunlong/wiringOP

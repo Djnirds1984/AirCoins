@@ -1,10 +1,14 @@
 # AirCoins PisoWiFi - Deployment Guide
 
-## Orange Pi One Setup & Installation Instructions
+## Multi-Platform Setup & Installation Instructions
+
+**Supported Platforms:**
+- Orange Pi One (ARM) - Full hardware support with GPIO coin acceptor
+- Ubuntu/Debian x86_64 - Development mode (API testing, no GPIO hardware)
 
 ---
 
-## 1. Required Hardware
+## 1. Required Hardware (Orange Pi One)
 
 | Component | Specification |
 |-----------|--------------|
@@ -32,7 +36,9 @@ VCC (5V)        →      External 5V supply (do NOT power from Orange Pi 5V pin)
 
 ## 2. Operating System
 
-### Recommended OS
+### Option A: Orange Pi One (ARM)
+
+#### Recommended OS
 
 | OS | Version | Notes |
 |----|---------|-------|
@@ -40,7 +46,7 @@ VCC (5V)        →      External 5V supply (do NOT power from Orange Pi 5V pin)
 | Orange Pi OS | Official image | Works but less community support |
 | Raspbian (legacy) | Debian 11 | Compatible with H3-based boards |
 
-### Download Armbian for Orange Pi One
+#### Download Armbian for Orange Pi One
 
 1. Go to: https://www.armbian.com/orange-pi-one/
 2. Download the **Bookworm** (Debian 12) server image
@@ -92,9 +98,40 @@ ip link show
 apt-get install firmware-realtek    # For RTL8188/RTL8192 chipsets
 ```
 
+### Option B: Ubuntu/Debian x86_64 (Development Mode)
+
+For development and testing on a regular PC or VM.
+
+#### Requirements
+
+| Component | Specification |
+|-----------|--------------|
+| **OS** | Ubuntu 20.04+ or Debian 11+ |
+| **RAM** | 1GB minimum (2GB recommended) |
+| **Disk** | 10GB free space |
+| **Network** | Ethernet or WiFi for remote access |
+
+#### Setup
+
+```bash
+# 1. Install Ubuntu/Debian (server or desktop)
+# Download from: https://ubuntu.com/download/server
+
+# 2. Update system
+sudo apt-get update && sudo apt-get upgrade -y
+
+# 3. Ensure SSH access (optional, for remote management)
+sudo apt-get install -y openssh-server
+sudo systemctl enable ssh
+```
+
+> **Note:** On x86, GPIO and WiFi AP features are disabled. The system runs in development mode where coin events can be simulated via API calls or file-based events.
+
 ---
 
 ## 3. Quick Install (Auto Installation)
+
+The installer auto-detects your architecture (ARM or x86) and configures accordingly.
 
 ### One-Line Install from Git
 
@@ -112,16 +149,20 @@ sudo bash install.sh
 ### What the Installer Does
 
 The `install.sh` script automatically:
-1. Updates system packages
-2. Installs PostgreSQL, Go, hostapd, dnsmasq, lighttpd, iptables, WiringOP
-3. Creates PostgreSQL database and user
-4. Runs database schema migrations
-5. Builds and deploys the Go API server
-6. Deploys all configuration files
-7. Deploys the web portal (index.html, admin.html)
-8. Deploys GPIO listener and session manager
-9. Installs and enables systemd services
-10. Enables IP forwarding and configures firewall
+1. Detects architecture (ARM Orange Pi or x86 Ubuntu/Debian)
+2. Updates system packages
+3. Installs PostgreSQL, Go, lighttpd (and hostapd/dnsmasq on ARM)
+4. Creates PostgreSQL database and user
+5. Runs database schema migrations
+6. Builds and deploys the Go API server
+7. Deploys all configuration files
+8. Deploys the web portal (index.html, admin.html)
+9. Deploys GPIO listener and session manager
+10. Installs and enables systemd services
+
+**Platform-specific behavior:**
+- **ARM (Orange Pi):** Full setup with WiFi AP, GPIO, iptables
+- **x86 (Ubuntu/Debian):** Development mode - skips WiFi AP and GPIO hardware, uses file-based coin simulation
 
 > **Note:** A reboot is recommended after installation before first use.
 
@@ -248,6 +289,50 @@ tail -f /var/log/pisowifi/session.log
 3. Select the GPIO pin in the **GPIO Pin Configuration** section
 4. Click **Test Pin** to read the real pin state
 5. The result shows the actual GPIO state (HIGH/LOW) and detection method
+
+### Testing on x86 (Development Mode)
+
+On x86 systems without GPIO hardware, you can simulate coin events:
+
+#### Method 1: Via API (Recommended)
+
+```bash
+# Send a coin event directly to the Go API
+curl -X POST http://localhost:8080/api/gpio/coin \
+    -H "Content-Type: application/json" \
+    -d '{"coin_value": 5}'
+
+# Check the API is working
+curl http://localhost:8080/api/system/status
+```
+
+#### Method 2: Via File-Based Event
+
+```bash
+# The GPIO listener runs in file-based test mode on x86
+# Write a coin value to the event file to simulate a coin insertion
+echo '5' > /var/lib/pisowifi/coin_event
+
+# Monitor the log to see it processed
+tail -f /var/log/pisowifi/gpio-coin.log
+# Should show: COIN DETECTED (test mode)! Pulse #1 | Value: P5
+```
+
+#### Verify Services on x86
+
+```bash
+# Check all services are running
+sudo pisowifi-ctl status
+
+# Check Go API is responding
+curl -I http://localhost:8080/api/system/status
+
+# Check web portal
+curl -I http://localhost
+
+# View logs
+sudo pisowifi-ctl logs
+```
 
 ---
 
@@ -421,6 +506,8 @@ tail -f /var/log/pisowifi/gpio-coin.log
 
 ## 10. System Architecture
 
+### ARM (Orange Pi One) - Full Hardware
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Orange Pi One                            │
@@ -478,37 +565,82 @@ tail -f /var/log/pisowifi/gpio-coin.log
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### x86 (Ubuntu/Debian) - Development Mode
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Ubuntu/Debian x86_64                          │
+│                                                                  │
+│  ┌──────────────────────────┐                                    │
+│  │        lighttpd          │                                    │
+│  │   (Web Server + Proxy)   │                                    │
+│  └──────────┬───────────────┘                                    │
+│             │                                                    │
+│  ┌──────────┴────────────────────────────────────────────────┐   │
+│  │  /api/* → Go API :8080 (reverse proxy)                    │   │
+│  └──────────────────────────┬────────────────────────────────┘   │
+│                              │                                   │
+│  ┌──────────────────┐        │                                   │
+│  │ GPIO Listener    │        │                                   │
+│  │ (file-based test │────────│  (no real GPIO - reads from      │
+│  │  mode)           │        │   /var/lib/pisowifi/coin_event)   │
+│  └──────────────────┘        │                                   │
+│                              │                                   │
+│  ┌──────────────────┐        │                                   │
+│  │ Session Manager  │────────│                                   │
+│  └──────────────────┘        │                                   │
+│                              │                                   │
+│           ┌──────────────────┴────────────────┐                   │
+│           │       PostgreSQL Database         │                   │
+│           │  (all data persisted here)        │                   │
+│           └───────────────────────────────────┘                   │
+│                                                                  │
+│           ┌───────────────────────────────────┐                   │
+│           │  Frontend (HTML/JS)               │                   │
+│           │  - index.html (Customer Portal)   │                   │
+│           │  - admin.html (Admin Dashboard)   │                   │
+│           │  Access via: http://localhost      │                   │
+│           └───────────────────────────────────┘                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+> **Note:** On x86, WiFi AP (hostapd), DHCP (dnsmasq), and iptables NAT are not configured. The web portal is accessed directly via localhost or the machine's IP address.
+
 ---
 
 ## 11. File Locations Reference
 
 | File | Path | Purpose |
 |------|------|---------|
-| Web Portal | `/var/www/html/index.html` | Captive portal page |
-| hostapd config | `/etc/hostapd/hostapd.conf` | WiFi AP settings |
-| dnsmasq config | `/etc/dnsmasq.conf` | DHCP + DNS redirect |
-| lighttpd config | `/etc/lighttpd/lighttpd.conf` | Web server settings |
-| iptables rules | `/etc/iptables/pisowifi.rules.sh` | Firewall/NAT rules |
+| Web Portal | `/var/www/html/index.html` | Customer portal page |
+| Admin Portal | `/var/www/html/admin.html` | Admin dashboard |
+| Go API binary | `/usr/local/bin/aircoins-api/aircoins-api` | REST API server |
+| lighttpd config | `/etc/lighttpd/lighttpd.conf` | Web server + reverse proxy |
+| hostapd config | `/etc/hostapd/hostapd.conf` | WiFi AP settings (ARM only) |
+| dnsmasq config | `/etc/dnsmasq.conf` | DHCP + DNS redirect (ARM only) |
+| iptables rules | `/etc/iptables/pisowifi.rules.sh` | Firewall/NAT rules (ARM only) |
 | GPIO listener | `/usr/local/bin/gpio-coin-listener` | Coin detection daemon |
 | Session manager | `/usr/local/bin/pisowifi-session-manager` | Session + auth manager |
 | API updater | `/usr/local/bin/pisowifi-api-update` | JSON status generator |
 | Control script | `/usr/local/bin/pisowifi-ctl` | Service control |
-| Session data | `/var/lib/pisowifi/sessions/` | Active session files |
-| Statistics | `/var/lib/pisowifi/stats` | Earnings/coin counters |
+| Database schema | Source: `system/database/schema.sql` | PostgreSQL tables |
+| GPIO config | `/var/lib/pisowifi/gpio_config` | GPIO pin settings |
+| Coin event file | `/var/lib/pisowifi/coin_event` | Coin event (test mode on x86) |
 | GPIO log | `/var/log/pisowifi/gpio-coin.log` | Coin detection log |
 | Session log | `/var/log/pisowifi/session.log` | Session activity log |
-| API status | `/var/www/html/api/status.json` | Frontend polling endpoint |
 
 ---
 
 ## 12. Security Notes
 
 - **Change admin password** after first login (Admin → Settings)
-- **Client isolation** is enabled in hostapd (clients can't see each other)
-- **Firewall** blocks all inbound by default except portal services
-- **Rate limiting** prevents connection flooding (20 concurrent per client)
+- **Default credentials:** admin / admin123 (change immediately on production)
+- **ARM:** Client isolation is enabled in hostapd (clients can't see each other)
+- **ARM:** Firewall blocks all inbound by default except portal services
+- **ARM:** Rate limiting prevents connection flooding (20 concurrent per client)
 - For production, change the default WiFi password in hostapd.conf if needed
-- Regularly update Armbian: `apt-get update && apt-get upgrade -y`
+- Regularly update system: `apt-get update && apt-get upgrade -y`
+- **x86:** For development only - do not expose to untrusted networks
 
 ---
 
@@ -517,3 +649,5 @@ tail -f /var/log/pisowifi/gpio-coin.log
 - Armbian Documentation: https://docs.armbian.com/
 - Orange Pi Wiki: http://www.orangepi.org/orangepiwiki/
 - WiringOP GPIO: https://github.com/orangepi-xunlong/wiringOP
+- Go: https://go.dev/doc/
+- PostgreSQL: https://www.postgresql.org/docs/

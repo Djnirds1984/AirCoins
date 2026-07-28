@@ -167,12 +167,41 @@ elif [ -d /sys/class/gpio ]; then
     done
 
 # ============================================
-# NO GPIO AVAILABLE - FATAL ERROR
+# METHOD 3: File-based test mode (x86 / no GPIO)
 # ============================================
+# For development/testing on x86 or systems without GPIO
+# Simulate coins by writing to the event file:
+#   echo '5' > /var/lib/pisowifi/coin_event
 else
-    log "FATAL: No GPIO interface available!"
-    log "Ensure WiringOP is installed: apt-get install wiringop"
-    log "Or sysfs GPIO is available at /sys/class/gpio"
-    echo "FATAL: No GPIO hardware found. Cannot start coin listener." >&2
-    exit 1
+    log "No GPIO hardware found - running in FILE-BASED TEST MODE"
+    log "To simulate a coin: echo '<coin_value>' > $EVENT_FILE"
+    log "  Example: echo '5' > $EVENT_FILE  (for P5 coin)"
+
+    COIN_COUNT=0
+
+    while true; do
+        # Check if event file has content
+        if [ -f "$EVENT_FILE" ]; then
+            event_content=$(cat "$EVENT_FILE" 2>/dev/null)
+            > "$EVENT_FILE"  # Clear the file
+
+            coin_value=$(echo "$event_content" | awk '{print $1}')
+
+            if [ -n "$coin_value" ] && [ "$coin_value" != "0" ] && [ "$coin_value" -gt 0 ] 2>/dev/null; then
+                COIN_COUNT=$((COIN_COUNT + 1))
+                log "COIN DETECTED (test mode)! Pulse #$COIN_COUNT | Value: P$coin_value"
+
+                # Send coin event to Go API
+                curl -s -X POST http://localhost:8080/api/gpio/coin \
+                    -H "Content-Type: application/json" \
+                    -d "{\"coin_value\": $coin_value}" > /dev/null 2>&1 &
+
+                # Update state
+                echo "$COIN_COUNT" > "$STATE_FILE"
+            fi
+        fi
+
+        # Poll interval (100ms for responsive test mode)
+        sleep 0.1
+    done
 fi

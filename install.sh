@@ -182,7 +182,7 @@ echo -e "${YELLOW}[4/10]${NC} Building Go API server..."
 cd "$SYSTEM_DIR/usr/local/bin/aircoins-api"
 
 # Download dependencies
-go mod download
+go mod tidy
 
 # Build the binary
 go build -o aircoins-api .
@@ -546,7 +546,7 @@ echo -e "${YELLOW}[4/10]${NC} Building Go API server..."
 cd "$SYSTEM_DIR/usr/local/bin/aircoins-api"
 
 # Download dependencies
-go mod download
+go mod tidy
 
 # Build the binary
 go build -o aircoins-api .

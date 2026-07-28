@@ -75,6 +75,38 @@ if [ "$IS_X86" = true ]; then
 fi
 
 # ============================================
+# VALIDATE PROJECT STRUCTURE
+# ============================================
+if [ ! -d "$SYSTEM_DIR" ]; then
+    echo -e "${RED}ERROR: Project structure not found!${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Current directory:${NC} $SCRIPT_DIR"
+    echo -e "  ${YELLOW}Expected:${NC} $SYSTEM_DIR"
+    echo ""
+    echo -e "  ${RED}This script must be run from inside the AirCoins project directory.${NC}"
+    echo ""
+    echo -e "  ${CYAN}Fix:${NC}"
+    echo -e "    cd /opt/AirCoins         # Navigate to project directory"
+    echo -e "    sudo bash install.sh     # Run installer from there"
+    echo ""
+    exit 1
+fi
+
+if [ ! -d "$SYSTEM_DIR/usr/local/bin/aircoins-api" ]; then
+    echo -e "${RED}ERROR: Go API source not found!${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Missing:${NC} $SYSTEM_DIR/usr/local/bin/aircoins-api"
+    echo ""
+    echo -e "  ${RED}The project may be incomplete. Please clone the full repository:${NC}"
+    echo ""
+    echo -e "    git clone https://github.com/Djnirds1984/AirCoins.git /opt/AirCoins"
+    echo -e "    cd /opt/AirCoins"
+    echo -e "    sudo bash install.sh"
+    echo ""
+    exit 1
+fi
+
+# ============================================
 # STEP 1: Update system
 # ============================================
 echo -e "${YELLOW}[1/10]${NC} Updating system packages..."

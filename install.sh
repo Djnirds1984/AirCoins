@@ -107,6 +107,35 @@ if [ ! -d "$SYSTEM_DIR/usr/local/bin/aircoins-api" ]; then
 fi
 
 # ============================================
+# STOP EXISTING SERVICES (reinstall safety)
+# ============================================
+# On a reinstall the running aircoins-api binary holds a file lock, which makes
+# the STEP 4 'cp' fail with "Text file busy". Stop everything before copying.
+stop_existing_services() {
+    echo -e "${YELLOW}Stopping existing services...${NC}"
+
+    # Prefer the control script if a previous install left one behind
+    if command -v pisowifi-ctl &> /dev/null; then
+        pisowifi-ctl stop 2>/dev/null || true
+    fi
+
+    # Stop systemd units (ignore errors if a unit does not exist yet)
+    systemctl stop aircoins-api gpio-coin-listener pisowifi-session lighttpd hostapd dnsmasq 2>/dev/null || true
+
+    # Kill any leftover processes by name as a fallback
+    pkill -f aircoins-api 2>/dev/null || true
+    pkill -f pisowifi-session 2>/dev/null || true
+    pkill -f gpio-coin-listener 2>/dev/null || true
+
+    # Give processes a moment to release file locks
+    sleep 1
+
+    echo -e "${GREEN}  ✓ Existing services stopped${NC}"
+}
+
+stop_existing_services
+
+# ============================================
 # STEP 1: Update system
 # ============================================
 echo -e "${YELLOW}[1/10]${NC} Updating system packages..."
@@ -503,6 +532,35 @@ echo "  ║     AirCoins PisoWiFi System v$VERSION     ║"
 echo "  ║     Orange Pi One Installer              ║"
 echo "  ╚══════════════════════════════════════════╝"
 echo -e "${NC}"
+
+# ============================================
+# STOP EXISTING SERVICES (reinstall safety)
+# ============================================
+# On a reinstall the running aircoins-api binary holds a file lock, which makes
+# the STEP 4 'cp' fail with "Text file busy". Stop everything before copying.
+stop_existing_services() {
+    echo -e "${YELLOW}Stopping existing services...${NC}"
+
+    # Prefer the control script if a previous install left one behind
+    if command -v pisowifi-ctl &> /dev/null; then
+        pisowifi-ctl stop 2>/dev/null || true
+    fi
+
+    # Stop systemd units (ignore errors if a unit does not exist yet)
+    systemctl stop aircoins-api gpio-coin-listener pisowifi-session lighttpd hostapd dnsmasq 2>/dev/null || true
+
+    # Kill any leftover processes by name as a fallback
+    pkill -f aircoins-api 2>/dev/null || true
+    pkill -f pisowifi-session 2>/dev/null || true
+    pkill -f gpio-coin-listener 2>/dev/null || true
+
+    # Give processes a moment to release file locks
+    sleep 1
+
+    echo -e "${GREEN}  ✓ Existing services stopped${NC}"
+}
+
+stop_existing_services
 
 # ============================================
 # STEP 1: Update system

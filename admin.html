@@ -1499,6 +1499,7 @@
                                 <th>IP Address</th>
                                 <th>Description</th>
                                 <th>Portal</th>
+                                <th>DHCP</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -3243,6 +3244,7 @@ async function loadVLANs() {
                     <td>${v.ip}</td>
                     <td>${v.description || '-'}</td>
                     <td>${v.is_portal ? '<span class="badge badge-success">Portal</span>' : '-'}</td>
+                    <td>${v.dhcp_active ? '<span class="badge badge-success">Active</span>' : '<span style="color:#888;">Inactive</span>'}</td>
                     <td>
                         <button class="btn-danger btn-sm" onclick="deleteVLAN('${v.interface}', ${v.vlan_id})">Delete</button>
                     </td>
@@ -3288,7 +3290,16 @@ async function createVLAN() {
             description: desc,
             is_portal: isPortal
         });
-        showNotification(`VLAN ${vlanId} created on ${iface}`, 'success');
+        // Show DHCP range info in success message
+        const netParts = (netmask || '255.255.255.0').split('.').map(Number);
+        const cidr = netParts.reduce((a, o) => a + ((o >>> 0).toString(2).split('1').length - 1), 0);
+        const ipParts = ip.split('.').map(Number);
+        const mask = cidr === 0 ? 0 : (~0 << (32 - cidr)) >>> 0;
+        const base = ((ipParts[0]<<24 | ipParts[1]<<16 | ipParts[2]<<8 | ipParts[3]) & mask) >>> 0;
+        const s = base + 100, e = base + 200;
+        const sIP = `${(s>>24)&255}.${(s>>16)&255}.${(s>>8)&255}.${s&255}`;
+        const eIP = `${(e>>24)&255}.${(e>>16)&255}.${(e>>8)&255}.${e&255}`;
+        showNotification(`VLAN ${vlanId} created on ${iface}. DHCP range: ${sIP} – ${eIP}`, 'success');
         // Clear form
         document.getElementById('vlan-id').value = '';
         document.getElementById('vlan-ip').value = '';

@@ -143,6 +143,7 @@ type VLANInfo struct {
 	Description string `json:"description"`
 	IsPortal    bool   `json:"is_portal"`
 	Active      bool   `json:"active"`
+	DHCPActive  bool   `json:"dhcp_active"`
 }
 
 type InterfaceInfo struct {

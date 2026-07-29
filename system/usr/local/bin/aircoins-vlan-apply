@@ -36,6 +36,12 @@ while IFS= read -r line; do
     # Bring up
     ip link set "$name" up 2>/dev/null
 
+    # Start DHCP for this VLAN if a dnsmasq config exists
+    if [ -f "/etc/dnsmasq.d/${name}.conf" ]; then
+        systemctl start "dnsmasq@${name}" 2>/dev/null
+        logger -t aircoins-vlan "Started DHCP for $name"
+    fi
+
     logger -t aircoins-vlan "Restored VLAN $name ($cidr)"
 done < "$CONF"
 

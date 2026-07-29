@@ -161,7 +161,8 @@ if [ "$IS_ARM" = true ]; then
         postgresql \
         postgresql-contrib \
         golang-go \
-        vlan
+        vlan \
+        dnsmasq
 else
     # x86 installation
     apt-get install -y -qq \
@@ -173,7 +174,8 @@ else
         postgresql \
         postgresql-contrib \
         golang-go \
-        vlan
+        vlan \
+        dnsmasq
 fi
 
 echo -e "${GREEN}  ✓ Packages installed${NC}"
@@ -181,6 +183,10 @@ echo -e "${GREEN}  ✓ Packages installed${NC}"
 # VLAN support
 modprobe 8021q 2>/dev/null || true
 grep -q "^8021q" /etc/modules 2>/dev/null || echo "8021q" >> /etc/modules
+
+# Disable the default dnsmasq service — we use per-interface instances via dnsmasq@.service
+systemctl disable dnsmasq 2>/dev/null || true
+systemctl stop dnsmasq 2>/dev/null || true
 
 # ============================================
 # STEP 3: Setup PostgreSQL Database
@@ -414,6 +420,10 @@ mkdir -p /var/log/pisowifi
 # Service files
 cp "$SYSTEM_DIR/etc/systemd/system/aircoins-api.service" /etc/systemd/system/
 cp "$SYSTEM_DIR/etc/systemd/system/aircoins-vlans.service" /etc/systemd/system/
+
+# dnsmasq template service for per-VLAN DHCP
+cp "$SYSTEM_DIR/etc/systemd/system/dnsmasq@.service" /etc/systemd/system/
+mkdir -p /etc/dnsmasq.d
 
 if [ "$IS_ARM" = true ]; then
     cp "$SYSTEM_DIR/etc/systemd/system/gpio-coin-listener.service" /etc/systemd/system/

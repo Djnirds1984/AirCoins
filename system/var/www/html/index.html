@@ -820,6 +820,8 @@
         let gpio = {
             countdownInterval: null,
             countdown: 60,
+            expiresAt: 0,
+            statusInterval: null,
             coins: [],
             totalAmount: 0,
             totalSeconds: 0,
@@ -853,6 +855,46 @@
 
         // ==================== GPIO COIN LISTENER ====================
 
+        // Coin slot arm/disarm API — the backend GPIO listener only
+        // polls the coin slot while the armed window is open.
+        const COINSLOT_ARM_SEC = 60;
+        const COINSLOT_ARM_URL = '/api/coinslot/arm';
+        const COINSLOT_DISARM_URL = '/api/coinslot/disarm';
+        const COINSLOT_STATUS_URL = '/api/coinslot/status';
+
+        function coinslotArm(durationSec) {
+            return fetch(COINSLOT_ARM_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ duration_sec: durationSec })
+            }).then(r => r.json()).catch(() => null);
+        }
+
+        function coinslotDisarm() {
+            fetch(COINSLOT_DISARM_URL, { method: 'POST' }).catch(() => {});
+        }
+
+        // Poll coin slot status while the modal is open so the countdown
+        // follows backend extensions (+30s per detected coin)
+        function startCoinslotStatusPolling() {
+            if (gpio.statusInterval) clearInterval(gpio.statusInterval);
+            gpio.statusInterval = setInterval(() => {
+                if (!gpio.active) {
+                    clearInterval(gpio.statusInterval);
+                    gpio.statusInterval = null;
+                    return;
+                }
+                fetch(COINSLOT_STATUS_URL + '?t=' + Date.now())
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.armed && data.expires_at > gpio.expiresAt) {
+                            gpio.expiresAt = data.expires_at;
+                        }
+                    })
+                    .catch(() => {});
+            }, 2000);
+        }
+
         function openGpioModal() {
             if (!state.systemOnline) {
                 showNotification('System is currently offline!', 'error');
@@ -880,24 +922,35 @@
             // Open modal
             document.getElementById('gpioModal').classList.add('active');
 
-            // Start 60s countdown
+            // Arm the coin slot on the backend (GPIO listener wakes up).
+            // Local fallback expiry keeps the countdown working if the
+            // API is not reachable (dev/demo mode).
+            gpio.expiresAt = Math.floor(Date.now() / 1000) + COINSLOT_ARM_SEC;
+            coinslotArm(COINSLOT_ARM_SEC).then(data => {
+                if (data && data.armed && data.expires_at) {
+                    gpio.expiresAt = data.expires_at;
+                }
+            });
+
+            // Start countdown driven by the armed window expiry
             startGpioCountdown();
+            startCoinslotStatusPolling();
         }
 
         function startGpioCountdown() {
             if (gpio.countdownInterval) clearInterval(gpio.countdownInterval);
 
-            gpio.countdown = 60;
+            gpio.countdown = Math.max(0, gpio.expiresAt - Math.floor(Date.now() / 1000));
             updateGpioCountdownUI();
 
             gpio.countdownInterval = setInterval(() => {
-                gpio.countdown--;
+                gpio.countdown = Math.max(0, gpio.expiresAt - Math.floor(Date.now() / 1000));
                 updateGpioCountdownUI();
 
                 if (gpio.countdown <= 0) {
                     clearInterval(gpio.countdownInterval);
                     closeGpioModal();
-                    showNotification('GPIO listener timed out. No coin detected.', 'info');
+                    showNotification('Coin slot timed out. No coin detected.', 'info');
                 }
             }, 1000);
         }
@@ -907,7 +960,7 @@
 
             // Update ring progress (circumference = 2 * PI * 55 = 345.58)
             const circumference = 345.58;
-            const offset = circumference - (gpio.countdown / 60) * circumference;
+            const offset = Math.max(0, circumference - (gpio.countdown / 60) * circumference);
             document.getElementById('gpioCountdownCircle').style.strokeDashoffset = offset;
 
             // Change color when low
@@ -924,13 +977,12 @@
         function handleGpioCoin(amount) {
             if (!gpio.active) return;
 
-            // Reset 60s countdown
-            gpio.countdown = 60;
+            // The GPIO listener extends the armed window +30s per coin;
+            // mirror that locally so the countdown doesn't cut off
+            const nowSec = Math.floor(Date.now() / 1000);
+            gpio.expiresAt = Math.max(gpio.expiresAt, nowSec + 30);
+            gpio.countdown = Math.max(0, gpio.expiresAt - nowSec);
             updateGpioCountdownUI();
-
-            // Clear old interval and restart
-            clearInterval(gpio.countdownInterval);
-            startGpioCountdown();
 
             // Add coin
             const minutes = state.pricing[amount];
@@ -1022,7 +1074,12 @@
 
         function closeGpioModal() {
             clearInterval(gpio.countdownInterval);
+            if (gpio.statusInterval) {
+                clearInterval(gpio.statusInterval);
+                gpio.statusInterval = null;
+            }
             gpio.active = false;
+            coinslotDisarm();
             document.getElementById('gpioModal').classList.remove('active');
         }
 
@@ -1031,9 +1088,7 @@
             gpio.coins = [];
             gpio.totalAmount = 0;
             gpio.totalSeconds = 0;
-            clearInterval(gpio.countdownInterval);
-            gpio.active = false;
-            document.getElementById('gpioModal').classList.remove('active');
+            closeGpioModal();
             showNotification('Coin insertion cancelled', 'info');
         }
 

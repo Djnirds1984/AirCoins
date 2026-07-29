@@ -34,6 +34,7 @@ func main() {
 	pricingHandler := &handlers.PricingHandler{DB: models.DB}
 	systemHandler := &handlers.SystemHandler{DB: models.DB}
 	reportsHandler := &handlers.ReportsHandler{DB: models.DB}
+	coinslotHandler := &handlers.CoinslotHandler{}
 
 	// Setup routes
 	mux := http.NewServeMux()
@@ -63,6 +64,11 @@ func main() {
 	mux.HandleFunc("/api/gpio/config", gpioHandler.Config)
 	mux.HandleFunc("/api/gpio/test", gpioHandler.Test)
 	mux.HandleFunc("/api/gpio/coin", gpioHandler.Coin)
+
+	// Coin slot arm/disarm routes (PUBLIC - used by captive portal customers)
+	mux.HandleFunc("/api/coinslot/arm", coinslotHandler.Arm)
+	mux.HandleFunc("/api/coinslot/disarm", coinslotHandler.Disarm)
+	mux.HandleFunc("/api/coinslot/status", coinslotHandler.Status)
 
 	// Pricing routes
 	mux.HandleFunc("/api/pricing", pricingHandler.Handle)

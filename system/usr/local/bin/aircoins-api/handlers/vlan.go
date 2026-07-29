@@ -96,6 +96,7 @@ func VLANList(w http.ResponseWriter, r *http.Request) {
 		if cfg, ok := cfgMap[key]; ok {
 			activeVLANs[i].Description = cfg.Description
 			activeVLANs[i].IsPortal = cfg.IsPortal
+			activeVLANs[i].StartIP = cfg.StartIP
 			if cfg.IP != "" && activeVLANs[i].IP == "" {
 				activeVLANs[i].IP = cfg.IP
 			}
@@ -104,25 +105,62 @@ func VLANList(w http.ResponseWriter, r *http.Request) {
 
 	// Auto-start DHCP for active VLANs that have a dnsmasq config but no DHCP running.
 	// This handles VLANs created before the DHCP auto-start feature was added.
+	// If the existing config is outdated (missing bind-dynamic), regenerate it with
+	// the current fix set (port=0, bind-dynamic) before starting the service.
 	for i := range activeVLANs {
 		if activeVLANs[i].DHCPActive {
 			continue
 		}
 		confPath := fmt.Sprintf("/etc/dnsmasq.d/%s.conf", activeVLANs[i].Name)
-		if _, err := os.Stat(confPath); err != nil {
+		confBytes, err := os.ReadFile(confPath)
+		if err != nil {
 			continue
 		}
-		log.Printf("VLANList: VLAN %s is active but DHCP is not running; attempting auto-start", activeVLANs[i].Name)
+
+		// Determine the start_ip from the saved config entry (if available)
+		key := fmt.Sprintf("%s.%d", activeVLANs[i].Interface, activeVLANs[i].VLANID)
+		var startIP string
+		if cfg, ok := cfgMap[key]; ok {
+			startIP = cfg.StartIP
+		}
+
+		needsRegen := !strings.Contains(string(confBytes), "bind-dynamic")
 		unitName := fmt.Sprintf("dnsmasq@%s", activeVLANs[i].Name)
-		if out, err := exec.Command("systemctl", "start", unitName).CombinedOutput(); err != nil {
-			log.Printf("VLANList: auto-start DHCP failed for %s: %v — %s", activeVLANs[i].Name, err, string(out))
-			continue
+
+		if needsRegen {
+			log.Printf("VLANList: VLAN %s has outdated dnsmasq config (missing bind-dynamic); regenerating", activeVLANs[i].Name)
+			// Extract vlanID from the interface name (e.g. "end0.13" → 13)
+			vid := activeVLANs[i].VLANID
+			ipCIDR := activeVLANs[i].IP
+			if ipCIDR == "" {
+				// Fall back to saved config IP
+				if cfg, ok := cfgMap[key]; ok {
+					ipCIDR = cfg.IP
+				}
+			}
+			if ipCIDR == "" {
+				log.Printf("VLANList: cannot regenerate config for %s: no IP available", activeVLANs[i].Name)
+				continue
+			}
+			// startDHCP stops the old service, writes new config, and starts it
+			if err := startDHCP(activeVLANs[i].Name, vid, ipCIDR, startIP); err != nil {
+				log.Printf("VLANList: failed to regenerate+restart DHCP for %s: %v", activeVLANs[i].Name, err)
+				continue
+			}
+			activeVLANs[i].DHCPActive = true
+			log.Printf("VLANList: regenerated and restarted DHCP for %s", activeVLANs[i].Name)
+		} else {
+			log.Printf("VLANList: VLAN %s is active but DHCP is not running; attempting auto-start", activeVLANs[i].Name)
+			if out, err := exec.Command("systemctl", "start", unitName).CombinedOutput(); err != nil {
+				log.Printf("VLANList: auto-start DHCP failed for %s: %v — %s", activeVLANs[i].Name, err, string(out))
+				continue
+			}
+			if out, err := exec.Command("systemctl", "enable", unitName).CombinedOutput(); err != nil {
+				log.Printf("VLANList: auto-start: warning: failed to enable %s: %v — %s", unitName, err, string(out))
+			}
+			log.Printf("VLANList: auto-started DHCP for %s", activeVLANs[i].Name)
+			activeVLANs[i].DHCPActive = true
 		}
-		if out, err := exec.Command("systemctl", "enable", unitName).CombinedOutput(); err != nil {
-			log.Printf("VLANList: auto-start: warning: failed to enable %s: %v — %s", unitName, err, string(out))
-		}
-		log.Printf("VLANList: auto-started DHCP for %s", activeVLANs[i].Name)
-		activeVLANs[i].DHCPActive = true
 	}
 
 	// Build a set of active VLAN keys for quick lookup
@@ -144,6 +182,7 @@ func VLANList(w http.ResponseWriter, r *http.Request) {
 				Description: cfg.Description,
 				IsPortal:    cfg.IsPortal,
 				Active:      false,
+				StartIP:     cfg.StartIP,
 			})
 		}
 	}
@@ -236,13 +275,13 @@ func VLANCreate(w http.ResponseWriter, r *http.Request) {
 
 	if err == sql.ErrNoRows {
 		_, err = models.DB.Exec(
-			"INSERT INTO vlan_config (interface, vlan_id, ip_address, description, is_portal) VALUES ($1,$2,$3,$4,$5)",
-			req.Interface, req.VLANID, ipCIDR, req.Description, req.IsPortal,
+			"INSERT INTO vlan_config (interface, vlan_id, ip_address, start_ip, description, is_portal) VALUES ($1,$2,$3,$4,$5,$6)",
+			req.Interface, req.VLANID, ipCIDR, req.StartIP, req.Description, req.IsPortal,
 		)
 	} else if err == nil {
 		_, err = models.DB.Exec(
-			"UPDATE vlan_config SET ip_address=$3, description=$4, is_portal=$5 WHERE interface=$1 AND vlan_id=$2",
-			req.Interface, req.VLANID, ipCIDR, req.Description, req.IsPortal,
+			"UPDATE vlan_config SET ip_address=$3, start_ip=$4, description=$5, is_portal=$6 WHERE interface=$1 AND vlan_id=$2",
+			req.Interface, req.VLANID, ipCIDR, req.StartIP, req.Description, req.IsPortal,
 		)
 	}
 	if err != nil {
@@ -254,13 +293,14 @@ func VLANCreate(w http.ResponseWriter, r *http.Request) {
 		Interface:   req.Interface,
 		VLANID:      req.VLANID,
 		IP:          ipCIDR,
+		StartIP:     req.StartIP,
 		Description: req.Description,
 		IsPortal:    req.IsPortal,
 	})
 
 	// Start DHCP (dnsmasq) for this VLAN
 	dhcpActive := false
-	if err := startDHCP(vlanName, req.VLANID, ipCIDR); err != nil {
+	if err := startDHCP(vlanName, req.VLANID, ipCIDR, req.StartIP); err != nil {
 		log.Printf("VLANCreate: DHCP failed for %s: %v", vlanName, err)
 	} else {
 		dhcpActive = true
@@ -275,6 +315,7 @@ func VLANCreate(w http.ResponseWriter, r *http.Request) {
 		IsPortal:    req.IsPortal,
 		Active:      true,
 		DHCPActive:  dhcpActive,
+		StartIP:     req.StartIP,
 	}
 
 	sendJSON(w, http.StatusOK, map[string]interface{}{"success": true, "vlan": vlan})
@@ -438,13 +479,17 @@ type vlanConfigEntry struct {
 	Interface   string
 	VLANID      int
 	IP          string
+	StartIP     string
 	Description string
 	IsPortal    bool
 }
 
 // readVLANConfig reads all entries from /etc/pisowifi/vlans.conf.
-// Format: interface vlan_id ip/cidr description [portal]
-// Example: eth0 100 192.168.100.1/24 Portal VLAN portal
+// New format: interface vlan_id ip/cidr start_ip description [portal]
+// Old format: interface vlan_id ip/cidr description [portal]
+// start_ip is "-" when not set; old files without start_ip are still supported.
+// Example (new): eth0 100 192.168.100.1/24 - Portal VLAN portal
+// Example (old): eth0 100 192.168.100.1/24 Portal VLAN portal
 func readVLANConfig() []vlanConfigEntry {
 	f, err := os.Open(vlanConfigPath)
 	if err != nil {
@@ -460,8 +505,6 @@ func readVLANConfig() []vlanConfigEntry {
 			continue
 		}
 
-		// Split into at most 5 fields; description may contain spaces only if
-		// it is the 4th token and everything up to the optional "portal" flag.
 		parts := strings.Fields(line)
 		if len(parts) < 3 {
 			continue
@@ -478,9 +521,30 @@ func readVLANConfig() []vlanConfigEntry {
 			IP:        parts[2],
 		}
 
-		// Remaining tokens: description words + optional "portal" flag
+		// Determine whether parts[3] is a start_ip field (new format) or
+		// the beginning of the description (old format).
+		// New-format indicator: parts[3] is "-" or a valid IP address.
+		var rest []string
 		if len(parts) > 3 {
-			rest := parts[3:]
+			candidate := parts[3]
+			isStartIP := candidate == "-"
+			if !isStartIP && net.ParseIP(candidate) != nil {
+				isStartIP = true
+			}
+			if isStartIP {
+				// New format: parts[3] = start_ip
+				if candidate != "-" {
+					entry.StartIP = candidate
+				}
+				rest = parts[4:]
+			} else {
+				// Old format: no start_ip column
+				rest = parts[3:]
+			}
+		}
+
+		// Remaining tokens: description words + optional "portal" flag
+		if len(rest) > 0 {
 			if rest[len(rest)-1] == "portal" {
 				entry.IsPortal = true
 				rest = rest[:len(rest)-1]
@@ -509,7 +573,11 @@ func writeVLANConfig(entries []vlanConfigEntry) {
 	defer f.Close()
 
 	for _, e := range entries {
-		line := fmt.Sprintf("%s %d %s %s", e.Interface, e.VLANID, e.IP, e.Description)
+		startIPCol := "-"
+		if e.StartIP != "" {
+			startIPCol = e.StartIP
+		}
+		line := fmt.Sprintf("%s %d %s %s %s", e.Interface, e.VLANID, e.IP, startIPCol, e.Description)
 		if e.IsPortal {
 			line += " portal"
 		}
@@ -594,9 +662,10 @@ func netmaskToCIDR(mask string) (int, error) {
 }
 
 // calculateDHCPRange returns a dnsmasq dhcp-range string for the given CIDR.
-// e.g. "10.0.13.1/24" → "10.0.13.100,10.0.13.200,12h"
-// The range is network+100 to network+200 within the subnet.
-func calculateDHCPRange(ipCIDR string) string {
+// e.g. "10.0.13.1/24", "" → "10.0.13.100,10.0.13.200,12h"
+// If startIP is non-empty and valid within the subnet, it is used as the first
+// address in the range; otherwise the default offset (network+100) is used.
+func calculateDHCPRange(ipCIDR string, startIP string) string {
 	ip, ipNet, err := net.ParseCIDR(ipCIDR)
 	if err != nil {
 		return ""
@@ -609,15 +678,41 @@ func calculateDHCPRange(ipCIDR string) string {
 		return ""
 	}
 
-	// Convert network to uint32, add offsets, convert back
+	// Convert network to uint32
 	base := uint32(network[0])<<24 | uint32(network[1])<<16 | uint32(network[2])<<8 | uint32(network[3])
-	start := base + 100
-	end := base + 200
 
-	startIP := net.IPv4(byte(start>>24), byte(start>>16), byte(start>>8), byte(start))
-	endIP := net.IPv4(byte(end>>24), byte(end>>16), byte(end>>8), byte(end))
+	// Compute subnet size for bounds checking
+	ones, bits := ipNet.Mask.Size()
+	hostBits := uint(bits - ones)
+	maxHost := (uint32(1) << hostBits) - 1 // e.g. 255 for /24
 
-	return fmt.Sprintf("%s,%s,12h", startIP, endIP)
+	// Determine start offset
+	var startOffset uint32 = 100 // default
+	if startIP != "" {
+		parsed := net.ParseIP(startIP)
+		if parsed != nil {
+			p4 := parsed.To4()
+			if p4 != nil && ipNet.Contains(parsed) {
+				ipVal := uint32(p4[0])<<24 | uint32(p4[1])<<16 | uint32(p4[2])<<8 | uint32(p4[3])
+				offset := ipVal - base
+				if offset > 0 && offset < maxHost {
+					startOffset = offset
+				}
+			}
+		}
+	}
+
+	start := base + startOffset
+	end := base + startOffset + 100
+	// Clamp end to broadcast-1
+	if end-base >= maxHost {
+		end = base + maxHost - 1
+	}
+
+	startAddr := net.IPv4(byte(start>>24), byte(start>>16), byte(start>>8), byte(start))
+	endAddr := net.IPv4(byte(end>>24), byte(end>>16), byte(end>>8), byte(end))
+
+	return fmt.Sprintf("%s,%s,12h", startAddr, endAddr)
 }
 
 // isDHCPActive checks whether the dnsmasq template instance is active for a
@@ -628,10 +723,12 @@ func isDHCPActive(vlanName string) bool {
 }
 
 // startDHCP writes a dnsmasq config for the VLAN and starts+enables the template service.
+// It stops any running instance before writing the new config to avoid stale state.
+// startIP may be empty to use the default offset (network+100).
 // Returns nil on success, or an error describing what went wrong.
-func startDHCP(vlanName string, vlanID int, ipCIDR string) error {
+func startDHCP(vlanName string, vlanID int, ipCIDR string, startIP string) error {
 	gateway := strings.Split(ipCIDR, "/")[0]
-	dhcpRange := calculateDHCPRange(ipCIDR)
+	dhcpRange := calculateDHCPRange(ipCIDR, startIP)
 	if dhcpRange == "" {
 		err := fmt.Errorf("could not calculate DHCP range for %s", ipCIDR)
 		log.Printf("startDHCP: %v", err)
@@ -640,7 +737,8 @@ func startDHCP(vlanName string, vlanID int, ipCIDR string) error {
 
 	configContent := fmt.Sprintf(`# Auto-generated by AirCoins for VLAN %d
 interface=%s
-bind-interfaces
+bind-dynamic
+port=0
 dhcp-range=%s
 dhcp-option=3,%s
 dhcp-option=6,%s
@@ -648,13 +746,20 @@ no-daemon
 `, vlanID, vlanName, dhcpRange, gateway, gateway)
 
 	configPath := fmt.Sprintf("/etc/dnsmasq.d/%s.conf", vlanName)
+	unitName := fmt.Sprintf("dnsmasq@%s", vlanName)
+
+	// Stop the existing service before writing a new config so the old
+	// process doesn't hold stale file descriptors or conflict.
+	if out, err := exec.Command("systemctl", "stop", unitName).CombinedOutput(); err != nil {
+		// Non-fatal: service may not have been running
+		log.Printf("startDHCP: note: systemctl stop %s: %v — %s", unitName, err, string(out))
+	}
+
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		err = fmt.Errorf("failed to write dnsmasq config for %s: %w", vlanName, err)
 		log.Printf("startDHCP: %v", err)
 		return err
 	}
-
-	unitName := fmt.Sprintf("dnsmasq@%s", vlanName)
 
 	if out, err := exec.Command("systemctl", "start", unitName).CombinedOutput(); err != nil {
 		err = fmt.Errorf("failed to start %s: %w — %s", unitName, err, string(out))

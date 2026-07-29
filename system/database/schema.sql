@@ -157,6 +157,7 @@ CREATE TABLE IF NOT EXISTS vlan_config (
     interface VARCHAR(20) NOT NULL,
     vlan_id INTEGER NOT NULL,
     ip_address VARCHAR(18) NOT NULL,
+    start_ip VARCHAR(15) DEFAULT '',
     description VARCHAR(100) DEFAULT '',
     is_portal BOOLEAN DEFAULT false,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

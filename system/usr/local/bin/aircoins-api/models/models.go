@@ -133,6 +133,7 @@ type VLANRequest struct {
 	Netmask     string `json:"netmask"`
 	Description string `json:"description"`
 	IsPortal    bool   `json:"is_portal"`
+	StartIP     string `json:"start_ip,omitempty"`
 }
 
 type VLANInfo struct {
@@ -144,6 +145,7 @@ type VLANInfo struct {
 	IsPortal    bool   `json:"is_portal"`
 	Active      bool   `json:"active"`
 	DHCPActive  bool   `json:"dhcp_active"`
+	StartIP     string `json:"start_ip,omitempty"`
 }
 
 type InterfaceInfo struct {

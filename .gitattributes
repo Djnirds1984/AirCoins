@@ -9,3 +9,4 @@
 *pisowifi-* text eol=lf
 *aircoins-gpio-lib text eol=lf
 *aircoins-vlan-apply text eol=lf
+*aircoins-vlans.service text eol=lf

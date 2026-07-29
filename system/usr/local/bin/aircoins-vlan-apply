@@ -5,6 +5,23 @@ CONF="/etc/pisowifi/vlans.conf"
 
 # Load 8021q kernel module
 modprobe 8021q 2>/dev/null
+sleep 1
+
+# Function: wait for interface to be UP
+wait_for_iface() {
+    local iface=$1
+    local max_wait=30
+    local waited=0
+    while [ $waited -lt $max_wait ]; do
+        if ip link show "$iface" 2>/dev/null | grep -q "state UP"; then
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    logger -t aircoins-vlan "Timeout waiting for $iface to come up"
+    return 1
+}
 
 while IFS= read -r line; do
     # Skip comments and empty lines
@@ -20,29 +37,47 @@ while IFS= read -r line; do
 
     name="${parent}.${vid}"
 
-    # Skip if already exists
-    ip link show "$name" &>/dev/null && continue
-
-    # Create VLAN interface
-    ip link add link "$parent" name "$name" type vlan id "$vid" 2>/dev/null
-    if [ $? -ne 0 ]; then
-        logger -t aircoins-vlan "Failed to create $name"
+    # Wait for parent interface
+    if ! wait_for_iface "$parent"; then
+        logger -t aircoins-vlan "Skipping $name — parent $parent not ready"
         continue
     fi
 
-    # Assign IP
+    # Create VLAN interface if not exists
+    if ! ip link show "$name" &>/dev/null; then
+        ip link add link "$parent" name "$name" type vlan id "$vid" 2>/dev/null
+        if [ $? -ne 0 ]; then
+            logger -t aircoins-vlan "Failed to create $name"
+            continue
+        fi
+        logger -t aircoins-vlan "Created VLAN $name"
+    fi
+
+    # Assign IP (may already exist from previous run)
     ip addr add "$cidr" dev "$name" 2>/dev/null
 
     # Bring up
     ip link set "$name" up 2>/dev/null
 
-    # Start DHCP for this VLAN if a dnsmasq config exists
-    if [ -f "/etc/dnsmasq.d/${name}.conf" ]; then
-        systemctl start "dnsmasq@${name}" 2>/dev/null
-        logger -t aircoins-vlan "Started DHCP for $name"
+    # Wait for VLAN interface to be UP
+    sleep 1
+    if ! ip link show "$name" 2>/dev/null | grep -q "state UP"; then
+        ip link set "$name" up 2>/dev/null
+        sleep 1
     fi
 
     logger -t aircoins-vlan "Restored VLAN $name ($cidr)"
+
+    # Start DHCP
+    if [ -f "/etc/dnsmasq.d/${name}.conf" ]; then
+        systemctl restart "dnsmasq@${name}" 2>/dev/null
+        if [ $? -ne 0 ]; then
+            sleep 2
+            systemctl restart "dnsmasq@${name}" 2>/dev/null
+        fi
+        logger -t aircoins-vlan "Started DHCP for $name"
+    fi
+
 done < "$CONF"
 
 logger -t aircoins-vlan "VLAN restore complete"

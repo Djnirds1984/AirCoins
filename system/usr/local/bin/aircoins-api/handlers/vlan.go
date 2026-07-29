@@ -46,6 +46,34 @@ func applyCaptiveRules(action, vlanName, ipCIDR string) {
 	log.Printf("applyCaptiveRules: %s captive rules for %s (%s)", action, vlanName, gateway)
 }
 
+// writeNetworkdConfig writes a per-VLAN systemd-networkd .network file so
+// networkd OWNS the static IP instead of flushing it as a foreign address on
+// every `networkctl reload`. The 04- prefix makes it win (lexically) over both
+// the 05-aircoins-vlans.network catch-all and the 10-netplan runtime config,
+// since networkd applies only the FIRST matching .network file.
+func writeNetworkdConfig(vlanName, cidr string) error {
+	content := fmt.Sprintf(`[Match]
+Name=%s
+
+[Network]
+Address=%s
+DHCP=no
+ConfigureWithoutCarrier=yes
+`, vlanName, cidr)
+	path := fmt.Sprintf("/etc/systemd/network/04-aircoins-%s.network", vlanName)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return err
+	}
+	exec.Command("networkctl", "reload").Run() // best-effort
+	return nil
+}
+
+// removeNetworkdConfig deletes the per-VLAN networkd file and reloads networkd.
+func removeNetworkdConfig(vlanName string) {
+	os.Remove(fmt.Sprintf("/etc/systemd/network/04-aircoins-%s.network", vlanName))
+	exec.Command("networkctl", "reload").Run()
+}
+
 // ============================================
 // VLAN LIST
 // ============================================
@@ -197,6 +225,17 @@ func VLANList(w http.ResponseWriter, r *http.Request) {
 		if ipCIDR != "" {
 			applyCaptiveRules("add", activeVLANs[i].Name, ipCIDR)
 		}
+
+		// Heal: make sure networkd owns the static IP so it survives
+		// `networkctl reload`. Repairs VLANs created before this fix existed.
+		netFile := fmt.Sprintf("/etc/systemd/network/04-aircoins-%s.network", activeVLANs[i].Name)
+		if _, err := os.Stat(netFile); os.IsNotExist(err) && ipCIDR != "" {
+			if err := writeNetworkdConfig(activeVLANs[i].Name, ipCIDR); err != nil {
+				log.Printf("VLANList: warning: failed to write networkd config for %s: %v", activeVLANs[i].Name, err)
+			} else {
+				log.Printf("VLANList: created missing networkd config for %s", activeVLANs[i].Name)
+			}
+		}
 	}
 
 	// Build a set of active VLAN keys for quick lookup
@@ -342,6 +381,13 @@ func VLANCreate(w http.ResponseWriter, r *http.Request) {
 		dhcpActive = true
 	}
 
+	// Persist the static IP in a per-VLAN networkd file so networkd owns it
+	// and won't flush it on reload. The `ip addr add` above stays for
+	// immediate effect; this makes it stick.
+	if err := writeNetworkdConfig(vlanName, ipCIDR); err != nil {
+		log.Printf("VLANCreate: warning: failed to write networkd config for %s: %v", vlanName, err)
+	}
+
 	// Install the captive portal capture rules for this VLAN
 	applyCaptiveRules("add", vlanName, ipCIDR)
 
@@ -404,6 +450,9 @@ func VLANDelete(w http.ResponseWriter, r *http.Request) {
 		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to delete VLAN: " + string(cmdOut)})
 		return
 	}
+
+	// Remove the per-VLAN networkd file
+	removeNetworkdConfig(vlanName)
 
 	// Remove from config file
 	removeVLANConfigEntry(req.Interface, req.VLANID)

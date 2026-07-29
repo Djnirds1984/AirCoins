@@ -17,3 +17,4 @@
 *lighttpd.conf text eol=lf
 *captive.conf text eol=lf
 *99-aircoins.conf text eol=lf
+*.network text eol=lf

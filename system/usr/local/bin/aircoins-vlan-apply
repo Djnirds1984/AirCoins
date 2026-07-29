@@ -7,6 +7,9 @@ CONF="/etc/pisowifi/vlans.conf"
 modprobe 8021q 2>/dev/null
 sleep 1
 
+# Set when a networkd file is created; triggers one reload at the end
+reload_networkd=0
+
 # Function: wait for interface to be UP
 wait_for_iface() {
     local iface=$1
@@ -78,6 +81,22 @@ while IFS= read -r line; do
 
     logger -t aircoins-vlan "Restored VLAN $name ($cidr)"
 
+    # Ensure networkd owns the static IP (survives networkctl reload)
+    NETFILE="/etc/systemd/network/04-aircoins-${name}.network"
+    if [ ! -f "$NETFILE" ]; then
+        cat > "$NETFILE" << NETEOF
+[Match]
+Name=${name}
+
+[Network]
+Address=${cidr}
+DHCP=no
+ConfigureWithoutCarrier=yes
+NETEOF
+        reload_networkd=1
+        logger -t aircoins-vlan "Created networkd config for $name"
+    fi
+
     # Start DHCP
     if [ -f "/etc/dnsmasq.d/${name}.conf" ]; then
         systemctl restart "dnsmasq@${name}" 2>/dev/null
@@ -95,5 +114,10 @@ while IFS= read -r line; do
     fi
 
 done < "$CONF"
+
+# Single reload if any networkd file was created above
+if [ "$reload_networkd" -eq 1 ]; then
+    networkctl reload 2>/dev/null
+fi
 
 logger -t aircoins-vlan "VLAN restore complete"

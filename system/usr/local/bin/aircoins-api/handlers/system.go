@@ -32,8 +32,8 @@ func (h *SystemHandler) Status(w http.ResponseWriter, r *http.Request) {
 	sendJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "ok",
 		"services": map[string]interface{}{
-			"database":  dbStatus,
-			"lighttpd":  lighttpdRunning,
+			"database": dbStatus,
+			"lighttpd": lighttpdRunning,
 		},
 		"system_online": lighttpdRunning,
 	})

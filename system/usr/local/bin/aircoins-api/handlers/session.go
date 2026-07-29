@@ -244,12 +244,12 @@ func (h *SessionHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	if err == nil {
 		response["session"] = map[string]interface{}{
-			"id":                session.ID,
-			"status":            session.Status,
-			"coins":             session.CoinsInserted,
-			"total":             session.TotalSeconds,
-			"remaining":         session.RemainingSeconds,
-			"started":           session.StartedAt.Unix(),
+			"id":        session.ID,
+			"status":    session.Status,
+			"coins":     session.CoinsInserted,
+			"total":     session.TotalSeconds,
+			"remaining": session.RemainingSeconds,
+			"started":   session.StartedAt.Unix(),
 		}
 	}
 

@@ -425,6 +425,11 @@ cp "$SYSTEM_DIR/etc/systemd/system/aircoins-vlans.service" /etc/systemd/system/
 cp "$SYSTEM_DIR/etc/systemd/system/dnsmasq@.service" /etc/systemd/system/
 mkdir -p /etc/dnsmasq.d
 
+# Prevent systemd-networkd from managing VLAN sub-interfaces (no DHCP on end0.*)
+mkdir -p /etc/systemd/network
+cp "$SYSTEM_DIR/etc/systemd/network/05-aircoins-vlans.network" /etc/systemd/network/
+networkctl reload 2>/dev/null || true
+
 if [ "$IS_ARM" = true ]; then
     cp "$SYSTEM_DIR/etc/systemd/system/gpio-coin-listener.service" /etc/systemd/system/
     cp "$SYSTEM_DIR/etc/systemd/system/pisowifi-session.service" /etc/systemd/system/

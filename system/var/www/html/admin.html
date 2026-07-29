@@ -16,11 +16,13 @@
 
         /* ==================== LOGIN SCREEN ==================== */
         #login-screen {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
             background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 100%);
+            z-index: 2000;
         }
         .login-card {
             background: rgba(26, 26, 46, 0.8);
@@ -75,7 +77,9 @@
             left: 0;
             height: 100vh;
             width: 220px;
+            background: #1a1a2e;
             background: rgba(26, 26, 46, 0.95);
+            -webkit-backdrop-filter: blur(20px);
             backdrop-filter: blur(20px);
             border-right: 1px solid rgba(255,255,255,0.08);
             display: flex;
@@ -148,7 +152,7 @@
             display: flex;
             flex-direction: column;
         }
-        #sidebar.collapsed ~ #main-content { margin-left: 60px; }
+        #main-content.sidebar-collapsed { margin-left: 60px; }
 
         #top-bar {
             display: flex;
@@ -1087,7 +1091,8 @@
             #sidebar { width: 60px; }
             #sidebar .logo-text { opacity: 0; width: 0; }
             #sidebar .nav-item .label { opacity: 0; }
-            #main-content { margin-left: 60px; }
+            #main-content { margin-left: 60px !important; }
+            #main-content.sidebar-collapsed { margin-left: 60px !important; }
             .stats-grid { grid-template-columns: 1fr 1fr; }
             .sys-info-grid { grid-template-columns: 1fr; }
         }
@@ -1641,6 +1646,7 @@ async function login(username, password) {
     sessionStorage.setItem('authToken', authToken);
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('admin-panel').style.display = 'block';
+    document.getElementById('sidebar').style.display = 'flex';
     showSection('dashboard');
     showNotification('Welcome back, admin!', 'success');
 }
@@ -1649,6 +1655,7 @@ function logout() {
     authToken = null;
     sessionStorage.removeItem('authToken');
     document.getElementById('admin-panel').style.display = 'none';
+    document.getElementById('sidebar').style.display = 'none';
     document.getElementById('login-screen').style.display = 'flex';
     document.getElementById('login-user').value = '';
     document.getElementById('login-pass').value = '';
@@ -1719,13 +1726,16 @@ function showSection(name) {
 // ============================================================
 function toggleSidebar() {
     var sidebar = document.getElementById('sidebar');
+    var mainContent = document.getElementById('main-content');
     sidebar.classList.toggle('collapsed');
+    mainContent.classList.toggle('sidebar-collapsed');
     localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed') ? '1' : '0');
 }
 
 function restoreSidebar() {
     if (localStorage.getItem('sidebarCollapsed') === '1') {
         document.getElementById('sidebar').classList.add('collapsed');
+        document.getElementById('main-content').classList.add('sidebar-collapsed');
     }
 }
 
@@ -3084,6 +3094,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (authToken) {
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('admin-panel').style.display = 'block';
+        document.getElementById('sidebar').style.display = 'flex';
         showSection('dashboard');
     }
 });

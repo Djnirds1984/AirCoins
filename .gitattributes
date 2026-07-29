@@ -8,3 +8,4 @@
 *set_gpio_config text eol=lf
 *pisowifi-* text eol=lf
 *aircoins-gpio-lib text eol=lf
+*aircoins-vlan-apply text eol=lf

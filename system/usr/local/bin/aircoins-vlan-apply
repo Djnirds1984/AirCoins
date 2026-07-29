@@ -1,0 +1,42 @@
+#!/bin/bash
+# AirCoins VLAN Restore — applies saved VLAN config on boot
+CONF="/etc/pisowifi/vlans.conf"
+[ -f "$CONF" ] || exit 0
+
+# Load 8021q kernel module
+modprobe 8021q 2>/dev/null
+
+while IFS= read -r line; do
+    # Skip comments and empty lines
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "$line" ]] && continue
+
+    # Parse: interface vlan_id ip/cidr description [portal]
+    parent=$(echo "$line" | awk '{print $1}')
+    vid=$(echo "$line" | awk '{print $2}')
+    cidr=$(echo "$line" | awk '{print $3}')
+
+    [ -z "$parent" ] || [ -z "$vid" ] || [ -z "$cidr" ] && continue
+
+    name="${parent}.${vid}"
+
+    # Skip if already exists
+    ip link show "$name" &>/dev/null && continue
+
+    # Create VLAN interface
+    ip link add link "$parent" name "$name" type vlan id "$vid" 2>/dev/null
+    if [ $? -ne 0 ]; then
+        logger -t aircoins-vlan "Failed to create $name"
+        continue
+    fi
+
+    # Assign IP
+    ip addr add "$cidr" dev "$name" 2>/dev/null
+
+    # Bring up
+    ip link set "$name" up 2>/dev/null
+
+    logger -t aircoins-vlan "Restored VLAN $name ($cidr)"
+done < "$CONF"
+
+logger -t aircoins-vlan "VLAN restore complete"

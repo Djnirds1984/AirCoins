@@ -160,7 +160,8 @@ if [ "$IS_ARM" = true ]; then
         bc \
         postgresql \
         postgresql-contrib \
-        golang-go
+        golang-go \
+        vlan
 else
     # x86 installation
     apt-get install -y -qq \
@@ -171,10 +172,15 @@ else
         bc \
         postgresql \
         postgresql-contrib \
-        golang-go
+        golang-go \
+        vlan
 fi
 
 echo -e "${GREEN}  ✓ Packages installed${NC}"
+
+# VLAN support
+modprobe 8021q 2>/dev/null || true
+grep -q "^8021q" /etc/modules 2>/dev/null || echo "8021q" >> /etc/modules
 
 # ============================================
 # STEP 3: Setup PostgreSQL Database
@@ -389,6 +395,11 @@ cp "$SYSTEM_DIR/usr/local/bin/pisowifi-api-update" /usr/local/bin/pisowifi-api-u
 chmod +x /usr/local/bin/pisowifi-api-update
 echo "  ✓ pisowifi-api-update"
 
+# Deploy VLAN support
+cp "$SYSTEM_DIR/usr/local/bin/aircoins-vlan-apply" /usr/local/bin/
+chmod +x /usr/local/bin/aircoins-vlan-apply
+echo "  ✓ aircoins-vlan-apply"
+
 echo -e "${GREEN}  ✓ All scripts deployed${NC}"
 
 # ============================================
@@ -402,6 +413,7 @@ mkdir -p /var/log/pisowifi
 
 # Service files
 cp "$SYSTEM_DIR/etc/systemd/system/aircoins-api.service" /etc/systemd/system/
+cp "$SYSTEM_DIR/etc/systemd/system/aircoins-vlans.service" /etc/systemd/system/
 
 if [ "$IS_ARM" = true ]; then
     cp "$SYSTEM_DIR/etc/systemd/system/gpio-coin-listener.service" /etc/systemd/system/
@@ -419,6 +431,7 @@ systemctl daemon-reload
 systemctl enable aircoins-api.service
 systemctl enable gpio-coin-listener.service
 systemctl enable pisowifi-session.service
+systemctl enable aircoins-vlans.service
 
 echo -e "${GREEN}  ✓ Services deployed and enabled${NC}"
 
@@ -430,6 +443,13 @@ echo -e "${YELLOW}[10/10]${NC} Configuring system..."
 # Set permissions
 chmod 755 /var/lib/pisowifi
 chmod 755 /var/log/pisowifi
+
+# Create VLAN config file if not exists
+mkdir -p /etc/pisowifi
+if [ ! -f /etc/pisowifi/vlans.conf ]; then
+    echo "# AirCoins VLAN Configuration" > /etc/pisowifi/vlans.conf
+    echo "# Format: interface vlan_id ip/cidr description [portal]" >> /etc/pisowifi/vlans.conf
+fi
 
 echo -e "${GREEN}  ✓ System configured${NC}"
 

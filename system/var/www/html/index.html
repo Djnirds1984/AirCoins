@@ -813,12 +813,42 @@
             expiresAt: 0,
             statusInterval: null,
             coins: [],
+            lastCoinId: 0,
             totalAmount: 0,
             totalSeconds: 0,
             active: false,
             sessionStartTime: null,
             sessionInterval: null
         };
+
+        // ==================== API HELPERS ====================
+        // lighttpd's server.error-handler-404 serves /index.html for ANY
+        // unknown path, so a wrong URL answers HTTP 200 with the portal's
+        // own HTML instead of failing. r.json() then throws a parse error
+        // that a bare .catch() swallows and the portal goes silently blind.
+        // Every JSON poll goes through here so that case is loud instead.
+        function fetchJSON(url) {
+            return fetch(url, { headers: { 'Accept': 'application/json' } })
+                .then(r => {
+                    if (!r.ok) throw new Error(url + ' -> HTTP ' + r.status);
+                    const ctype = (r.headers.get('content-type') || '').toLowerCase();
+                    if (ctype.indexOf('json') === -1) {
+                        throw new Error(url + ' -> non-JSON response (' +
+                            (ctype || 'no content-type') +
+                            '); path probably served by the captive-portal 404 fallback');
+                    }
+                    return r.json();
+                });
+        }
+
+        // Polls run every 2s; log each distinct failure once so a broken
+        // endpoint is visible in the console without flooding it.
+        const warnedOnce = {};
+        function warnOnce(key, err) {
+            if (warnedOnce[key]) return;
+            warnedOnce[key] = true;
+            console.warn('[AirCoins] ' + key + ': ' + ((err && err.message) || err));
+        }
 
         // ==================== PRICING (/api/pricing) ====================
         const PRICING_URL = '/api/pricing';
@@ -909,11 +939,7 @@
         // reachable (file:// preview, backend down) the portal just shows a
         // placeholder instead of stale demo pricing.
         function loadPricing() {
-            return fetch(PRICING_URL + '?t=' + Date.now())
-                .then(r => {
-                    if (!r.ok) throw new Error('pricing unavailable');
-                    return r.json();
-                })
+            return fetchJSON(PRICING_URL + '?t=' + Date.now())
                 .then(res => {
                     const rows = (res && Array.isArray(res.data)) ? res.data : [];
                     const tiers = {};
@@ -927,7 +953,8 @@
                     state.pricing = tiers;
                     state.pricingLoaded = true;
                 })
-                .catch(() => {
+                .catch(err => {
+                    warnOnce('pricing', err);
                     state.pricing = {};
                     state.pricingLoaded = false;
                 })
@@ -967,25 +994,61 @@
             fetch(COINSLOT_DISARM_URL, { method: 'POST' }).catch(() => {});
         }
 
-        // Poll coin slot status while the modal is open so the countdown
-        // follows backend extensions (+30s per detected coin)
+        // Poll coin slot status while the modal is open. The response carries
+        // both the armed window (countdown follows the backend's +30s per
+        // coin extensions) and every coin detected since arming, which is how
+        // the modal learns about real pulses: the GPIO listener POSTs each
+        // pulse to /api/gpio/coin, the API stores a coin_events row, and
+        // /api/coinslot/status reports the rows newer than the arm timestamp.
+        function pollCoinslotStatus() {
+            fetchJSON(COINSLOT_STATUS_URL + '?t=' + Date.now())
+                .then(data => {
+                    if (!gpio.active || !data) return;
+
+                    if (data.armed && data.expires_at > gpio.expiresAt) {
+                        gpio.expiresAt = data.expires_at;
+                    }
+
+                    applyCoinslotCoins(data.coins_inserted);
+                })
+                .catch(err => warnOnce('coinslot status', err));
+        }
+
         function startCoinslotStatusPolling() {
             if (gpio.statusInterval) clearInterval(gpio.statusInterval);
+            pollCoinslotStatus();
             gpio.statusInterval = setInterval(() => {
                 if (!gpio.active) {
                     clearInterval(gpio.statusInterval);
                     gpio.statusInterval = null;
                     return;
                 }
-                fetch(COINSLOT_STATUS_URL + '?t=' + Date.now())
-                    .then(r => r.json())
-                    .then(data => {
-                        if (data.armed && data.expires_at > gpio.expiresAt) {
-                            gpio.expiresAt = data.expires_at;
-                        }
-                    })
-                    .catch(() => {});
+                pollCoinslotStatus();
             }, 2000);
+        }
+
+        // Feeds the coins reported by the backend into the modal. Rows are
+        // ordered by id, so anything past the last id we rendered is new;
+        // the poll is therefore idempotent and never double-counts a coin.
+        function applyCoinslotCoins(summary) {
+            if (!summary || !Array.isArray(summary.coins)) return;
+
+            summary.coins.forEach(coin => {
+                const id = parseInt(coin && coin.id, 10) || 0;
+                if (id <= gpio.lastCoinId) return;
+                gpio.lastCoinId = id;
+                handleGpioCoin(parseInt(coin.value, 10) || 0, coin.minutes);
+            });
+
+            // The backend resolved the pricing tiers that actually get
+            // credited, so let its totals win over the local mirror.
+            if (typeof summary.total_value === 'number') {
+                gpio.totalAmount = summary.total_value;
+            }
+            if (typeof summary.total_seconds === 'number') {
+                gpio.totalSeconds = summary.total_seconds;
+            }
+            if (gpio.coins.length > 0) updateGpioCoinTotals();
         }
 
         function openGpioModal() {
@@ -997,6 +1060,7 @@
             // Reset GPIO state
             gpio.countdown = 60;
             gpio.coins = [];
+            gpio.lastCoinId = 0;
             gpio.totalAmount = 0;
             gpio.totalSeconds = 0;
             gpio.active = true;
@@ -1066,8 +1130,10 @@
             }
         }
 
-        // Handle real GPIO coin detection from backend API
-        function handleGpioCoin(amount) {
+        // Handle real GPIO coin detection from backend API.
+        // serverMinutes is the minutes the backend resolved for this coin;
+        // the local pricing mirror is only used when it is unavailable.
+        function handleGpioCoin(amount, serverMinutes) {
             if (!gpio.active) return;
 
             // The GPIO listener extends the armed window +30s per coin;
@@ -1080,24 +1146,16 @@
             // Add coin. The portal mirrors the backend pricing rules, but the
             // backend is what actually credits time — an unpriced coin is still
             // listed, just without minutes.
-            const minutes = minutesForAmount(amount);
+            const minutes = (typeof serverMinutes === 'number' && serverMinutes >= 0)
+                ? serverMinutes
+                : minutesForAmount(amount);
             const minutesText = minutes > 0 ? '+' + minutes + ' min' : 'no rate';
             gpio.coins.push({ amount: amount, minutes: minutes, time: new Date().toLocaleTimeString() });
             gpio.totalAmount += amount;
             gpio.totalSeconds += minutes * 60;
 
             // Update coin display
-            document.getElementById('gpioCoinDisplay').classList.add('active');
-            document.getElementById('gpioCoinTotal').textContent = '₱' + gpio.totalAmount;
-
-            // Calculate and display total time in HH:MM:SS
-            const totalHrs = Math.floor(gpio.totalSeconds / 3600);
-            const totalMins = Math.floor((gpio.totalSeconds % 3600) / 60);
-            const totalSecs = gpio.totalSeconds % 60;
-            const timeStr = String(totalHrs).padStart(2, '0') + ':' +
-                           String(totalMins).padStart(2, '0') + ':' +
-                           String(totalSecs).padStart(2, '0');
-            document.getElementById('gpioTotalTime').textContent = timeStr;
+            updateGpioCoinTotals();
 
             // Add to coin list
             const listItem = document.createElement('div');
@@ -1122,6 +1180,21 @@
                     document.getElementById('gpioStatus').className = 'gpio-status detecting';
                 }
             }, 2000);
+        }
+
+        // Renders the running totals of the armed window (peso total and the
+        // credited time as HH:MM:SS)
+        function updateGpioCoinTotals() {
+            document.getElementById('gpioCoinDisplay').classList.add('active');
+            document.getElementById('gpioCoinTotal').textContent = '₱' + gpio.totalAmount;
+
+            const totalHrs = Math.floor(gpio.totalSeconds / 3600);
+            const totalMins = Math.floor((gpio.totalSeconds % 3600) / 60);
+            const totalSecs = gpio.totalSeconds % 60;
+            document.getElementById('gpioTotalTime').textContent =
+                String(totalHrs).padStart(2, '0') + ':' +
+                String(totalMins).padStart(2, '0') + ':' +
+                String(totalSecs).padStart(2, '0');
         }
 
         function gpioDonePaying() {
@@ -1277,28 +1350,25 @@
             }
         }
 
-        // ==================== ORANGE PI GPIO API INTEGRATION ====================
-        // When deployed on Orange Pi, the session manager writes status to
-        // /var/lib/pisowifi/status.json which lighttpd serves as a static file.
-        // This polling layer syncs the HTML frontend with the real GPIO backend.
+        // ==================== SESSION / SYSTEM STATUS POLLING ====================
+        // GET /api/session/status (Go API, proxied by lighttpd) reports the
+        // caller's active session and whether the system is up. It replaces
+        // the old file-based /api/status.json of the demo build, which no
+        // longer exists on the device: because lighttpd answers unknown paths
+        // with index.html (HTTP 200 + HTML), that poll never failed loudly, it
+        // just never delivered any data. Coin events are NOT polled here —
+        // they arrive through /api/coinslot/status while the modal is armed.
 
         const API_ENABLED = true;           // Set false to disable API polling
         const API_POLL_INTERVAL = 2000;     // Poll every 2 seconds
-        const API_STATUS_URL = '/api/status.json';
-        const API_COIN_URL = '/api/coin_event.json';
+        const API_STATUS_URL = '/api/session/status';
         let apiPollTimer = null;
-        let lastCoinTimestamp = 0;
 
-        // Poll backend for GPIO coin events and session status
+        // Poll backend for session status and system health
         function apiPoll() {
             if (!API_ENABLED) return;
 
-            // Fetch status.json (written by session manager)
-            fetch(API_STATUS_URL + '?t=' + Date.now())
-                .then(r => {
-                    if (!r.ok) throw new Error('No API');
-                    return r.json();
-                })
+            fetchJSON(API_STATUS_URL + '?t=' + Date.now())
                 .then(data => {
                     // Sync session state from backend
                     if (data.session && data.session.status === 'active') {
@@ -1327,19 +1397,6 @@
                         document.getElementById('runningTimerBar').classList.add('active');
                     }
 
-                    // Check for new coin events
-                    if (data.last_coin_time && data.last_coin_time > lastCoinTimestamp) {
-                        lastCoinTimestamp = data.last_coin_time;
-                        const coinVal = parseInt(data.last_coin_value) || 1;
-
-                        // If GPIO modal is open, process the coin detection
-                        if (gpio.active) {
-                            handleGpioCoin(coinVal);
-                        }
-
-                        showNotification('GPIO: ₱' + coinVal + ' coin detected!', 'success');
-                    }
-
                     // Sync system status
                     if (data.system) {
                         const indicator = document.getElementById('systemStatus');
@@ -1356,7 +1413,8 @@
                     }
                 })
                 .catch(err => {
-                    // API not available - backend not yet deployed
+                    // API not reachable (backend down, or file:// preview)
+                    warnOnce('session status', err);
                 });
         }
 

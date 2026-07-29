@@ -6,7 +6,7 @@ Wants=postgresql.service
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/aircoins-api/aircoins-api
-ExecStop=/bin/kill -TERM $MAINPID
+# No ExecStop: systemd's default SIGTERM handling stops the server cleanly.
 Restart=always
 RestartSec=5
 User=root

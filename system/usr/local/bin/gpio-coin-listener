@@ -28,6 +28,23 @@
 #   5. Armed file gone/expired -> back to IDLE
 # ============================================
 
+# ============================================
+# SINGLE INSTANCE GUARD
+# ============================================
+# Two listeners on the same pin count every pulse twice (the journal shows
+# interleaved "Pulse #N" counters). Orphans survive a botched service stop,
+# so refuse to start when another instance already holds the lock.
+#
+# This runs BEFORE the cleanup trap is installed on purpose: a duplicate
+# must exit without touching the running instance's PID/armed files.
+# Exit 0 so systemd's Restart=on-failure does not loop on it.
+LOCK_FILE="/run/gpio-coin-listener.lock"
+exec 9>"$LOCK_FILE"
+if command -v flock >/dev/null 2>&1 && ! flock -n 9; then
+    echo "gpio-coin-listener: another instance is already running, exiting" >&2
+    exit 0
+fi
+
 # Source the shared GPIO library
 GPIO_LIB="/usr/local/bin/aircoins-gpio-lib"
 if [ -f "$GPIO_LIB" ]; then
@@ -67,8 +84,13 @@ ARM_EXTEND_SEC=30                            # extra window per detected coin
 # ============================================
 # LOGGING
 # ============================================
+# Log to BOTH stdout (captured by the systemd journal) and the log file,
+# so `journalctl -u gpio-coin-listener` shows pulse detection live.
+mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    local line="[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+    echo "$line"
+    echo "$line" >> "$LOG_FILE"
 }
 
 # ============================================

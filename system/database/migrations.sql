@@ -23,7 +23,151 @@ ALTER TABLE IF EXISTS pricing DROP COLUMN IF EXISTS rate_per_minute;
 ALTER TABLE IF EXISTS pricing DROP COLUMN IF EXISTS rate_per_min;
 
 -- ============================================
--- 002 - PRICING: purge seeded default tiers (once)
+-- 002 - SYSTEM_SETTINGS: ensure UNIQUE (key)
+-- ============================================
+-- The API (admin.go) and migration 005 below use
+-- INSERT ... ON CONFLICT (key), which requires a unique constraint or
+-- unique index on system_settings.key. Databases created from an old
+-- schema.sql may lack it, making those statements fail with:
+--   pq: there is no unique or exclusion constraint matching the ON CONFLICT specification
+-- MUST run before migration 005 (which relies on ON CONFLICT (key)).
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'system_settings'
+    ) THEN
+        RETURN;
+    END IF;
+
+    -- Already enforced by any non-partial unique index on exactly (key)
+    -- (covers both UNIQUE constraints and plain unique indexes — either
+    -- satisfies ON CONFLICT (key) arbiter inference)
+    IF EXISTS (
+        SELECT 1
+        FROM pg_index i
+        JOIN pg_class t ON t.oid = i.indrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = current_schema()
+          AND t.relname = 'system_settings'
+          AND i.indisunique
+          AND i.indpred IS NULL
+          AND i.indnkeyatts = 1
+          AND (SELECT a.attname FROM pg_attribute a
+               WHERE a.attrelid = t.oid AND a.attnum = i.indkey[0]) = 'key'
+    ) THEN
+        RETURN;
+    END IF;
+
+    -- Remove duplicate keys first (keep the most recently updated row),
+    -- otherwise ALTER TABLE below fails
+    DELETE FROM system_settings s
+    USING system_settings k
+    WHERE s.key = k.key
+      AND s.id <> k.id
+      AND (COALESCE(s.updated_at, 'epoch'::timestamp), s.id)
+        < (COALESCE(k.updated_at, 'epoch'::timestamp), k.id);
+
+    ALTER TABLE system_settings ADD CONSTRAINT system_settings_key_key UNIQUE (key);
+    RAISE NOTICE 'Migration 002: UNIQUE constraint added on system_settings(key)';
+END
+$$;
+
+-- ============================================
+-- 003 - PRICING: ensure UNIQUE (coin_value)
+-- ============================================
+-- The API (pricing.go, "Add Pricing Tier") uses
+-- INSERT ... ON CONFLICT (coin_value). Databases created from an old
+-- schema.sql have a pricing table without the unique constraint, so the
+-- insert fails. Current schema.sql declares coin_value UNIQUE inline —
+-- this backfills existing databases.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'pricing'
+    ) THEN
+        RETURN;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_index i
+        JOIN pg_class t ON t.oid = i.indrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = current_schema()
+          AND t.relname = 'pricing'
+          AND i.indisunique
+          AND i.indpred IS NULL
+          AND i.indnkeyatts = 1
+          AND (SELECT a.attname FROM pg_attribute a
+               WHERE a.attrelid = t.oid AND a.attnum = i.indkey[0]) = 'coin_value'
+    ) THEN
+        RETURN;
+    END IF;
+
+    -- Remove duplicate tiers first (keep the most recently updated row),
+    -- otherwise ALTER TABLE below fails
+    DELETE FROM pricing p
+    USING pricing q
+    WHERE p.coin_value = q.coin_value
+      AND p.id <> q.id
+      AND (COALESCE(p.updated_at, p.created_at, 'epoch'::timestamp), p.id)
+        < (COALESCE(q.updated_at, q.created_at, 'epoch'::timestamp), q.id);
+
+    ALTER TABLE pricing ADD CONSTRAINT pricing_coin_value_key UNIQUE (coin_value);
+    RAISE NOTICE 'Migration 003: UNIQUE constraint added on pricing(coin_value)';
+END
+$$;
+
+-- ============================================
+-- 004 - DAILY_STATS: ensure UNIQUE (date)
+-- ============================================
+-- The update_daily_stats() trigger function in schema.sql uses
+-- INSERT ... ON CONFLICT (date). If the function is ever (re)applied on a
+-- database whose daily_stats table predates the UNIQUE(date) column
+-- constraint, every session INSERT/UPDATE would fail. Backfill it here.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'daily_stats'
+    ) THEN
+        RETURN;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_index i
+        JOIN pg_class t ON t.oid = i.indrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = current_schema()
+          AND t.relname = 'daily_stats'
+          AND i.indisunique
+          AND i.indpred IS NULL
+          AND i.indnkeyatts = 1
+          AND (SELECT a.attname FROM pg_attribute a
+               WHERE a.attrelid = t.oid AND a.attnum = i.indkey[0]) = 'date'
+    ) THEN
+        RETURN;
+    END IF;
+
+    -- Remove duplicate dates first (keep the most recently updated row),
+    -- otherwise ALTER TABLE below fails
+    DELETE FROM daily_stats d
+    USING daily_stats e
+    WHERE d.date = e.date
+      AND d.id <> e.id
+      AND (COALESCE(d.updated_at, d.created_at, 'epoch'::timestamp), d.id)
+        < (COALESCE(e.updated_at, e.created_at, 'epoch'::timestamp), e.id);
+
+    ALTER TABLE daily_stats ADD CONSTRAINT daily_stats_date_key UNIQUE (date);
+    RAISE NOTICE 'Migration 004: UNIQUE constraint added on daily_stats(date)';
+END
+$$;
+
+-- ============================================
+-- 005 - PRICING: purge seeded default tiers (once)
 -- ============================================
 -- Older schema.sql seeded (1,5), (5,30), (10,60). The pricing table must
 -- start blank so the operator enters every tier manually.
@@ -55,7 +199,7 @@ BEGIN
                 'Seeded default pricing tiers removed (pricing starts blank)')
         ON CONFLICT (key) DO NOTHING;
 
-        RAISE NOTICE 'Migration 002: seeded default pricing tiers purged';
+        RAISE NOTICE 'Migration 005: seeded default pricing tiers purged';
     END IF;
 END
 $$;

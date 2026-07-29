@@ -34,7 +34,7 @@ func main() {
 	pricingHandler := &handlers.PricingHandler{DB: models.DB}
 	systemHandler := &handlers.SystemHandler{DB: models.DB}
 	reportsHandler := &handlers.ReportsHandler{DB: models.DB}
-	coinslotHandler := &handlers.CoinslotHandler{}
+	coinslotHandler := &handlers.CoinslotHandler{DB: models.DB}
 
 	// Setup routes
 	mux := http.NewServeMux()

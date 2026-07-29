@@ -10,8 +10,7 @@
 *aircoins-gpio-lib text eol=lf
 *aircoins-vlan-apply text eol=lf
 *aircoins-captive-rules text eol=lf
-*aircoins-vlans.service text eol=lf
-*dnsmasq@.service text eol=lf
+*.service text eol=lf
 
 # SQL applied on the device with psql
 *.sql text eol=lf

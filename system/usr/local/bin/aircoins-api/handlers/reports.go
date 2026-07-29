@@ -179,11 +179,11 @@ func (h *ReportsHandler) GetCoinEvents(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type CoinEventRow struct {
-		ID         int        `json:"id"`
-		CoinValue  int        `json:"coin_value"`
-		DetectedAt time.Time  `json:"detected_at"`
-		Processed  bool       `json:"processed"`
-		SessionID  *int       `json:"session_id,omitempty"`
+		ID         int       `json:"id"`
+		CoinValue  int       `json:"coin_value"`
+		DetectedAt time.Time `json:"detected_at"`
+		Processed  bool      `json:"processed"`
+		SessionID  *int      `json:"session_id,omitempty"`
 	}
 
 	events := make([]CoinEventRow, 0)

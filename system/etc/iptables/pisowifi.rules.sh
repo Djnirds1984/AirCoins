@@ -11,6 +11,10 @@ ETH_IFACE="eth0"        # Internet uplink (Ethernet)
 WIFI_NET="192.168.42.0/24"
 PORTAL_IP="192.168.42.1"
 
+# Central interface/network config (overrides the defaults above if present)
+PISOWIFI_CONF="/etc/pisowifi/pisowifi.conf"
+[ -f "$PISOWIFI_CONF" ] && source "$PISOWIFI_CONF"
+
 # ============================================
 # FLUSH EXISTING RULES
 # ============================================

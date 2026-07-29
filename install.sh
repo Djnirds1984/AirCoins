@@ -243,6 +243,15 @@ echo -e "${YELLOW}[6/10]${NC} Deploying configuration files..."
 cp "$SYSTEM_DIR/etc/lighttpd/lighttpd.conf" /etc/lighttpd/lighttpd.conf
 echo "  ✓ lighttpd.conf"
 
+# Central pisowifi config (do NOT overwrite an existing one on reinstall)
+mkdir -p /etc/pisowifi
+if [ -f /etc/pisowifi/pisowifi.conf ]; then
+    echo "  ✓ pisowifi.conf (kept existing)"
+else
+    cp "$SYSTEM_DIR/etc/pisowifi/pisowifi.conf" /etc/pisowifi/pisowifi.conf
+    echo "  ✓ pisowifi.conf"
+fi
+
 if [ "$IS_ARM" = true ]; then
     # hostapd
     cp "$SYSTEM_DIR/etc/hostapd/hostapd.conf" /etc/hostapd/hostapd.conf
@@ -408,6 +417,12 @@ if [ "$IS_ARM" = true ]; then
     echo -e "  ${YELLOW}GPIO Wiring:${NC}"
     echo -e "    Coin Acceptor Pulse → Physical Pin 7 (PA6)"
     echo -e "    Coin Acceptor GND   → Orange Pi GND"
+    echo ""
+    echo -e "  ${YELLOW}⚠ WiFi Interface (required):${NC}"
+    echo -e "    Orange Pi PC/One has NO built-in WiFi. Plug in an AP-capable USB"
+    echo -e "    WiFi adapter, find its name with ${CYAN}ip link${NC}, then set"
+    echo -e "    ${CYAN}WIFI_IFACE${NC} in ${CYAN}/etc/pisowifi/pisowifi.conf${NC} and run:"
+    echo -e "    ${CYAN}sudo pisowifi-ctl restart${NC}"
 else
     echo -e "  ${CYAN}Portal URL:${NC}  http://localhost"
     echo -e "  ${CYAN}Admin URL:${NC}   http://localhost/admin.html"
@@ -612,6 +627,15 @@ echo "  ✓ dnsmasq.conf"
 cp "$SYSTEM_DIR/etc/lighttpd/lighttpd.conf" /etc/lighttpd/lighttpd.conf
 echo "  ✓ lighttpd.conf"
 
+# Central pisowifi config (do NOT overwrite an existing one on reinstall)
+mkdir -p /etc/pisowifi
+if [ -f /etc/pisowifi/pisowifi.conf ]; then
+    echo "  ✓ pisowifi.conf (kept existing)"
+else
+    cp "$SYSTEM_DIR/etc/pisowifi/pisowifi.conf" /etc/pisowifi/pisowifi.conf
+    echo "  ✓ pisowifi.conf"
+fi
+
 # iptables rules
 cp "$SYSTEM_DIR/etc/iptables/pisowifi.rules.sh" /etc/iptables/pisowifi.rules.sh
 chmod +x /etc/iptables/pisowifi.rules.sh
@@ -758,6 +782,12 @@ echo ""
 echo -e "  ${YELLOW}GPIO Wiring:${NC}"
 echo -e "    Coin Acceptor Pulse → Physical Pin 7 (PA6)"
 echo -e "    Coin Acceptor GND   → Orange Pi GND"
+echo ""
+echo -e "  ${YELLOW}⚠ WiFi Interface (required):${NC}"
+echo -e "    Orange Pi PC/One has NO built-in WiFi. Plug in an AP-capable USB"
+echo -e "    WiFi adapter, find its name with ${CYAN}ip link${NC}, then set"
+echo -e "    ${CYAN}WIFI_IFACE${NC} in ${CYAN}/etc/pisowifi/pisowifi.conf${NC} and run:"
+echo -e "    ${CYAN}sudo pisowifi-ctl restart${NC}"
 echo ""
 echo -e "  ${YELLOW}To start now:${NC} sudo pisowifi-ctl start"
 echo ""

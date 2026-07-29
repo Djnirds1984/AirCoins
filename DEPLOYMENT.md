@@ -393,6 +393,35 @@ sudo systemctl status postgresql
 
 ## 8. Configuration
 
+### Configure the WiFi Interface (Required)
+
+The Orange Pi PC / One has **no built-in WiFi**. You must plug in a USB WiFi
+adapter that supports **AP (master) mode**. Because the interface name can vary
+between adapters/kernels (`wlan0`, `wlan1`, `wlx001122334455`, ...), the system
+reads the interface name from a central config file instead of assuming `wlan0`.
+
+```bash
+# 1. Plug in the USB WiFi adapter, then find its interface name:
+ip link
+# or
+iw dev
+
+# 2. Set WIFI_IFACE to match in the central config file:
+sudo nano /etc/pisowifi/pisowifi.conf
+#    WIFI_IFACE=wlan0        <-- change to your adapter's name
+
+# 3. Apply the change:
+sudo pisowifi-ctl restart
+```
+
+`/etc/pisowifi/pisowifi.conf` is sourced by `pisowifi-ctl`, the session manager
+and the iptables rules. On startup `pisowifi-ctl` writes `WIFI_IFACE` into
+`/etc/hostapd/hostapd.conf` and `/etc/dnsmasq.conf` so they always match.
+
+> If the configured interface does not exist, `pisowifi-ctl start` prints a
+> clear error listing the available interfaces and skips the WiFi AP / DHCP,
+> while the web server, API and GPIO listener keep running.
+
 ### Change WiFi SSID
 
 ```bash

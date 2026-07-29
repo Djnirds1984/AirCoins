@@ -16,6 +16,14 @@ ETH_IFACE="eth0"
 PORTAL_IP="192.168.42.1"
 WIFI_NET="192.168.42.1/24"
 
+# Central interface/network config (overrides the defaults above if present)
+PISOWIFI_CONF="/etc/pisowifi/pisowifi.conf"
+[ -f "$PISOWIFI_CONF" ] && source "$PISOWIFI_CONF"
+
+# Config files kept in sync with $WIFI_IFACE at startup
+HOSTAPD_CONF="/etc/hostapd/hostapd.conf"
+DNSMASQ_CONF="/etc/dnsmasq.conf"
+
 # Service binaries
 GPIO_LISTENER="/usr/local/bin/gpio-coin-listener"
 SESSION_MGR="/usr/local/bin/pisowifi-session-manager"
@@ -48,6 +56,25 @@ print_banner() {
     echo "  ║     Orange Pi One Control Panel      ║"
     echo "  ╚══════════════════════════════════════╝"
     echo -e "${NC}"
+}
+
+# Sync the configured interface into hostapd/dnsmasq so they always match
+apply_iface_to_configs() {
+    [ -f "$HOSTAPD_CONF" ] && sed -i "s/^interface=.*/interface=$WIFI_IFACE/" "$HOSTAPD_CONF"
+    [ -f "$DNSMASQ_CONF" ] && sed -i "s/^interface=.*/interface=$WIFI_IFACE/" "$DNSMASQ_CONF"
+}
+
+# Verify the WiFi interface exists before starting the AP/DHCP
+check_wifi_iface() {
+    if ip link show "$WIFI_IFACE" > /dev/null 2>&1; then
+        return 0
+    fi
+    echo -e "${RED}Interface '$WIFI_IFACE' not found.${NC}"
+    echo -e "${YELLOW}Orange Pi PC has no built-in WiFi - plug in a USB WiFi adapter that${NC}"
+    echo -e "${YELLOW}supports AP mode, then set WIFI_IFACE in $PISOWIFI_CONF${NC}"
+    echo -e "${YELLOW}Available interfaces:${NC}"
+    ip -o link | awk -F': ' '{print "    " $2}'
+    return 1
 }
 
 start_wifi_ap() {
@@ -303,8 +330,13 @@ case "$1" in
         echo -e "${GREEN}Starting AirCoins PisoWiFi System...${NC}"
         echo ""
         enable_forwarding
-        start_wifi_ap
-        start_dhcp
+        if check_wifi_iface; then
+            apply_iface_to_configs
+            start_wifi_ap
+            start_dhcp
+        else
+            echo -e "${YELLOW}Skipping WiFi AP and DHCP (no wireless interface).${NC}"
+        fi
         start_webserver
         start_iptables
         start_gpio_listener

@@ -233,6 +233,24 @@ sudo pisowifi-ctl start
 sudo pisowifi-ctl status
 ```
 
+### Admin Panel Access via Ethernet (No WiFi Required)
+
+The web server listens on **all interfaces**, so after deployment the admin
+panel is accessible via the device's Ethernet IP from any device on the same
+LAN — no WiFi adapter is required for initial setup:
+
+```bash
+# Find the device's Ethernet IP
+ip addr show eth0
+
+# Then from any browser on the same LAN:
+# http://<device-ip>            (customer portal)
+# http://<device-ip>/admin.html (admin panel)
+```
+
+> The captive-portal redirect only applies to WiFi clients on 192.168.42.0/24;
+> requests arriving on the Ethernet IP are served directly.
+
 ### Verify Everything Works
 
 ```bash

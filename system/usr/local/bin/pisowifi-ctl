@@ -292,7 +292,10 @@ show_status() {
     # Connected clients
     echo ""
     echo -e "${CYAN}--- Clients ---${NC}"
-    local client_count=$(wc -l < /var/lib/dnsmasq/dnsmasq.leases 2>/dev/null || echo 0)
+    local client_count=0
+    if [ -f /var/lib/dnsmasq/dnsmasq.leases ]; then
+        client_count=$(wc -l < /var/lib/dnsmasq/dnsmasq.leases)
+    fi
     echo "  Connected: $client_count"
 
     # Active sessions

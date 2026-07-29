@@ -73,6 +73,14 @@ iptables -A INPUT -i $WIFI_IFACE -p tcp --dport 80 -j ACCEPT
 # Allow SSH (for admin access) from WiFi
 iptables -A INPUT -i $WIFI_IFACE -p tcp --dport 22 -j ACCEPT
 
+# Allow HTTP/HTTPS (admin panel) from Ethernet/LAN side
+# (Orange Pi PC has no WiFi - Ethernet is the only management path)
+iptables -A INPUT -i $ETH_IFACE -p tcp --dport 80 -j ACCEPT
+iptables -A INPUT -i $ETH_IFACE -p tcp --dport 443 -j ACCEPT
+
+# Allow SSH (for admin access) from Ethernet
+iptables -A INPUT -i $ETH_IFACE -p tcp --dport 22 -j ACCEPT
+
 # Allow ICMP (ping)
 iptables -A INPUT -p icmp --icmp-type echo-request -j ACCEPT
 

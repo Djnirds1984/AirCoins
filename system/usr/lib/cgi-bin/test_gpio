@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================
-# AirCoins PisoWiFi - GPIO Pin Test CGI Handler
+# AirCoins - GPIO Pin Test CGI Handler
 # ============================================
 # Reads the real state of a GPIO pin using WiringOP or sysfs
 # Called from admin panel "Test Pin" button

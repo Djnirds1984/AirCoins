@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AirCoins - PisoWiFi System</title>
+    <title>AirCoins - PisoNet System</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -218,30 +218,6 @@
             .nav-links { flex-wrap: wrap; justify-content: center; }
         }
 
-        /* WIFI ANIMATION */
-        .wifi-icon {
-            width: 80px; height: 80px;
-            margin: 0 auto 20px;
-            position: relative;
-        }
-        .wifi-wave {
-            position: absolute;
-            border: 3px solid #00d4ff;
-            border-radius: 50%;
-            border-bottom: none;
-            border-left: none;
-            border-right: none;
-            animation: wifiPulse 2s infinite;
-        }
-        .wifi-wave:nth-child(1) { width: 30px; height: 30px; top: 35px; left: 25px; animation-delay: 0s; }
-        .wifi-wave:nth-child(2) { width: 50px; height: 50px; top: 25px; left: 15px; animation-delay: 0.3s; }
-        .wifi-wave:nth-child(3) { width: 70px; height: 70px; top: 15px; left: 5px; animation-delay: 0.6s; }
-        .wifi-dot { width: 8px; height: 8px; background: #00d4ff; border-radius: 50%; position: absolute; bottom: 10px; left: 36px; }
-        @keyframes wifiPulse {
-            0%, 100% { opacity: 0.3; }
-            50% { opacity: 1; }
-        }
-
         .section-title {
             text-align: center;
             font-size: 28px;
@@ -443,19 +419,13 @@
     <!-- HOME PAGE -->
     <div class="page active" id="page-home">
         <div class="hero">
-            <div class="wifi-icon">
-                <div class="wifi-wave"></div>
-                <div class="wifi-wave"></div>
-                <div class="wifi-wave"></div>
-                <div class="wifi-dot"></div>
-            </div>
             <h1>Welcome to <span>AirCoins</span></h1>
-            <p>Fast & affordable PisoWiFi. Insert coins and get connected instantly!</p>
+            <p>Fast & affordable PisoNet. Insert coins and get connected instantly!</p>
         </div>
 
         <div class="status-card">
             <p><span class="status-indicator status-online" id="systemStatus"></span> <strong id="statusText">System Online</strong></p>
-            <p style="margin-top:10px; color:#aaa;">WiFi Network: <strong style="color:#00d4ff;">AirCoins_Free</strong></p>
+            <p style="margin-top:10px; color:#aaa;">Network: <strong style="color:#00d4ff;">AirCoins</strong></p>
             <p style="color:#aaa;">Speed: <strong style="color:#00ff88;">Up to 50 Mbps</strong></p>
         </div>
 
@@ -500,7 +470,7 @@
 
     <!-- CONNECT PAGE -->
     <div class="page" id="page-connect">
-        <h2 class="section-title">Connect to WiFi</h2>
+        <h2 class="section-title">Connect to Network</h2>
         <p class="section-subtitle">Insert coins to start your session</p>
 
         <div class="status-card">
@@ -538,13 +508,6 @@
             </div>
 
             <div id="activeSession" style="display:none;">
-                <div class="wifi-icon" style="margin-top:20px;">
-                    <div class="wifi-wave"></div>
-                    <div class="wifi-wave"></div>
-                    <div class="wifi-wave"></div>
-                    <div class="wifi-dot"></div>
-                </div>
-
                 <div class="timer-display" id="timerDisplay">00:00:00:00</div>
 
                 <div class="progress-bar">

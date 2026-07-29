@@ -27,19 +27,15 @@ func (h *SystemHandler) Status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check services
-	hostapdRunning := checkServiceRunning("hostapd")
-	dnsmasqRunning := checkServiceRunning("dnsmasq")
 	lighttpdRunning := checkServiceRunning("lighttpd")
 
 	sendJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "ok",
 		"services": map[string]interface{}{
 			"database":  dbStatus,
-			"hostapd":   hostapdRunning,
-			"dnsmasq":   dnsmasqRunning,
 			"lighttpd":  lighttpdRunning,
 		},
-		"system_online": hostapdRunning && dnsmasqRunning && lighttpdRunning,
+		"system_online": lighttpdRunning,
 	})
 }
 

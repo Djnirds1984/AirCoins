@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os/exec"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -107,8 +109,8 @@ func (h *AdminHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error fetching active sessions: %v", err)
 	}
 
-	// Check if system is online (hostapd running)
-	stats.SystemOnline = checkHostapdRunning()
+	// Check if system is online (lighttpd running)
+	stats.SystemOnline = checkLighttpdRunning()
 
 	sendJSON(w, http.StatusOK, stats)
 }
@@ -251,11 +253,14 @@ func (h *AdminHandler) logAction(level, component, message string) {
 	}
 }
 
-// Helper to check if hostapd is running
-func checkHostapdRunning() bool {
-	// This would normally check if hostapd process is running
-	// For now, return true (implement with os/exec if needed)
-	return true
+// Helper to check if lighttpd is running
+func checkLighttpdRunning() bool {
+	cmd := exec.Command("systemctl", "is-active", "lighttpd")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "active"
 }
 
 // Helper to send JSON response

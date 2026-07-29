@@ -2,7 +2,7 @@
 # ============================================
 # AirCoins PisoWiFi - Service Control Script
 # ============================================
-# Start/stop/restart/status for all PisoWiFi services
+# Start/stop/restart/status for all AirCoins services
 #
 # Install to: /usr/local/bin/pisowifi-ctl
 # Usage: pisowifi-ctl {start|stop|restart|status|logs}
@@ -11,23 +11,15 @@
 # ============================================
 # CONFIGURATION
 # ============================================
-WIFI_IFACE="wlan0"
 ETH_IFACE="eth0"
-PORTAL_IP="192.168.42.1"
-WIFI_NET="192.168.42.1/24"
 
 # Central interface/network config (overrides the defaults above if present)
 PISOWIFI_CONF="/etc/pisowifi/pisowifi.conf"
 [ -f "$PISOWIFI_CONF" ] && source "$PISOWIFI_CONF"
 
-# Config files kept in sync with $WIFI_IFACE at startup
-HOSTAPD_CONF="/etc/hostapd/hostapd.conf"
-DNSMASQ_CONF="/etc/dnsmasq.conf"
-
 # Service binaries
 GPIO_LISTENER="/usr/local/bin/gpio-coin-listener"
 SESSION_MGR="/usr/local/bin/pisowifi-session-manager"
-IPTABLES_RULES="/etc/iptables/pisowifi.rules.sh"
 
 # PID files
 GPIO_PID="/var/run/gpio-coin-listener.pid"
@@ -52,69 +44,10 @@ NC='\033[0m' # No Color
 print_banner() {
     echo -e "${CYAN}"
     echo "  ╔══════════════════════════════════════╗"
-    echo "  ║     AirCoins PisoWiFi System         ║"
+    echo "  ║     AirCoins System                  ║"
     echo "  ║     Orange Pi One Control Panel      ║"
     echo "  ╚══════════════════════════════════════╝"
     echo -e "${NC}"
-}
-
-# Sync the configured interface into hostapd/dnsmasq so they always match
-apply_iface_to_configs() {
-    [ -f "$HOSTAPD_CONF" ] && sed -i "s/^interface=.*/interface=$WIFI_IFACE/" "$HOSTAPD_CONF"
-    [ -f "$DNSMASQ_CONF" ] && sed -i "s/^interface=.*/interface=$WIFI_IFACE/" "$DNSMASQ_CONF"
-}
-
-# Verify the WiFi interface exists before starting the AP/DHCP
-check_wifi_iface() {
-    if ip link show "$WIFI_IFACE" > /dev/null 2>&1; then
-        return 0
-    fi
-    echo -e "${RED}Interface '$WIFI_IFACE' not found.${NC}"
-    echo -e "${YELLOW}Orange Pi PC has no built-in WiFi - plug in a USB WiFi adapter that${NC}"
-    echo -e "${YELLOW}supports AP mode, then set WIFI_IFACE in $PISOWIFI_CONF${NC}"
-    echo -e "${YELLOW}Available interfaces:${NC}"
-    ip -o link | awk -F': ' '{print "    " $2}'
-    return 1
-}
-
-start_wifi_ap() {
-    echo -n "Starting WiFi Access Point... "
-
-    # Configure WiFi interface
-    ip link set $WIFI_IFACE up
-    ip addr flush dev $WIFI_IFACE
-    ip addr add $PORTAL_IP/24 dev $WIFI_IFACE
-
-    # Start hostapd
-    systemctl start hostapd 2>/dev/null
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}[OK]${NC}"
-    else
-        # Try manual start
-        hostapd -B /etc/hostapd/hostapd.conf 2>/dev/null
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}[OK]${NC} (manual)"
-        else
-            echo -e "${RED}[FAIL]${NC}"
-            return 1
-        fi
-    fi
-}
-
-start_dhcp() {
-    echo -n "Starting DHCP/DNS Server... "
-    systemctl start dnsmasq 2>/dev/null
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}[OK]${NC}"
-    else
-        dnsmasq -C /etc/dnsmasq.conf 2>/dev/null
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}[OK]${NC} (manual)"
-        else
-            echo -e "${RED}[FAIL]${NC}"
-            return 1
-        fi
-    fi
 }
 
 start_webserver() {
@@ -130,17 +63,6 @@ start_webserver() {
             echo -e "${RED}[FAIL]${NC}"
             return 1
         fi
-    fi
-}
-
-start_iptables() {
-    echo -n "Applying iptables rules... "
-    bash "$IPTABLES_RULES" 2>/dev/null
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}[OK]${NC}"
-    else
-        echo -e "${RED}[FAIL]${NC}"
-        return 1
     fi
 }
 
@@ -179,14 +101,8 @@ start_session_manager() {
     fi
 }
 
-enable_forwarding() {
-    echo -n "Enabling IP forwarding... "
-    echo 1 > /proc/sys/net/ipv4/ip_forward
-    echo -e "${GREEN}[OK]${NC}"
-}
-
 stop_all() {
-    echo -e "${YELLOW}Stopping AirCoins PisoWiFi...${NC}"
+    echo -e "${YELLOW}Stopping AirCoins System...${NC}"
 
     echo -n "Stopping GPIO Coin Listener... "
     if [ -f "$GPIO_PID" ]; then
@@ -210,42 +126,14 @@ stop_all() {
     systemctl stop lighttpd 2>/dev/null || killall lighttpd 2>/dev/null
     echo -e "${GREEN}[STOPPED]${NC}"
 
-    echo -n "Stopping DHCP/DNS... "
-    systemctl stop dnsmasq 2>/dev/null || killall dnsmasq 2>/dev/null
+    echo -n "Stopping AirCoins API... "
+    systemctl stop aircoins-api 2>/dev/null || killall aircoins-api 2>/dev/null
     echo -e "${GREEN}[STOPPED]${NC}"
-
-    echo -n "Stopping WiFi AP... "
-    systemctl stop hostapd 2>/dev/null || killall hostapd 2>/dev/null
-    echo -e "${GREEN}[STOPPED]${NC}"
-
-    echo -n "Flushing iptables... "
-    iptables -F 2>/dev/null
-    iptables -t nat -F 2>/dev/null
-    iptables -t mangle -F 2>/dev/null
-    iptables -P INPUT ACCEPT 2>/dev/null
-    iptables -P FORWARD ACCEPT 2>/dev/null
-    echo -e "${GREEN}[FLUSHED]${NC}"
 }
 
 show_status() {
     print_banner
     echo -e "${CYAN}--- Service Status ---${NC}"
-
-    # hostapd
-    echo -n "  WiFi AP (hostapd):      "
-    if pgrep -x hostapd > /dev/null; then
-        echo -e "${GREEN}RUNNING${NC}"
-    else
-        echo -e "${RED}STOPPED${NC}"
-    fi
-
-    # dnsmasq
-    echo -n "  DHCP/DNS (dnsmasq):     "
-    if pgrep -x dnsmasq > /dev/null; then
-        echo -e "${GREEN}RUNNING${NC}"
-    else
-        echo -e "${RED}STOPPED${NC}"
-    fi
 
     # lighttpd
     echo -n "  Web Server (lighttpd):  "
@@ -271,34 +159,9 @@ show_status() {
         echo -e "${RED}STOPPED${NC}"
     fi
 
-    # WiFi interface
-    echo ""
-    echo -e "${CYAN}--- Network ---${NC}"
-    echo -n "  WiFi Interface ($WIFI_IFACE): "
-    if ip link show $WIFI_IFACE > /dev/null 2>&1; then
-        local wifi_ip=$(ip addr show $WIFI_IFACE | grep "inet " | awk '{print $2}')
-        echo -e "${GREEN}UP${NC} ($wifi_ip)"
-    else
-        echo -e "${RED}DOWN${NC}"
-    fi
-
-    echo -n "  IP Forwarding:          "
-    if [ "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)" = "1" ]; then
-        echo -e "${GREEN}ENABLED${NC}"
-    else
-        echo -e "${RED}DISABLED${NC}"
-    fi
-
-    # Connected clients
-    echo ""
-    echo -e "${CYAN}--- Clients ---${NC}"
-    local client_count=0
-    if [ -f /var/lib/dnsmasq/dnsmasq.leases ]; then
-        client_count=$(wc -l < /var/lib/dnsmasq/dnsmasq.leases)
-    fi
-    echo "  Connected: $client_count"
-
     # Active sessions
+    echo ""
+    echo -e "${CYAN}--- Sessions ---${NC}"
     local active_sessions=$(ls /var/lib/pisowifi/sessions/*.session 2>/dev/null | wc -l)
     echo "  Active Sessions: $active_sessions"
 
@@ -330,24 +193,13 @@ show_logs() {
 case "$1" in
     start)
         print_banner
-        echo -e "${GREEN}Starting AirCoins PisoWiFi System...${NC}"
+        echo -e "${GREEN}Starting AirCoins System...${NC}"
         echo ""
-        enable_forwarding
-        if check_wifi_iface; then
-            apply_iface_to_configs
-            start_wifi_ap
-            start_dhcp
-        else
-            echo -e "${YELLOW}Skipping WiFi AP and DHCP (no wireless interface).${NC}"
-        fi
         start_webserver
-        start_iptables
         start_gpio_listener
         start_session_manager
         echo ""
         echo -e "${GREEN}✓ All services started!${NC}"
-        echo -e "  Portal: ${CYAN}http://$PORTAL_IP${NC}"
-        echo -e "  SSID:   ${CYAN}AirCoins_Free${NC}"
         ;;
     stop)
         stop_all
@@ -369,8 +221,8 @@ case "$1" in
         print_banner
         echo "Usage: $0 {start|stop|restart|status|logs}"
         echo ""
-        echo "  start   - Start all PisoWiFi services"
-        echo "  stop    - Stop all PisoWiFi services"
+        echo "  start   - Start all AirCoins services"
+        echo "  stop    - Stop all AirCoins services"
         echo "  restart - Restart all services"
         echo "  status  - Show service status"
         echo "  logs    - Show recent logs (optional: line count)"

@@ -255,7 +255,7 @@ func (h *SessionHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	// Get system status
 	response["system"] = map[string]interface{}{
-		"online": checkHostapdRunning(),
+		"online": checkLighttpdRunning(),
 		"ip":     clientIP,
 	}
 

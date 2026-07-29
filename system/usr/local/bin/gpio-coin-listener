@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================
-# AirCoins PisoWiFi - GPIO Coin Listener Daemon
+# AirCoins - GPIO Coin Listener Daemon
 # ============================================
 # Listens for coin pulses on GPIO pin
 # Orange Pi One uses WiringOP (wiringPi) library

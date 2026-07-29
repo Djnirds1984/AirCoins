@@ -1,20 +1,15 @@
 -- ============================================
--- AirCoins PisoWiFi - PostgreSQL Database Schema
+-- AirCoins PisoNet - PostgreSQL Database Schema
 -- ============================================
 -- Database: aircoins
--- Run as: sudo -u postgres psql -f schema.sql
+-- Run as:  psql -U aircoins -d aircoins -f schema.sql
+-- (install.sh creates the database and user before running this file)
 -- ============================================
-
--- Create database
-CREATE DATABASE aircoins;
-
--- Connect to aircoins database
-\c aircoins;
 
 -- ============================================
 -- ADMIN USERS
 -- ============================================
-CREATE TABLE admin_users (
+CREATE TABLE IF NOT EXISTS admin_users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(50) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
@@ -24,13 +19,14 @@ CREATE TABLE admin_users (
 
 -- Insert default admin user (password: admin123)
 -- Hash generated with bcrypt
-INSERT INTO admin_users (username, password_hash) 
-VALUES ('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy');
+INSERT INTO admin_users (username, password_hash)
+VALUES ('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy')
+ON CONFLICT (username) DO NOTHING;
 
 -- ============================================
 -- SYSTEM SETTINGS
 -- ============================================
-CREATE TABLE system_settings (
+CREATE TABLE IF NOT EXISTS system_settings (
     id SERIAL PRIMARY KEY,
     key VARCHAR(100) UNIQUE NOT NULL,
     value TEXT NOT NULL,
@@ -40,17 +36,16 @@ CREATE TABLE system_settings (
 
 -- Insert default settings
 INSERT INTO system_settings (key, value, description) VALUES
-    ('ssid', 'AirCoins_Free', 'WiFi network name'),
     ('bandwidth', '50', 'Bandwidth limit in Mbps'),
     ('max_session', '120', 'Maximum session time in minutes'),
-    ('portal_ip', '192.168.42.1', 'Portal IP address'),
-    ('wifi_interface', 'wlan0', 'WiFi interface name'),
-    ('eth_interface', 'eth0', 'Ethernet interface name');
+    ('eth_interface', 'eth0', 'Ethernet interface name'),
+    ('portal_ip', '', 'Portal IP address for admin access')
+ON CONFLICT (key) DO NOTHING;
 
 -- ============================================
 -- GPIO CONFIGURATION
 -- ============================================
-CREATE TABLE gpio_config (
+CREATE TABLE IF NOT EXISTS gpio_config (
     id SERIAL PRIMARY KEY,
     pin INTEGER NOT NULL DEFAULT 7,
     coin_value INTEGER NOT NULL DEFAULT 1,
@@ -58,13 +53,15 @@ CREATE TABLE gpio_config (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
--- Insert default GPIO config
-INSERT INTO gpio_config (pin, coin_value, pulse_mode) VALUES (7, 1, 'falling');
+-- Insert default GPIO config (only if table is empty)
+INSERT INTO gpio_config (pin, coin_value, pulse_mode)
+SELECT 7, 1, 'falling'
+WHERE NOT EXISTS (SELECT 1 FROM gpio_config LIMIT 1);
 
 -- ============================================
 -- PRICING TABLE
 -- ============================================
-CREATE TABLE pricing (
+CREATE TABLE IF NOT EXISTS pricing (
     id SERIAL PRIMARY KEY,
     coin_value INTEGER NOT NULL,
     minutes INTEGER NOT NULL,
@@ -73,27 +70,15 @@ CREATE TABLE pricing (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
--- Insert default pricing
-INSERT INTO pricing (coin_value, minutes) VALUES
-    (1, 5),
-    (5, 30),
-    (10, 60);
+-- Insert default pricing (only if table is empty)
+INSERT INTO pricing (coin_value, minutes)
+SELECT * FROM (VALUES (1, 5), (5, 30), (10, 60)) AS v(coin_value, minutes)
+WHERE NOT EXISTS (SELECT 1 FROM pricing LIMIT 1);
 
 -- ============================================
--- COIN EVENTS (raw coin detections)
+-- SESSIONS (must come before coin_events — FK dependency)
 -- ============================================
-CREATE TABLE coin_events (
-    id SERIAL PRIMARY KEY,
-    coin_value INTEGER NOT NULL,
-    detected_at TIMESTAMP DEFAULT NOW(),
-    processed BOOLEAN DEFAULT false,
-    session_id INTEGER REFERENCES sessions(id)
-);
-
--- ============================================
--- SESSIONS
--- ============================================
-CREATE TABLE sessions (
+CREATE TABLE IF NOT EXISTS sessions (
     id SERIAL PRIMARY KEY,
     client_ip VARCHAR(45),
     client_mac VARCHAR(17),
@@ -107,15 +92,26 @@ CREATE TABLE sessions (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Index for faster queries
-CREATE INDEX idx_sessions_status ON sessions(status);
-CREATE INDEX idx_sessions_client_ip ON sessions(client_ip);
-CREATE INDEX idx_sessions_started_at ON sessions(started_at);
+-- Indexes for faster queries
+CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+CREATE INDEX IF NOT EXISTS idx_sessions_client_ip ON sessions(client_ip);
+CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at);
+
+-- ============================================
+-- COIN EVENTS (raw coin detections)
+-- ============================================
+CREATE TABLE IF NOT EXISTS coin_events (
+    id SERIAL PRIMARY KEY,
+    coin_value INTEGER NOT NULL,
+    detected_at TIMESTAMP DEFAULT NOW(),
+    processed BOOLEAN DEFAULT false,
+    session_id INTEGER REFERENCES sessions(id)
+);
 
 -- ============================================
 -- SYSTEM LOGS
 -- ============================================
-CREATE TABLE system_logs (
+CREATE TABLE IF NOT EXISTS system_logs (
     id SERIAL PRIMARY KEY,
     level VARCHAR(10) NOT NULL DEFAULT 'INFO', -- INFO, WARN, ERROR, DEBUG
     component VARCHAR(50), -- gpio, session, admin, system
@@ -124,15 +120,15 @@ CREATE TABLE system_logs (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Index for log queries
-CREATE INDEX idx_logs_level ON system_logs(level);
-CREATE INDEX idx_logs_created_at ON system_logs(created_at);
-CREATE INDEX idx_logs_component ON system_logs(component);
+-- Indexes for log queries
+CREATE INDEX IF NOT EXISTS idx_logs_level ON system_logs(level);
+CREATE INDEX IF NOT EXISTS idx_logs_created_at ON system_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_logs_component ON system_logs(component);
 
 -- ============================================
 -- DAILY STATS (aggregated)
 -- ============================================
-CREATE TABLE daily_stats (
+CREATE TABLE IF NOT EXISTS daily_stats (
     id SERIAL PRIMARY KEY,
     date DATE UNIQUE NOT NULL,
     total_earnings INTEGER DEFAULT 0,
@@ -144,7 +140,7 @@ CREATE TABLE daily_stats (
 );
 
 -- Index for date queries
-CREATE INDEX idx_daily_stats_date ON daily_stats(date);
+CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_stats(date);
 
 -- ============================================
 -- FUNCTIONS
@@ -171,6 +167,8 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Trigger to auto-update daily stats when session changes
+-- Drop first since CREATE TRIGGER has no IF NOT EXISTS in older PG versions
+DROP TRIGGER IF EXISTS trigger_update_daily_stats ON sessions;
 CREATE TRIGGER trigger_update_daily_stats
 AFTER INSERT OR UPDATE ON sessions
 FOR EACH ROW
@@ -181,7 +179,7 @@ EXECUTE FUNCTION update_daily_stats();
 -- ============================================
 
 -- View for today's stats
-CREATE VIEW today_stats AS
+CREATE OR REPLACE VIEW today_stats AS
 SELECT 
     COALESCE(SUM(total_earnings), 0) as earnings,
     COALESCE(SUM(total_coins), 0) as coins,
@@ -190,7 +188,7 @@ FROM daily_stats
 WHERE date = CURRENT_DATE;
 
 -- View for active sessions
-CREATE VIEW active_sessions AS
+CREATE OR REPLACE VIEW active_sessions AS
 SELECT * FROM sessions
 WHERE status = 'active' AND remaining_seconds > 0;
 
@@ -198,8 +196,8 @@ WHERE status = 'active' AND remaining_seconds > 0;
 -- PERMISSIONS
 -- ============================================
 -- Grant permissions to www-data for CGI scripts
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO www-data;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO www-data;
+GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO "www-data";
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "www-data";
 
 -- ============================================
 -- COMPLETION

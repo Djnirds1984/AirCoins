@@ -1,5 +1,5 @@
 [Unit]
-Description=AirCoins PisoWiFi - Session Manager
+Description=AirCoins - Session Manager
 After=network.target
 Wants=network.target
 
@@ -13,7 +13,7 @@ StandardOutput=null
 StandardError=journal
 PIDFile=/var/run/pisowifi-session.pid
 
-# Needs root for iptables manipulation
+# Needs root for PID file management
 NoNewPrivileges=no
 ProtectSystem=false
 PrivateTmp=true

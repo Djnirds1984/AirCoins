@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================
-# AirCoins PisoWiFi - API Status Generator
+# AirCoins - API Status Generator
 # ============================================
 # Generates status.json for the HTML frontend to poll
 # Called by session manager every second
@@ -23,7 +23,7 @@ mkdir -p "$OUTPUT_DIR"
 
 # System status
 SYSTEM_ONLINE="true"
-if ! pgrep -x hostapd > /dev/null 2>&1; then
+if ! pgrep -x lighttpd > /dev/null 2>&1; then
     SYSTEM_ONLINE="false"
 fi
 
@@ -35,13 +35,12 @@ for session_file in "$SESSION_DIR"/*.session; do
     ACTIVE_SESSIONS=$((ACTIVE_SESSIONS + 1))
 
     STATUS=$(grep "^STATUS=" "$session_file" | cut -d= -f2)
-    IP=$(grep "^IP=" "$session_file" | cut -d= -f2)
     COINS=$(grep "^COINS=" "$session_file" | cut -d= -f2)
     TOTAL=$(grep "^TOTAL=" "$session_file" | cut -d= -f2)
     REMAINING=$(grep "^REMAINING=" "$session_file" | cut -d= -f2)
     STARTED=$(grep "^STARTED=" "$session_file" | cut -d= -f2)
 
-    SESSION_JSON="{\"status\":\"$STATUS\",\"ip\":\"$IP\",\"coins\":$COINS,\"total\":$TOTAL,\"remaining\":$REMAINING,\"started\":$STARTED}"
+    SESSION_JSON="{\"status\":\"$STATUS\",\"coins\":$COINS,\"total\":$TOTAL,\"remaining\":$REMAINING,\"started\":$STARTED}"
 done
 
 if [ -z "$SESSION_JSON" ]; then
@@ -73,8 +72,9 @@ if [ -f "$EVENT_FILE" ]; then
     LAST_COIN_TIME=$(echo "$EVENT_CONTENT" | awk '{print $2}')
 fi
 
-# Connected clients count
-CLIENT_COUNT=$(wc -l < /var/lib/dnsmasq/dnsmasq.leases 2>/dev/null || echo 0)
+# Ethernet IP address
+ETH_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+[ -z "$ETH_IP" ] && ETH_IP="0.0.0.0"
 
 # ============================================
 # GENERATE JSON
@@ -84,16 +84,14 @@ cat > "$OUTPUT_FILE" << EOF
     "timestamp": $(date +%s),
     "system": {
         "online": $SYSTEM_ONLINE,
-        "ssid": "AirCoins_Free",
-        "ip": "192.168.42.1"
+        "ip": "$ETH_IP"
     },
     "session": $SESSION_JSON,
     "stats": {
         "total_earnings": ${TOTAL_EARNINGS:-0},
         "total_coins": ${TOTAL_COINS:-0},
         "total_sessions": ${TOTAL_SESSIONS:-0},
-        "active_clients": $ACTIVE_SESSIONS,
-        "connected_devices": $CLIENT_COUNT
+        "active_clients": $ACTIVE_SESSIONS
     },
     "gpio": {
         "coin_count": ${GPIO_COIN_COUNT:-0},

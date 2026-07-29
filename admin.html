@@ -327,8 +327,8 @@
             <div class="admin-card">
                 <h3>🔧 Settings</h3>
                 <div class="form-group">
-                    <label>WiFi Name (SSID)</label>
-                    <input type="text" id="ssid" value="AirCoins_Free">
+                    <label>Portal IP</label>
+                    <input type="text" id="portal_ip" placeholder="192.168.1.100">
                 </div>
                 <div class="form-group">
                     <label>Bandwidth Limit (Mbps)</label>
@@ -437,9 +437,9 @@
             sessionLogs: [],
             startTimeStamp: Date.now(),
             pricing: { 1: 5, 5: 30, 10: 60 },
-            ssid: 'AirCoins_Free',
             bandwidth: 50,
             maxSession: 120,
+            portal_ip: '',
             gpioPin: 7,
             gpioCoinValue: 1,
             gpioPulseMode: 'falling'
@@ -455,12 +455,12 @@
                 state.sessionsCount = parsed.sessionsCount || 0;
                 state.sessionLogs = parsed.sessionLogs || [];
                 state.pricing = parsed.pricing || { 1: 5, 5: 30, 10: 60 };
-                state.ssid = parsed.ssid || 'AirCoins_Free';
                 state.bandwidth = parsed.bandwidth || 50;
                 state.maxSession = parsed.maxSession || 120;
                 state.gpioPin = parsed.gpioPin || 7;
                 state.gpioCoinValue = parsed.gpioCoinValue || 1;
                 state.gpioPulseMode = parsed.gpioPulseMode || 'falling';
+                state.portal_ip = parsed.portal_ip || '';
             }
         }
 
@@ -472,12 +472,12 @@
                 sessionsCount: state.sessionsCount,
                 sessionLogs: state.sessionLogs,
                 pricing: state.pricing,
-                ssid: state.ssid,
                 bandwidth: state.bandwidth,
                 maxSession: state.maxSession,
                 gpioPin: state.gpioPin,
                 gpioCoinValue: state.gpioCoinValue,
-                gpioPulseMode: state.gpioPulseMode
+                gpioPulseMode: state.gpioPulseMode,
+                portal_ip: state.portal_ip
             }));
         }
 
@@ -530,9 +530,9 @@
                 });
             }
 
-            document.getElementById('ssid').value = state.ssid;
             document.getElementById('bandwidth').value = state.bandwidth;
             document.getElementById('maxSession').value = state.maxSession;
+            document.getElementById('portal_ip').value = state.portal_ip;
 
             updatePricingTable();
             loadGpioConfig();
@@ -546,9 +546,9 @@
         }
 
         function saveSettings() {
-            state.ssid = document.getElementById('ssid').value;
             state.bandwidth = parseInt(document.getElementById('bandwidth').value);
             state.maxSession = parseInt(document.getElementById('maxSession').value);
+            state.portal_ip = document.getElementById('portal_ip').value;
             saveState();
             showNotification('Settings saved!', 'success');
         }

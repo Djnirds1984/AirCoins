@@ -1,8 +1,8 @@
 #!/bin/bash
 # ============================================
-# AirCoins PisoWiFi - Session Manager
+# AirCoins - Session Manager
 # ============================================
-# Manages client sessions: time tracking, iptables rules,
+# Manages client sessions: time tracking,
 # coin events processing, and session expiry
 #
 # Install to: /usr/local/bin/pisowifi-session-manager
@@ -12,9 +12,7 @@
 # ============================================
 # CONFIGURATION
 # ============================================
-WIFI_IFACE="wlan0"
 ETH_IFACE="eth0"
-PORTAL_IP="192.168.42.1"
 
 # Central interface/network config (overrides the defaults above if present)
 PISOWIFI_CONF="/etc/pisowifi/pisowifi.conf"
@@ -44,15 +42,6 @@ log() {
 # ============================================
 cleanup() {
     log "Session Manager stopping..."
-    # Remove all client iptables rules
-    for session_file in "$SESSION_DIR"/*.session; do
-        if [ -f "$session_file" ]; then
-            CLIENT_IP=$(grep "^IP=" "$session_file" | cut -d= -f2)
-            if [ -n "$CLIENT_IP" ]; then
-                iptables -D ALLOWED_CLIENTS -s "$CLIENT_IP" -j ACCEPT 2>/dev/null
-            fi
-        fi
-    done
     rm -f "$PID_FILE"
     exit 0
 }
@@ -72,256 +61,6 @@ if [ ! -f "$STATS_FILE" ]; then
     echo "total_coins=0" >> "$STATS_FILE"
     echo "total_sessions=0" >> "$STATS_FILE"
 fi
-
-# ============================================
-# FUNCTIONS
-# ============================================
-
-# Get minutes for a coin value
-get_minutes_for_coin() {
-    local amount=$1
-    case $amount in
-        1)  echo $PRICE_1 ;;
-        5)  echo $PRICE_5 ;;
-        10) echo $PRICE_10 ;;
-        *)  echo $((amount * PRICE_1)) ;;  # Default: 5 min per peso
-    esac
-}
-
-# Add client to allowed iptables chain
-allow_client() {
-    local client_ip=$1
-    # Check if rule already exists
-    if ! iptables -C ALLOWED_CLIENTS -s "$client_ip" -j ACCEPT 2>/dev/null; then
-        # Insert before the DROP rule (last rule in chain)
-        local rule_num=$(iptables -L ALLOWED_CLIENTS --line-numbers | grep "DROP" | tail -1 | awk '{print $1}')
-        if [ -n "$rule_num" ]; then
-            iptables -I ALLOWED_CLIENTS "$rule_num" -s "$client_ip" -j ACCEPT
-        else
-            iptables -I ALLOWED_CLIENTS -s "$client_ip" -j ACCEPT
-        fi
-        log "ALLOWED: $client_ip can now access internet"
-    fi
-}
-
-# Remove client from allowed iptables chain
-block_client() {
-    local client_ip=$1
-    while iptables -D ALLOWED_CLIENTS -s "$client_ip" -j ACCEPT 2>/dev/null; do
-        :  # Remove all matching rules
-    done
-    log "BLOCKED: $client_ip internet access revoked"
-}
-
-# Get client IP from MAC address
-get_client_ip() {
-    local mac=$1
-    # Check dnsmasq leases file
-    local ip=$(grep "$mac" /var/lib/dnsmasq/dnsmasq.leases 2>/dev/null | awk '{print $3}')
-    if [ -z "$ip" ]; then
-        # Fallback: check ARP table
-        ip=$(ip neigh show dev $WIFI_IFACE | grep "$mac" | awk '{print $1}')
-    fi
-    echo "$ip"
-}
-
-# Process a coin event
-process_coin_event() {
-    if [ ! -f "$EVENT_FILE" ]; then
-        return
-    fi
-
-    # Read and clear event file atomically
-    local event_content=$(cat "$EVENT_FILE")
-    > "$EVENT_FILE"
-
-    local coin_value=$(echo "$event_content" | awk '{print $1}')
-    local event_time=$(echo "$event_content" | awk '{print $2}')
-
-    if [ -z "$coin_value" ] || [ "$coin_value" = "0" ]; then
-        return
-    fi
-
-    local minutes=$(get_minutes_for_coin "$coin_value")
-    local seconds=$((minutes * 60))
-
-    log "COIN EVENT: ₱$coin_value = $minutes minutes ($seconds seconds)"
-
-    # Find the most recent active session (or create new one)
-    # For single-client system, we use a "default" session
-    # For multi-client, we'd match by MAC/IP
-    local session_file="$SESSION_DIR/default.session"
-
-    if [ -f "$session_file" ]; then
-        # Add time to existing session
-        local current_remaining=$(grep "^REMAINING=" "$session_file" | cut -d= -f2)
-        local current_total=$(grep "^TOTAL=" "$session_file" | cut -d= -f2)
-        local current_coins=$(grep "^COINS=" "$session_file" | cut -d= -f2)
-        local client_ip=$(grep "^IP=" "$session_file" | cut -d= -f2)
-
-        local new_remaining=$((current_remaining + seconds))
-        local new_total=$((current_total + seconds))
-        local new_coins=$((current_coins + coin_value))
-
-        # Update session file
-        cat > "$session_file" << EOF
-STATUS=active
-IP=$client_ip
-COINS=$new_coins
-TOTAL=$new_total
-REMAINING=$new_remaining
-STARTED=$(grep "^STARTED=" "$session_file" | cut -d= -f2)
-UPDATED=$(date +%s)
-EOF
-        log "SESSION UPDATED: ₱$new_coins total | $new_remaining seconds remaining"
-
-        # Ensure client is allowed
-        if [ -n "$client_ip" ]; then
-            allow_client "$client_ip"
-        fi
-    else
-        # New session - get client IP from DHCP leases
-        local client_ip=$(get_latest_client_ip)
-
-        if [ -z "$client_ip" ]; then
-            log "WARNING: No client connected. Coin ₱$coin_value queued."
-            # Store pending coin
-            echo "$coin_value" >> "$SESSION_DIR/pending_coins"
-            return
-        fi
-
-        # Create new session
-        cat > "$session_file" << EOF
-STATUS=active
-IP=$client_ip
-COINS=$coin_value
-TOTAL=$seconds
-REMAINING=$seconds
-STARTED=$(date +%s)
-UPDATED=$(date +%s)
-EOF
-        log "NEW SESSION: $client_ip | ₱$coin_value | $minutes minutes"
-
-        # Allow client through iptables
-        allow_client "$client_ip"
-    fi
-
-    # Update stats
-    update_stats "$coin_value"
-}
-
-# Get the most recently connected client IP
-get_latest_client_ip() {
-    local latest_ip=""
-    local latest_time=0
-
-    while IFS= read -r line; do
-        local ip=$(echo "$line" | awk '{print $3}')
-        local expiry=$(echo "$line" | awk '{print $2}')
-        if [ -n "$ip" ] && [ "$ip" != "$PORTAL_IP" ]; then
-            # Check if client is in ARP table (actually connected)
-            if ip neigh show dev $WIFI_IFACE | grep -q "$ip"; then
-                latest_ip="$ip"
-                break
-            fi
-        fi
-    done < <(sort -k2 -rn /var/lib/dnsmasq/dnsmasq.leases 2>/dev/null)
-
-    echo "$latest_ip"
-}
-
-# Update statistics
-update_stats() {
-    local coin_value=$1
-    local earnings=$(grep "^total_earnings=" "$STATS_FILE" | cut -d= -f2)
-    local coins=$(grep "^total_coins=" "$STATS_FILE" | cut -d= -f2)
-    local sessions=$(grep "^total_sessions=" "$STATS_FILE" | cut -d= -f2)
-
-    earnings=$((earnings + coin_value))
-    coins=$((coins + 1))
-
-    cat > "$STATS_FILE" << EOF
-total_earnings=$earnings
-total_coins=$coins
-total_sessions=$sessions
-EOF
-}
-
-# Check and expire sessions
-check_sessions() {
-    for session_file in "$SESSION_DIR"/*.session; do
-        [ -f "$session_file" ] || continue
-
-        local status=$(grep "^STATUS=" "$session_file" | cut -d= -f2)
-        local remaining=$(grep "^REMAINING=" "$session_file" | cut -d= -f2)
-        local client_ip=$(grep "^IP=" "$session_file" | cut -d= -f2)
-
-        if [ "$status" = "active" ]; then
-            if [ "$remaining" -le 0 ] 2>/dev/null; then
-                # Session expired
-                log "SESSION EXPIRED: $client_ip"
-                block_client "$client_ip"
-
-                # Update session status
-                sed -i 's/^STATUS=active/STATUS=expired/' "$session_file"
-
-                # Move to log
-                cat "$session_file" >> "$SESSION_DIR/session_history.log"
-                rm -f "$session_file"
-            fi
-        fi
-    done
-}
-
-# Tick: decrement remaining seconds for all active sessions
-tick_sessions() {
-    for session_file in "$SESSION_DIR"/*.session; do
-        [ -f "$session_file" ] || continue
-
-        local status=$(grep "^STATUS=" "$session_file" | cut -d= -f2)
-        if [ "$status" = "active" ]; then
-            local remaining=$(grep "^REMAINING=" "$session_file" | cut -d= -f2)
-            if [ -n "$remaining" ] && [ "$remaining" -gt 0 ] 2>/dev/null; then
-                local new_remaining=$((remaining - 1))
-                sed -i "s/^REMAINING=.*/REMAINING=$new_remaining/" "$session_file"
-                sed -i "s/^UPDATED=.*/UPDATED=$(date +%s)/" "$session_file"
-            fi
-        fi
-    done
-}
-
-# Process any pending coins (coins inserted before client connected)
-process_pending_coins() {
-    if [ -f "$SESSION_DIR/pending_coins" ]; then
-        local total_pending=0
-        while IFS= read -r val; do
-            total_pending=$((total_pending + val))
-        done < "$SESSION_DIR/pending_coins"
-
-        if [ "$total_pending" -gt 0 ]; then
-            local client_ip=$(get_latest_client_ip)
-            if [ -n "$client_ip" ]; then
-                log "Processing pending coins: ₱$total_pending for $client_ip"
-                local minutes=$(get_minutes_for_coin "$total_pending")
-                local seconds=$((minutes * 60))
-
-                local session_file="$SESSION_DIR/default.session"
-                cat > "$session_file" << EOF
-STATUS=active
-IP=$client_ip
-COINS=$total_pending
-TOTAL=$seconds
-REMAINING=$seconds
-STARTED=$(date +%s)
-UPDATED=$(date +%s)
-EOF
-                allow_client "$client_ip"
-                update_stats "$total_pending"
-                rm -f "$SESSION_DIR/pending_coins"
-            fi
-        fi
-    fi
-}
 
 # ============================================
 # API-BASED PROCESSING (PostgreSQL-backed via Go API)
@@ -352,22 +91,12 @@ process_coin_events() {
 
             log "COIN EVENT: ₱$coin_value = $minutes minutes ($seconds seconds)"
 
-            # Find or create session for latest client
-            local client_ip=$(get_latest_client_ip)
+            # Start or extend session via API
+            curl -s -X POST "$API_URL/api/session/start" \
+                -H "Content-Type: application/json" \
+                -d "{\"client_ip\":\"local\",\"seconds\":$seconds,\"coins\":$coin_value}" > /dev/null 2>&1
 
-            if [ -n "$client_ip" ]; then
-                # Start or extend session
-                curl -s -X POST "$API_URL/api/session/start" \
-                    -H "Content-Type: application/json" \
-                    -d "{\"client_ip\":\"$client_ip\",\"seconds\":$seconds,\"coins\":$coin_value}" > /dev/null 2>&1
-
-                # Ensure client is allowed through iptables
-                allow_client "$client_ip"
-
-                log "SESSION: $client_ip | ₱$coin_value | $minutes minutes"
-            else
-                log "WARNING: No client connected. Coin ₱$coin_value queued."
-            fi
+            log "SESSION: ₱$coin_value | $minutes minutes"
 
             # Mark event as processed
             curl -s -X POST "$API_URL/api/gpio/coin/$event_id/processed" > /dev/null 2>&1
@@ -398,7 +127,7 @@ tick_sessions() {
     done
 }
 
-# Expire sessions and block their clients (via API)
+# Expire sessions (via API)
 check_sessions() {
     # Get expired sessions
     local expired=$(curl -s "$API_URL/api/admin/sessions?status=expired" 2>/dev/null)
@@ -407,13 +136,12 @@ check_sessions() {
         return
     fi
 
-    # Block each expired client
+    # Log each expired session
     echo "$expired" | while read -r session; do
-        local client_ip=$(echo "$session" | grep -o '"client_ip":"[^"]*"' | cut -d'"' -f4)
+        local session_id=$(echo "$session" | grep -o '"id":[0-9]*' | cut -d: -f2)
 
-        if [ -n "$client_ip" ]; then
-            block_client "$client_ip"
-            log "SESSION EXPIRED: $client_ip"
+        if [ -n "$session_id" ]; then
+            log "SESSION EXPIRED: session_id=$session_id"
         fi
     done
 }
@@ -430,7 +158,7 @@ while true; do
     # Tick all active sessions (decrement 1 second via API)
     tick_sessions
 
-    # Check for expired sessions and update iptables
+    # Check for expired sessions
     check_sessions
 
     # Sleep 1 second

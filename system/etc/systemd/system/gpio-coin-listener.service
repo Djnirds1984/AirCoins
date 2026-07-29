@@ -1,5 +1,5 @@
 [Unit]
-Description=AirCoins PisoWiFi - GPIO Coin Listener
+Description=AirCoins - GPIO Coin Listener
 After=network.target
 Wants=network.target
 

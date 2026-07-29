@@ -1,4 +1,4 @@
-# AirCoins PisoWiFi - Deployment Guide
+# AirCoins PisoNet - Deployment Guide
 
 ## Multi-Platform Setup & Installation Instructions
 
@@ -13,10 +13,9 @@
 | Component | Specification |
 |-----------|--------------|
 | **Single Board Computer** | Orange Pi One (Allwinner H3, 512MB RAM) |
-| **WiFi Module** | Built-in or USB WiFi dongle (RTL8188CUS / RTL8192CU recommended) |
-| **Internet Connection** | Ethernet (eth0) connected to upstream internet |
+| **Internet Connection** | Ethernet (eth0) connected to ISP router |
 | **Coin Acceptor** | Multi-coin acceptor with pulse output (5V, programmable) |
-| **Power Supply** | 5V 3A micro USB (stable power required for WiFi AP) |
+| **Power Supply** | 5V 3A micro USB |
 | **MicroSD Card** | 16GB+ Class 10 (for OS) |
 | **Enclosure** | Metal/plastic case with coin slot cutout |
 
@@ -79,23 +78,9 @@ auto eth0
 iface eth0 inet dhcp
 ```
 
-**/etc/network/interfaces** (WiFi - AP mode, managed by hostapd):
-```
-# wlan0 is managed by hostapd - do NOT configure here
-```
-
 ```bash
 # 5. Update system
 apt-get update && apt-get upgrade -y
-
-# 6. Enable WiFi adapter (if using USB WiFi)
-# Check if WiFi is detected:
-iwconfig
-# or
-ip link show
-
-# If wlan0 is not visible, install firmware:
-apt-get install firmware-realtek    # For RTL8188/RTL8192 chipsets
 ```
 
 ### Option B: Ubuntu/Debian x86_64 (Development Mode)
@@ -109,7 +94,7 @@ For development and testing on a regular PC or VM.
 | **OS** | Ubuntu 20.04+ or Debian 11+ |
 | **RAM** | 1GB minimum (2GB recommended) |
 | **Disk** | 10GB free space |
-| **Network** | Ethernet or WiFi for remote access |
+| **Network** | Ethernet for LAN access |
 
 #### Setup
 
@@ -125,7 +110,7 @@ sudo apt-get install -y openssh-server
 sudo systemctl enable ssh
 ```
 
-> **Note:** On x86, GPIO and WiFi AP features are disabled. The system runs in development mode where coin events can be simulated via API calls or file-based events.
+> **Note:** On x86, GPIO hardware is unavailable. The system runs in development mode where coin events can be simulated via API calls or file-based events.
 
 ---
 
@@ -151,7 +136,7 @@ sudo bash install.sh
 The `install.sh` script automatically:
 1. Detects architecture (ARM Orange Pi or x86 Ubuntu/Debian)
 2. Updates system packages
-3. Installs PostgreSQL, Go, lighttpd (and hostapd/dnsmasq on ARM)
+3. Installs PostgreSQL, Go, lighttpd
 4. Creates PostgreSQL database and user
 5. Runs database schema migrations
 6. Builds and deploys the Go API server
@@ -161,8 +146,8 @@ The `install.sh` script automatically:
 10. Installs and enables systemd services
 
 **Platform-specific behavior:**
-- **ARM (Orange Pi):** Full setup with WiFi AP, GPIO, iptables
-- **x86 (Ubuntu/Debian):** Development mode - skips WiFi AP and GPIO hardware, uses file-based coin simulation
+- **ARM (Orange Pi):** Full setup with GPIO and Ethernet LAN
+- **x86 (Ubuntu/Debian):** Development mode — skips GPIO hardware, uses file-based coin simulation
 
 > **Note:** A reboot is recommended after installation before first use.
 
@@ -226,66 +211,48 @@ sudo reboot
 ### Start Services
 
 ```bash
-# Start all PisoWiFi services
+# Start all PisoNet services
 sudo pisowifi-ctl start
 
 # Check status
 sudo pisowifi-ctl status
 ```
 
-### Admin Panel Access via Ethernet (No WiFi Required)
+### Admin Panel Access via Ethernet LAN
 
 The web server listens on **all interfaces**, so after deployment the admin
-panel is accessible via the device's Ethernet IP from any device on the same
-LAN — no WiFi adapter is required for initial setup:
+panel is accessible from any device on the same LAN:
 
 ```bash
 # Find the device's Ethernet IP
 ip addr show eth0
 
 # Then from any browser on the same LAN:
-# http://<device-ip>            (customer portal)
-# http://<device-ip>/admin.html (admin panel)
+# http://<device-ethernet-ip>            (customer portal)
+# http://<device-ethernet-ip>/admin.html (admin panel)
 ```
-
-> The captive-portal redirect only applies to WiFi clients on 192.168.42.0/24;
-> requests arriving on the Ethernet IP are served directly.
 
 ### Verify Everything Works
 
 ```bash
-# 1. Check WiFi AP is broadcasting
-sudo iwconfig wlan0
-# Should show: SSID=AirCoins_Free
-
-# 2. Check DHCP is serving IPs
-cat /var/lib/dnsmasq/dnsmasq.leases
-
-# 3. Check web portal is accessible
-curl -I http://192.168.42.1
+# 1. Check web portal is accessible
+curl -I http://localhost
 # Should return HTTP 200
 
-# 4. Check GPIO listener is running
+# 2. Check GPIO listener is running
 sudo pisowifi-ctl status
 # GPIO Coin Listener should show: RUNNING
 
-# 5. Check iptables rules
-sudo iptables -L -n -v
+# 3. Check Go API is responding
+curl -I http://localhost:8080/api/system/status
+
+# 4. Check lighttpd is running
+sudo systemctl status lighttpd
 ```
 
 ---
 
 ## 6. Testing
-
-### Test from a Phone/Laptop
-
-1. Connect to WiFi network: **AirCoins_Free**
-2. Open a browser - you should be redirected to the portal
-3. Click **INSERT COIN** button - GPIO modal opens with 60-second countdown
-4. Insert a real coin into the coin acceptor
-5. The modal detects the coin, resets the 60s countdown, and shows the amount
-6. Insert more coins or click **Done Paying**
-7. Verify the countdown timer appears on the main screen
 
 ### Test GPIO (with real coin acceptor)
 
@@ -302,7 +269,7 @@ tail -f /var/log/pisowifi/session.log
 
 ### Test GPIO Pin from Admin Panel
 
-1. Go to **http://192.168.42.1/admin.html**
+1. Go to **http://<device-ethernet-ip>/admin.html**
 2. Login with **admin / admin123**
 3. Select the GPIO pin in the **GPIO Pin Configuration** section
 4. Click **Test Pin** to read the real pin state
@@ -394,12 +361,6 @@ sudo systemctl start pisowifi-session
 sudo systemctl status pisowifi-session
 sudo journalctl -u pisowifi-session -f
 
-# WiFi AP
-sudo systemctl start hostapd
-
-# DHCP/DNS
-sudo systemctl start dnsmasq
-
 # Web Server
 sudo systemctl start lighttpd
 
@@ -411,46 +372,9 @@ sudo systemctl status postgresql
 
 ## 8. Configuration
 
-### Configure the WiFi Interface (Required)
-
-The Orange Pi PC / One has **no built-in WiFi**. You must plug in a USB WiFi
-adapter that supports **AP (master) mode**. Because the interface name can vary
-between adapters/kernels (`wlan0`, `wlan1`, `wlx001122334455`, ...), the system
-reads the interface name from a central config file instead of assuming `wlan0`.
-
-```bash
-# 1. Plug in the USB WiFi adapter, then find its interface name:
-ip link
-# or
-iw dev
-
-# 2. Set WIFI_IFACE to match in the central config file:
-sudo nano /etc/pisowifi/pisowifi.conf
-#    WIFI_IFACE=wlan0        <-- change to your adapter's name
-
-# 3. Apply the change:
-sudo pisowifi-ctl restart
-```
-
-`/etc/pisowifi/pisowifi.conf` is sourced by `pisowifi-ctl`, the session manager
-and the iptables rules. On startup `pisowifi-ctl` writes `WIFI_IFACE` into
-`/etc/hostapd/hostapd.conf` and `/etc/dnsmasq.conf` so they always match.
-
-> If the configured interface does not exist, `pisowifi-ctl start` prints a
-> clear error listing the available interfaces and skips the WiFi AP / DHCP,
-> while the web server, API and GPIO listener keep running.
-
-### Change WiFi SSID
-
-```bash
-sudo nano /etc/hostapd/hostapd.conf
-# Edit the line: ssid=YourNewName
-sudo pisowifi-ctl restart
-```
-
 ### Change Pricing
 
-Edit in the **Admin Panel** (http://192.168.42.1 → Admin → Login)
+Edit in the **Admin Panel** (http://<device-ethernet-ip>/admin.html → Admin → Login)
 - Default credentials: `admin` / `admin123`
 - Click **Edit Pricing** to change minutes per coin
 
@@ -469,53 +393,9 @@ sudo nano /usr/local/bin/gpio-coin-listener
 sudo systemctl restart gpio-coin-listener
 ```
 
-### Change Network Range
-
-```bash
-# Edit DHCP range
-sudo nano /etc/dnsmasq/dnsmasq.conf
-# Change: dhcp-range=192.168.42.100,192.168.42.200,255.255.255.0,12h
-
-# Edit portal IP
-sudo nano /etc/iptables/pisowifi.rules.sh
-# Change: PORTAL_IP="192.168.42.1"
-
-sudo pisowifi-ctl restart
-```
-
 ---
 
 ## 9. Troubleshooting
-
-### WiFi AP Not Broadcasting
-
-```bash
-# Check if WiFi adapter is detected
-lsusb                          # USB adapters
-ip link show wlan0             # Interface exists?
-
-# Check hostapd logs
-sudo journalctl -u hostapd -n 50
-
-# Test hostapd manually
-sudo hostapd -d /etc/hostapd/hostapd.conf
-```
-
-### No Internet for Clients
-
-```bash
-# Check IP forwarding
-cat /proc/sys/net/ipv4/ip_forward    # Should be 1
-
-# Check iptables NAT
-sudo iptables -t nat -L -n
-
-# Check Ethernet has internet
-ping -c 3 8.8.8.8
-
-# Reapply iptables rules
-sudo bash /etc/iptables/pisowifi.rules.sh
-```
 
 ### Portal Not Loading
 
@@ -559,56 +439,41 @@ tail -f /var/log/pisowifi/gpio-coin.log
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Orange Pi One                            │
 │                                                                  │
-│  ┌──────────┐    ┌──────────┐    ┌──────────────────────────┐   │
-│  │ hostapd  │    │ dnsmasq  │    │        lighttpd          │   │
-│  │ (WiFi AP)│    │(DHCP+DNS)│    │   (Web Server + Proxy)   │   │
-│  └────┬─────┘    └────┬─────┘    └──────────┬───────────────┘   │
-│       │               │                      │                   │
-│       │    ┌──────────┴────────┐             │                   │
-│       │    │     iptables      │             │                   │
-│       │    │  (NAT + Captive   │             │                   │
-│       │    │   Portal + Auth)  │             │                   │
-│       │    └──────────┬────────┘             │                   │
-│       │               │                      │                   │
-│  ┌────┴─────┐    ┌────┴──────────┐    ┌──────┴──────────────┐   │
-│  │  wlan0   │    │     eth0      │    │  /api/* → Go :8080  │   │
-│  │ (WiFi AP)│    │  (Internet)   │    │  (reverse proxy)    │   │
-│  └──────────┘    └───────────────┘    └──────────┬──────────┘   │
-│                                                   │              │
-│  ┌──────────────────┐    ┌────────────────────────┴──────────┐   │
-│  │ GPIO Coin        │    │     Go API Server (:8080)         │   │
-│  │ Listener         │───▶│  ┌─────────────────────────────┐  │   │
-│  │ (gpio-coin-      │    │  │  REST API Endpoints:        │  │   │
-│  │  listener)       │    │  │  /api/admin/*               │  │   │
-│  └──────────────────┘    │  │  /api/session/*             │  │   │
-│                          │  │  /api/gpio/*                │  │   │
-│  ┌──────────────────┐    │  │  /api/pricing/*             │  │   │
-│  │ Session Manager  │───▶│  │  /api/system/*              │  │   │
-│  │ (pisowifi-       │    │  └─────────────────────────────┘  │   │
-│  │  session-manager)│    └──────────────────┬────────────────┘   │
-│  └──────────────────┘                       │                    │
-│                                             │                    │
-│                          ┌──────────────────┴────────────────┐   │
-│                          │       PostgreSQL Database         │   │
-│                          │  ┌─────────────────────────────┐  │   │
-│                          │  │  Tables:                    │  │   │
-│                          │  │  - admin_users              │  │   │
-│                          │  │  - sessions                 │  │   │
-│                          │  │  - coin_events              │  │   │
-│                          │  │  - gpio_config              │  │   │
-│                          │  │  - pricing                  │  │   │
-│                          │  │  - system_settings          │  │   │
-│                          │  │  - daily_stats              │  │   │
-│                          │  │  - system_logs              │  │   │
-│                          │  └─────────────────────────────┘  │   │
-│                          └───────────────────────────────────┘   │
+│  ┌──────────────────────────┐                                    │
+│  │        lighttpd          │                                    │
+│  │   (Web Server + Proxy)   │                                    │
+│  └──────────┬───────────────┘                                    │
+│             │                                                    │
+│  ┌──────────┴────────────────────────────────────────────────┐   │
+│  │  /api/* → Go API :8080 (reverse proxy)                    │   │
+│  └──────────────────────────┬────────────────────────────────┘   │
+│                              │                                   │
+│  ┌──────────────────┐    ┌───┴─────────────────────────────┐    │
+│  │ GPIO Coin        │    │     Go API Server (:8080)        │    │
+│  │ Listener         │───▶│  REST API Endpoints:             │    │
+│  │ (gpio-coin-      │    │  /api/admin/*                    │    │
+│  │  listener)       │    │  /api/session/*                  │    │
+│  └──────────────────┘    │  /api/gpio/*                     │    │
+│                          │  /api/pricing/*                   │    │
+│  ┌──────────────────┐    │  /api/system/*                    │    │
+│  │ Session Manager  │───▶└──────────────────┬──────────────┘    │
+│  │ (pisowifi-       │                       │                   │
+│  │  session-manager)│    ┌──────────────────┴───────────────┐   │
+│  └──────────────────┘    │       PostgreSQL Database         │   │
+│                          │  Tables:                          │   │
+│  ┌─────────────────────┐ │  - admin_users, sessions          │   │
+│  │  eth0 (Ethernet)    │ │  - coin_events, gpio_config       │   │
+│  │  ISP Router (LAN)   │ │  - pricing, system_settings       │   │
+│  │  Clients access via │ │  - daily_stats, system_logs       │   │
+│  │  Ethernet LAN       │ └───────────────────────────────────┘   │
+│  └─────────────────────┘                                         │
 │                                                                  │
-│                          ┌───────────────────────────────────┐   │
-│                          │  Frontend (HTML/JS)               │   │
-│                          │  - index.html (Customer Portal)   │   │
-│                          │  - admin.html (Admin Dashboard)   │   │
-│                          │  (polls /api/* endpoints)         │   │
-│                          └───────────────────────────────────┘   │
+│  ┌───────────────────────────────────────────────────────────┐   │
+│  │  Frontend (HTML/JS)                                       │   │
+│  │  - index.html (Customer Portal)                           │   │
+│  │  - admin.html (Admin Dashboard)                           │   │
+│  │  Access: http://<device-ethernet-ip>/admin.html           │   │
+│  └───────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -651,7 +516,7 @@ tail -f /var/log/pisowifi/gpio-coin.log
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-> **Note:** On x86, WiFi AP (hostapd), DHCP (dnsmasq), and iptables NAT are not configured. The web portal is accessed directly via localhost or the machine's IP address.
+> **Note:** On x86, real GPIO hardware is not available. The web portal is accessed directly via localhost or the machine's IP address.
 
 ---
 
@@ -663,9 +528,6 @@ tail -f /var/log/pisowifi/gpio-coin.log
 | Admin Portal | `/var/www/html/admin.html` | Admin dashboard |
 | Go API binary | `/usr/local/bin/aircoins-api/aircoins-api` | REST API server |
 | lighttpd config | `/etc/lighttpd/lighttpd.conf` | Web server + reverse proxy |
-| hostapd config | `/etc/hostapd/hostapd.conf` | WiFi AP settings (ARM only) |
-| dnsmasq config | `/etc/dnsmasq.conf` | DHCP + DNS redirect (ARM only) |
-| iptables rules | `/etc/iptables/pisowifi.rules.sh` | Firewall/NAT rules (ARM only) |
 | GPIO listener | `/usr/local/bin/gpio-coin-listener` | Coin detection daemon |
 | Session manager | `/usr/local/bin/pisowifi-session-manager` | Session + auth manager |
 | API updater | `/usr/local/bin/pisowifi-api-update` | JSON status generator |
@@ -682,10 +544,7 @@ tail -f /var/log/pisowifi/gpio-coin.log
 
 - **Change admin password** after first login (Admin → Settings)
 - **Default credentials:** admin / admin123 (change immediately on production)
-- **ARM:** Client isolation is enabled in hostapd (clients can't see each other)
-- **ARM:** Firewall blocks all inbound by default except portal services
-- **ARM:** Rate limiting prevents connection flooding (20 concurrent per client)
-- For production, change the default WiFi password in hostapd.conf if needed
+- The admin panel is accessible from any device on the same Ethernet LAN at `http://<device-ethernet-ip>/admin.html`
 - Regularly update system: `apt-get update && apt-get upgrade -y`
 - **x86:** For development only - do not expose to untrusted networks
 

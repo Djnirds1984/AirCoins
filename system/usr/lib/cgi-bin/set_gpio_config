@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================
-# AirCoins PisoWiFi - GPIO Config CGI Handler
+# AirCoins - GPIO Config CGI Handler
 # ============================================
 # Receives GPIO config from admin panel
 # Writes to /var/lib/pisowifi/gpio_config

@@ -1,6 +1,6 @@
 [Unit]
 Description=dnsmasq DHCP/DNS for %i
-After=network-online.target
+After=network-online.target aircoins-vlans.service
 Wants=network-online.target
 
 [Service]

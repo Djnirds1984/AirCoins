@@ -20,6 +20,16 @@ INSTALL_DIR="/opt/aircoins"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYSTEM_DIR="$SCRIPT_DIR/system"
 
+# Database settings (defaults match the Go API defaults in
+# system/usr/local/bin/aircoins-api/main.go). Override via environment:
+#   DB_PASSWORD=mysecret sudo -E bash install.sh
+DB_NAME="${DB_NAME:-aircoins}"
+DB_USER="${DB_USER:-aircoins}"
+DB_PASSWORD="${DB_PASSWORD:-aircoins123}"
+
+# Never let apt/dpkg open interactive dialogs during unattended installs
+export DEBIAN_FRONTEND=noninteractive
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -141,7 +151,10 @@ stop_existing_services
 # ============================================
 echo -e "${YELLOW}[1/10]${NC} Updating system packages..."
 apt-get update -qq
-apt-get upgrade -y -qq
+# force-confdef/confold: never stop on a dpkg conffile prompt during upgrade
+apt-get upgrade -y -qq \
+    -o Dpkg::Options::=--force-confdef \
+    -o Dpkg::Options::=--force-confold
 echo -e "${GREEN}  ✓ System updated${NC}"
 
 # ============================================
@@ -201,47 +214,84 @@ echo -e "${YELLOW}[3/10]${NC} Setting up PostgreSQL database..."
 systemctl start postgresql
 systemctl enable postgresql
 
+# Wait until PostgreSQL accepts connections (a race with service startup
+# would otherwise make the schema/migration steps below fail)
+PG_READY=false
+for _ in $(seq 1 30); do
+    if sudo -u postgres pg_isready -q 2>/dev/null; then
+        PG_READY=true
+        break
+    fi
+    sleep 1
+done
+if [ "$PG_READY" != true ]; then
+    echo -e "${RED}  ✘ FATAL: PostgreSQL did not accept connections within 30s${NC}"
+    echo -e "${RED}    Check: systemctl status postgresql${NC}"
+    exit 1
+fi
+
 # Ensure pg_hba.conf allows password auth over TCP (localhost)
-# This is required so 'psql -U aircoins -h localhost' and the Go API can connect.
+# This is required so the Go API can connect as $DB_USER via localhost.
 PG_HBA=$(find /etc/postgresql -name pg_hba.conf 2>/dev/null | head -1)
-if [ -n "$PG_HBA" ] && ! grep -q "^host.*aircoins.*md5" "$PG_HBA" 2>/dev/null; then
+if [ -n "$PG_HBA" ] && ! grep -q "^host.*${DB_NAME}.*${DB_USER}.*md5" "$PG_HBA" 2>/dev/null; then
     echo "  Configuring pg_hba.conf for password authentication..."
     # Add entries before any 'reject' rules so they take precedence
-    sed -i '/^# DO NOT DISABLE/i \
-# AirCoins: allow password auth for the aircoins user\nhost    aircoins    aircoins    127.0.0.1/32    md5\nhost    aircoins    aircoins    ::1/128         md5' "$PG_HBA" 2>/dev/null || \
-    echo -e "${YELLOW}  ⚠ Could not auto-edit pg_hba.conf. If schema import fails, add manually:${NC}" \
-              "${YELLOW}    host  aircoins  aircoins  127.0.0.1/32  md5${NC}"
+    sed -i "/^# DO NOT DISABLE/i \\
+# AirCoins: allow password auth for the ${DB_USER} user\nhost    ${DB_NAME}    ${DB_USER}    127.0.0.1/32    md5\nhost    ${DB_NAME}    ${DB_USER}    ::1/128         md5" "$PG_HBA" 2>/dev/null || \
+    echo -e "${YELLOW}  ⚠ Could not auto-edit pg_hba.conf. If the API cannot connect, add manually:${NC}" \
+              "${YELLOW}    host  ${DB_NAME}  ${DB_USER}  127.0.0.1/32  md5${NC}"
     systemctl reload postgresql
 fi
 
-# Create database user and database
-sudo -u postgres psql -c "CREATE USER aircoins WITH PASSWORD 'aircoins123';" 2>/dev/null || true
-sudo -u postgres psql -c "CREATE DATABASE aircoins OWNER aircoins;" 2>/dev/null || true
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE aircoins TO aircoins;" 2>/dev/null || true
+# All psql calls below go through the postgres superuser via peer auth so
+# they are fully non-interactive — a password prompt can never appear.
+run_pg() { sudo -u postgres psql -v ON_ERROR_STOP=1 "$@"; }
 
-# Run schema (idempotent — skip if tables already exist)
-TABLES_EXIST=$(psql -U aircoins -d aircoins -h localhost -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='sessions';" 2>/dev/null || echo "0")
+# Create database user (idempotent), then ALWAYS (re)set the password so
+# repeat installs converge on the configured DB_PASSWORD
+if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}';" | grep -q 1; then
+    run_pg -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';"
+fi
+run_pg -c "ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';"
+
+# Create database if missing, ensure ownership + grants
+if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}';" | grep -q 1; then
+    run_pg -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};"
+fi
+run_pg -c "ALTER DATABASE ${DB_NAME} OWNER TO ${DB_USER};"
+run_pg -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};"
+
+# schema.sql grants table access to the "www-data" role (CGI scripts) —
+# make sure it exists so those GRANTs cannot fail under ON_ERROR_STOP
+if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='www-data';" | grep -q 1; then
+    run_pg -c 'CREATE ROLE "www-data" WITH LOGIN;'
+fi
+
+# Run schema (idempotent — skip if tables already exist).
+# SET ROLE keeps object ownership on $DB_USER even though psql connects as postgres.
+TABLES_EXIST=$(sudo -u postgres psql -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='sessions';" 2>/dev/null || echo "0")
 if [ "$TABLES_EXIST" = "1" ]; then
     echo -e "${GREEN}  ✓ Schema already applied, skipping${NC}"
 else
     echo "  Applying database schema..."
-    if ! psql -U aircoins -d aircoins -h localhost -f "$SYSTEM_DIR/database/schema.sql"; then
+    if ! run_pg -d "$DB_NAME" -c "SET ROLE ${DB_USER};" -f "$SYSTEM_DIR/database/schema.sql"; then
         echo -e "${RED}  ✘ FATAL: Schema import failed!${NC}"
         echo -e "${RED}    Please check PostgreSQL is running and try manually:${NC}"
-        echo -e "${RED}    psql -U aircoins -d aircoins -h localhost -f $SYSTEM_DIR/database/schema.sql${NC}"
+        echo -e "${RED}    sudo -u postgres psql -v ON_ERROR_STOP=1 -d ${DB_NAME} -c 'SET ROLE ${DB_USER};' -f $SYSTEM_DIR/database/schema.sql${NC}"
         exit 1
     fi
     echo -e "${GREEN}  ✓ Schema applied successfully${NC}"
 fi
 
-# Run idempotent migrations (safe on both fresh and existing databases)
+# Run idempotent migrations (safe on both fresh and existing databases).
+# Non-fatal: a failed migration must not abort the whole install.
 if [ -f "$SYSTEM_DIR/database/migrations.sql" ]; then
     echo "  Applying database migrations..."
-    if psql -U aircoins -d aircoins -h localhost -f "$SYSTEM_DIR/database/migrations.sql" > /dev/null; then
+    if run_pg -d "$DB_NAME" -c "SET ROLE ${DB_USER};" -f "$SYSTEM_DIR/database/migrations.sql" > /dev/null; then
         echo -e "${GREEN}  ✓ Migrations applied${NC}"
     else
         echo -e "${YELLOW}  ⚠ Migrations failed. Run manually:${NC}"
-        echo -e "${YELLOW}    psql -U aircoins -d aircoins -h localhost -f $SYSTEM_DIR/database/migrations.sql${NC}"
+        echo -e "${YELLOW}    sudo -u postgres psql -v ON_ERROR_STOP=1 -d ${DB_NAME} -c 'SET ROLE ${DB_USER};' -f $SYSTEM_DIR/database/migrations.sql${NC}"
     fi
 fi
 
@@ -308,7 +358,8 @@ if [ "$IS_ARM" = true ]; then
                 echo "  Installing WiringOP from source..."
                 cd /tmp
                 if [ ! -d "WiringOP" ]; then
-                    git clone https://github.com/orangepi-xunlong/wiringOP.git 2>/dev/null || {
+                    # GIT_TERMINAL_PROMPT=0: never hang on a credentials prompt
+                    GIT_TERMINAL_PROMPT=0 git clone https://github.com/orangepi-xunlong/wiringOP.git 2>/dev/null || {
                         echo -e "${YELLOW}  ⚠ WiringOP source not available.${NC}"
                     }
                 fi
@@ -554,8 +605,12 @@ echo -e "  ${RED}NOTE: A reboot is recommended before first use.${NC}"
 echo -e "  ${RED}      sudo reboot${NC}"
 echo ""
 
-# Ask to start now
-read -p "Start AirCoins now? [y/N]: " start_now
+# Ask to start now (only when running interactively — never block an
+# unattended install; default is No)
+start_now="n"
+if [ -t 0 ]; then
+    read -p "Start AirCoins now? [y/N]: " start_now || true
+fi
 if [[ "$start_now" =~ ^[Yy]$ ]]; then
     echo ""
     pisowifi-ctl start

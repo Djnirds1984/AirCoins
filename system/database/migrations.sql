@@ -4,9 +4,14 @@
 -- Applied on EVERY install/update run (install.sh), after schema.sql.
 -- Safe to run repeatedly on an already-provisioned device.
 --
--- Run manually as:
---   psql -U aircoins -d aircoins -h localhost -f migrations.sql
+-- Run manually as (non-interactive, via postgres superuser peer auth):
+--   sudo -u postgres psql -v ON_ERROR_STOP=1 -d aircoins -c 'SET ROLE aircoins;' -f migrations.sql
 -- ============================================
+
+-- Pin the schema explicitly: current_schema() checks below must resolve to
+-- 'public' whether this file runs as the aircoins role or as postgres
+-- (whose default "$user" schema does not exist).
+SET search_path = public;
 
 -- ============================================
 -- 001 - PRICING: drop rate-per-minute

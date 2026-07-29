@@ -2,7 +2,8 @@
 -- AirCoins PisoNet - PostgreSQL Database Schema
 -- ============================================
 -- Database: aircoins
--- Run as:  psql -U aircoins -d aircoins -f schema.sql
+-- Run as (non-interactive, via postgres superuser peer auth):
+--   sudo -u postgres psql -v ON_ERROR_STOP=1 -d aircoins -c 'SET ROLE aircoins;' -f schema.sql
 -- (install.sh creates the database and user before running this file)
 -- ============================================
 

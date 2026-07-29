@@ -1713,7 +1713,14 @@ async function apiCall(method, path, body) {
 
     const res = await fetch(API_BASE + path, opts);
     if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
-    if (!res.ok) throw new Error('API error: ' + res.status);
+    if (!res.ok) {
+        let msg = 'API error: ' + res.status;
+        try {
+            const errData = await res.json();
+            if (errData.message) msg = errData.message;
+        } catch (_) {}
+        throw new Error(msg);
+    }
     return res.json();
 }
 

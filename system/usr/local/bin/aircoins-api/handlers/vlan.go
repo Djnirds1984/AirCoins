@@ -33,12 +33,9 @@ func VLANList(w http.ResponseWriter, r *http.Request) {
 	// Get active VLANs from ip command
 	out, err := exec.Command("ip", "-d", "link", "show", "type", "vlan").Output()
 	if err != nil {
-		log.Printf("Failed to list VLANs: %v", err)
-		sendJSON(w, http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "Failed to list VLANs: " + err.Error(),
-		})
-		return
+		log.Printf("Warning: failed to list active VLANs: %v", err)
+		// Continue with empty active list; saved config entries will still be returned
+		out = []byte{}
 	}
 
 	// Parse ip -d link show type vlan output
@@ -101,6 +98,29 @@ func VLANList(w http.ResponseWriter, r *http.Request) {
 			if cfg.IP != "" && activeVLANs[i].IP == "" {
 				activeVLANs[i].IP = cfg.IP
 			}
+		}
+	}
+
+	// Build a set of active VLAN keys for quick lookup
+	activeSet := make(map[string]bool)
+	for i := range activeVLANs {
+		key := fmt.Sprintf("%s.%d", activeVLANs[i].Interface, activeVLANs[i].VLANID)
+		activeSet[key] = true
+	}
+
+	// Add saved config entries that are not currently active
+	for _, cfg := range cfgEntries {
+		key := fmt.Sprintf("%s.%d", cfg.Interface, cfg.VLANID)
+		if !activeSet[key] {
+			activeVLANs = append(activeVLANs, models.VLANInfo{
+				Interface:   cfg.Interface,
+				VLANID:      cfg.VLANID,
+				Name:        fmt.Sprintf("%s.%d", cfg.Interface, cfg.VLANID),
+				IP:          cfg.IP,
+				Description: cfg.Description,
+				IsPortal:    cfg.IsPortal,
+				Active:      false,
+			})
 		}
 	}
 
@@ -299,8 +319,14 @@ func VLANInterfaces(w http.ResponseWriter, r *http.Request) {
 		if name == "lo" {
 			continue
 		}
-		// Only include physical interfaces (eth*, wlan*, en*)
-		if !(strings.HasPrefix(name, "eth") || strings.HasPrefix(name, "wlan") || strings.HasPrefix(name, "en")) {
+		// Exclude VLAN sub-interfaces (e.g. eth0.100)
+		if strings.Contains(name, ".") {
+			continue
+		}
+		// Only include physical devices: check for /sys/class/net/<name>/device symlink
+		// This excludes virtual interfaces like docker0, veth*, br-*, etc.
+		devicePath := "/sys/class/net/" + name + "/device"
+		if _, err := os.Stat(devicePath); err != nil {
 			continue
 		}
 

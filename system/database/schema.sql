@@ -150,6 +150,25 @@ CREATE TABLE IF NOT EXISTS daily_stats (
 CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_stats(date);
 
 -- ============================================
+-- VLAN CONFIGURATION
+-- ============================================
+CREATE TABLE IF NOT EXISTS vlan_config (
+    id SERIAL PRIMARY KEY,
+    interface VARCHAR(20) NOT NULL,
+    vlan_id INTEGER NOT NULL,
+    ip_address VARCHAR(18) NOT NULL,
+    description VARCHAR(100) DEFAULT '',
+    is_portal BOOLEAN DEFAULT false,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(interface, vlan_id)
+);
+
+-- Default portal VLAN setting
+INSERT INTO system_settings (key, value, description) VALUES
+    ('portal_vlan', '', 'Primary VLAN ID for portal access')
+ON CONFLICT (key) DO NOTHING;
+
+-- ============================================
 -- FUNCTIONS
 -- ============================================
 

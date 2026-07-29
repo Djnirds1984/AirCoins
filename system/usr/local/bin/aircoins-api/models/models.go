@@ -123,6 +123,35 @@ type DailyStats struct {
 }
 
 // ============================================
+// VLAN MODELS
+// ============================================
+
+type VLANRequest struct {
+	Interface   string `json:"interface"`
+	VLANID      int    `json:"vlan_id"`
+	IP          string `json:"ip"`
+	Netmask     string `json:"netmask"`
+	Description string `json:"description"`
+	IsPortal    bool   `json:"is_portal"`
+}
+
+type VLANInfo struct {
+	Interface   string `json:"interface"`
+	VLANID      int    `json:"vlan_id"`
+	Name        string `json:"name"`
+	IP          string `json:"ip"`
+	Description string `json:"description"`
+	IsPortal    bool   `json:"is_portal"`
+	Active      bool   `json:"active"`
+}
+
+type InterfaceInfo struct {
+	Name  string `json:"name"`
+	IP    string `json:"ip"`
+	State string `json:"state"`
+}
+
+// ============================================
 // REQUEST/RESPONSE TYPES
 // ============================================
 

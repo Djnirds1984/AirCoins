@@ -76,6 +76,12 @@ func main() {
 	mux.HandleFunc("/api/system/services", handlers.AuthMiddleware(systemHandler.GetServices))
 	mux.HandleFunc("/api/system/services/", handlers.AuthMiddleware(systemHandler.ControlService))
 
+	// VLAN routes
+	mux.HandleFunc("/api/vlan/list", handlers.AuthMiddleware(handlers.VLANList))
+	mux.HandleFunc("/api/vlan/create", handlers.AuthMiddleware(handlers.VLANCreate))
+	mux.HandleFunc("/api/vlan/delete", handlers.AuthMiddleware(handlers.VLANDelete))
+	mux.HandleFunc("/api/vlan/interfaces", handlers.AuthMiddleware(handlers.VLANInterfaces))
+
 	// Health check
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

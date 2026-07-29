@@ -9,5 +9,11 @@
 *pisowifi-* text eol=lf
 *aircoins-gpio-lib text eol=lf
 *aircoins-vlan-apply text eol=lf
+*aircoins-captive-rules text eol=lf
 *aircoins-vlans.service text eol=lf
 *dnsmasq@.service text eol=lf
+
+# Linux config files deployed verbatim
+*lighttpd.conf text eol=lf
+*captive.conf text eol=lf
+*99-aircoins.conf text eol=lf

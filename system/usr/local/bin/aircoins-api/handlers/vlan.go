@@ -19,6 +19,33 @@ import (
 
 const vlanConfigPath = "/etc/pisowifi/vlans.conf"
 
+// captiveRulesPath is the helper that installs/removes the per-VLAN captive
+// portal iptables rules (DNS + HTTP capture, MASQUERADE for paying clients).
+const captiveRulesPath = "/usr/local/bin/aircoins-captive-rules"
+
+// applyCaptiveRules runs aircoins-captive-rules for a VLAN. action is "add" or
+// "del". Failures are logged but never fatal: a VLAN without captive rules is
+// still usable, it just won't auto-pop the portal.
+func applyCaptiveRules(action, vlanName, ipCIDR string) {
+	gateway := strings.Split(ipCIDR, "/")[0]
+	if gateway == "" {
+		log.Printf("applyCaptiveRules: skipping %s for %s: no gateway IP", action, vlanName)
+		return
+	}
+
+	if _, err := os.Stat(captiveRulesPath); err != nil {
+		log.Printf("applyCaptiveRules: %s not installed; skipping captive rules for %s", captiveRulesPath, vlanName)
+		return
+	}
+
+	if out, err := exec.Command(captiveRulesPath, action, vlanName, gateway).CombinedOutput(); err != nil {
+		log.Printf("applyCaptiveRules: %s %s %s failed: %v — %s", action, vlanName, gateway, err, string(out))
+		return
+	}
+
+	log.Printf("applyCaptiveRules: %s captive rules for %s (%s)", action, vlanName, gateway)
+}
+
 // ============================================
 // VLAN LIST
 // ============================================
@@ -103,19 +130,19 @@ func VLANList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Auto-start DHCP for active VLANs that have a dnsmasq config but no DHCP running.
-	// This handles VLANs created before the DHCP auto-start feature was added.
-	// If the existing config is outdated (missing bind-dynamic), regenerate it with
-	// the current fix set (port=0, bind-dynamic) before starting the service.
+	// Heal active VLANs: regenerate outdated dnsmasq configs and make sure DHCP
+	// plus the captive portal rules are actually in place.
+	//
+	// A config is outdated when it predates the captive portal support: those
+	// configs use port=0 (DNS disabled) and lack the address=/#/ wildcard, so
+	// probe requests are never captured and the portal never pops up.
 	for i := range activeVLANs {
-		if activeVLANs[i].DHCPActive {
-			continue
-		}
 		confPath := fmt.Sprintf("/etc/dnsmasq.d/%s.conf", activeVLANs[i].Name)
 		confBytes, err := os.ReadFile(confPath)
 		if err != nil {
 			continue
 		}
+		conf := string(confBytes)
 
 		// Determine the start_ip from the saved config entry (if available)
 		key := fmt.Sprintf("%s.%d", activeVLANs[i].Interface, activeVLANs[i].VLANID)
@@ -124,32 +151,35 @@ func VLANList(w http.ResponseWriter, r *http.Request) {
 			startIP = cfg.StartIP
 		}
 
-		needsRegen := !strings.Contains(string(confBytes), "bind-dynamic")
+		ipCIDR := activeVLANs[i].IP
+		if ipCIDR == "" {
+			// Fall back to saved config IP
+			if cfg, ok := cfgMap[key]; ok {
+				ipCIDR = cfg.IP
+			}
+		}
+
+		needsRegen := !strings.Contains(conf, "bind-dynamic") ||
+			!strings.Contains(conf, "address=/#/") ||
+			strings.Contains(conf, "port=0")
 		unitName := fmt.Sprintf("dnsmasq@%s", activeVLANs[i].Name)
 
-		if needsRegen {
-			log.Printf("VLANList: VLAN %s has outdated dnsmasq config (missing bind-dynamic); regenerating", activeVLANs[i].Name)
-			// Extract vlanID from the interface name (e.g. "end0.13" → 13)
-			vid := activeVLANs[i].VLANID
-			ipCIDR := activeVLANs[i].IP
-			if ipCIDR == "" {
-				// Fall back to saved config IP
-				if cfg, ok := cfgMap[key]; ok {
-					ipCIDR = cfg.IP
-				}
-			}
+		switch {
+		case needsRegen:
+			log.Printf("VLANList: VLAN %s has outdated dnsmasq config (no captive DNS hijack); regenerating", activeVLANs[i].Name)
 			if ipCIDR == "" {
 				log.Printf("VLANList: cannot regenerate config for %s: no IP available", activeVLANs[i].Name)
 				continue
 			}
 			// startDHCP stops the old service, writes new config, and starts it
-			if err := startDHCP(activeVLANs[i].Name, vid, ipCIDR, startIP); err != nil {
+			if err := startDHCP(activeVLANs[i].Name, activeVLANs[i].VLANID, ipCIDR, startIP); err != nil {
 				log.Printf("VLANList: failed to regenerate+restart DHCP for %s: %v", activeVLANs[i].Name, err)
 				continue
 			}
 			activeVLANs[i].DHCPActive = true
 			log.Printf("VLANList: regenerated and restarted DHCP for %s", activeVLANs[i].Name)
-		} else {
+
+		case !activeVLANs[i].DHCPActive:
 			log.Printf("VLANList: VLAN %s is active but DHCP is not running; attempting auto-start", activeVLANs[i].Name)
 			if out, err := exec.Command("systemctl", "start", unitName).CombinedOutput(); err != nil {
 				log.Printf("VLANList: auto-start DHCP failed for %s: %v — %s", activeVLANs[i].Name, err, string(out))
@@ -160,6 +190,12 @@ func VLANList(w http.ResponseWriter, r *http.Request) {
 			}
 			log.Printf("VLANList: auto-started DHCP for %s", activeVLANs[i].Name)
 			activeVLANs[i].DHCPActive = true
+		}
+
+		// Captive rules are idempotent, so this also repairs VLANs that were
+		// created before captive portal support existed.
+		if ipCIDR != "" {
+			applyCaptiveRules("add", activeVLANs[i].Name, ipCIDR)
 		}
 	}
 
@@ -306,6 +342,9 @@ func VLANCreate(w http.ResponseWriter, r *http.Request) {
 		dhcpActive = true
 	}
 
+	// Install the captive portal capture rules for this VLAN
+	applyCaptiveRules("add", vlanName, ipCIDR)
+
 	vlan := models.VLANInfo{
 		Interface:   req.Interface,
 		VLANID:      req.VLANID,
@@ -351,6 +390,10 @@ func VLANDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vlanName := fmt.Sprintf("%s.%d", req.Interface, req.VLANID)
+
+	// Remove the captive portal rules while the interface still exists, so the
+	// script can resolve the VLAN subnet for the MASQUERADE rule.
+	applyCaptiveRules("del", vlanName, getVLANIP(vlanName))
 
 	// Stop DHCP (dnsmasq) for this VLAN before removing the interface
 	stopDHCP(vlanName)
@@ -735,15 +778,28 @@ func startDHCP(vlanName string, vlanID int, ipCIDR string, startIP string) error
 		return err
 	}
 
+	// DNS is deliberately ENABLED here: address=/#/<gateway> answers every
+	// hostname with the gateway IP, which is what captures the captive portal
+	// detection probes (captive.apple.com, connectivitycheck.gstatic.com, ...)
+	// and makes the portal pop up automatically.
+	//
+	// except-interface=lo together with bind-dynamic is what keeps multiple
+	// per-VLAN instances from fighting over 127.0.0.1:53 — do NOT go back to
+	// port=0 to fix a bind conflict, it disables the portal capture.
+	//
+	// Authorized clients are not affected: aircoins-captive-rules DNATs their
+	// port 53 traffic to a real upstream resolver.
 	configContent := fmt.Sprintf(`# Auto-generated by AirCoins for VLAN %d
 interface=%s
 bind-dynamic
-port=0
+except-interface=lo
+no-resolv
+no-hosts
+address=/#/%s
 dhcp-range=%s
 dhcp-option=3,%s
 dhcp-option=6,%s
-no-daemon
-`, vlanID, vlanName, dhcpRange, gateway, gateway)
+`, vlanID, vlanName, gateway, dhcpRange, gateway, gateway)
 
 	configPath := fmt.Sprintf("/etc/dnsmasq.d/%s.conf", vlanName)
 	unitName := fmt.Sprintf("dnsmasq@%s", vlanName)

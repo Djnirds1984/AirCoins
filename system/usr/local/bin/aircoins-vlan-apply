@@ -88,6 +88,12 @@ while IFS= read -r line; do
         logger -t aircoins-vlan "Started DHCP for $name"
     fi
 
+    # Apply captive portal rules (DNS/HTTP capture + NAT for paid clients)
+    if [ -x /usr/local/bin/aircoins-captive-rules ]; then
+        /usr/local/bin/aircoins-captive-rules add "$name" "${cidr%/*}" >/dev/null 2>&1 ||
+            logger -t aircoins-vlan "Failed to apply captive rules for $name"
+    fi
+
 done < "$CONF"
 
 logger -t aircoins-vlan "VLAN restore complete"

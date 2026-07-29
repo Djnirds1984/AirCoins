@@ -6,7 +6,7 @@
 #   - Orange Pi One (ARM) - Full hardware support
 #   - Ubuntu/Debian x86   - Development mode (no GPIO)
 #
-# Wired-only operation — no WiFi, no captive portal.
+# Wired/VLAN operation with captive portal auto-popup.
 # Run as root: sudo bash install.sh
 # ============================================
 
@@ -162,7 +162,9 @@ if [ "$IS_ARM" = true ]; then
         postgresql-contrib \
         golang-go \
         vlan \
-        dnsmasq
+        dnsmasq \
+        iptables \
+        conntrack
 else
     # x86 installation
     apt-get install -y -qq \
@@ -175,7 +177,9 @@ else
         postgresql-contrib \
         golang-go \
         vlan \
-        dnsmasq
+        dnsmasq \
+        iptables \
+        conntrack
 fi
 
 echo -e "${GREEN}  ✓ Packages installed${NC}"
@@ -338,6 +342,20 @@ else
     echo "  ✓ pisowifi.conf"
 fi
 
+# Captive portal config (do NOT overwrite an existing one on reinstall)
+if [ -f /etc/pisowifi/captive.conf ]; then
+    echo "  ✓ captive.conf (kept existing)"
+else
+    cp "$SYSTEM_DIR/etc/pisowifi/captive.conf" /etc/pisowifi/captive.conf
+    echo "  ✓ captive.conf"
+fi
+
+# Enable IP forwarding so authorized clients can be routed to the uplink
+mkdir -p /etc/sysctl.d
+cp "$SYSTEM_DIR/etc/sysctl.d/99-aircoins.conf" /etc/sysctl.d/99-aircoins.conf
+sysctl -p /etc/sysctl.d/99-aircoins.conf > /dev/null 2>&1 || true
+echo "  ✓ 99-aircoins.conf (ip_forward)"
+
 echo -e "${GREEN}  ✓ Configs deployed${NC}"
 
 # ============================================
@@ -374,6 +392,15 @@ $HTTP["url"] =~ "^/cgi-bin/" {
 CGIEOF
 fi
 
+# Validate and load the new config (captive portal redirects live here)
+if lighttpd -t -f /etc/lighttpd/lighttpd.conf > /dev/null 2>&1; then
+    systemctl restart lighttpd 2>/dev/null || true
+    echo "  ✓ lighttpd config valid, service restarted"
+else
+    echo -e "${RED}  ✘ lighttpd config test FAILED — portal will not serve!${NC}"
+    lighttpd -t -f /etc/lighttpd/lighttpd.conf || true
+fi
+
 echo -e "${GREEN}  ✓ Portal deployed to /var/www/html/${NC}"
 
 # ============================================
@@ -405,6 +432,11 @@ echo "  ✓ pisowifi-api-update"
 cp "$SYSTEM_DIR/usr/local/bin/aircoins-vlan-apply" /usr/local/bin/
 chmod +x /usr/local/bin/aircoins-vlan-apply
 echo "  ✓ aircoins-vlan-apply"
+
+# Captive portal rules (per-VLAN DNS/HTTP capture + NAT for paid clients)
+cp "$SYSTEM_DIR/usr/local/bin/aircoins-captive-rules" /usr/local/bin/
+chmod +x /usr/local/bin/aircoins-captive-rules
+echo "  ✓ aircoins-captive-rules"
 
 echo -e "${GREEN}  ✓ All scripts deployed${NC}"
 

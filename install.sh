@@ -243,42 +243,70 @@ echo -e "${GREEN}  ✓ Go API built and deployed${NC}"
 cd "$SCRIPT_DIR"
 
 # ============================================
-# STEP 5: Install WiringOP (ARM only)
+# STEP 5: Install GPIO support (board-aware)
 # ============================================
 echo -e "${YELLOW}[5/10]${NC} Installing GPIO support..."
 
+# Detect board for GPIO install decisions
+DETECTED_BOARD=""
+if [ -f /proc/device-tree/model ]; then
+    DETECTED_BOARD=$(tr -d '\0' < /proc/device-tree/model 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+fi
+DETECTED_BOARD_LOWER=$(echo "$DETECTED_BOARD" | tr '[:upper:]' '[:lower:]')
+
 if [ "$IS_ARM" = true ]; then
-    if command -v gpio &> /dev/null; then
-        echo -e "${GREEN}  ✓ WiringOP already installed${NC}"
-    else
-        # Try to install from Armbian repo first
-        if apt-cache show wiringop &> /dev/null; then
-            apt-get install -y -qq wiringop
-            echo -e "${GREEN}  ✓ WiringOP installed from repo${NC}"
+    # Install gpiod package for libgpiod fallback (both OPi and RPi)
+    apt-get install -y -qq gpiod 2>/dev/null || true
+
+    if echo "$DETECTED_BOARD_LOWER" | grep -qi "raspberry.pi\|raspberrypi"; then
+        # Raspberry Pi: ensure raspi-gpio is available (usually pre-installed)
+        if command -v raspi-gpio &>/dev/null; then
+            echo -e "${GREEN}  ✓ raspi-gpio already available${NC}"
         else
-            # Manual install from GitHub
-            echo "  Installing WiringOP from source..."
-            cd /tmp
-            if [ ! -d "WiringOP" ]; then
-                git clone https://github.com/orangepi-xunlong/wiringOP.git 2>/dev/null || {
-                    echo -e "${YELLOW}  ⚠ WiringOP source not available.${NC}"
-                }
-            fi
-            if [ -d "WiringOP" ]; then
-                cd WiringOP
-                ./build
-                ./build install
-                cd ..
-                rm -rf WiringOP
-                echo -e "${GREEN}  ✓ WiringOP installed from source${NC}"
+            apt-get install -y -qq raspi-gpio 2>/dev/null || true
+            echo -e "${GREEN}  ✓ raspi-gpio installed${NC}"
+        fi
+        echo -e "  ${CYAN}Board: Raspberry Pi — using raspi-gpio${NC}"
+    else
+        # Orange Pi (or other ARM): install WiringOP
+        if command -v gpio &> /dev/null; then
+            echo -e "${GREEN}  ✓ WiringOP already installed${NC}"
+        else
+            # Try to install from Armbian repo first
+            if apt-cache show wiringop &> /dev/null; then
+                apt-get install -y -qq wiringop
+                echo -e "${GREEN}  ✓ WiringOP installed from repo${NC}"
+            else
+                # Manual install from GitHub
+                echo "  Installing WiringOP from source..."
+                cd /tmp
+                if [ ! -d "WiringOP" ]; then
+                    git clone https://github.com/orangepi-xunlong/wiringOP.git 2>/dev/null || {
+                        echo -e "${YELLOW}  ⚠ WiringOP source not available.${NC}"
+                    }
+                fi
+                if [ -d "WiringOP" ]; then
+                    cd WiringOP
+                    ./build
+                    ./build install
+                    cd ..
+                    rm -rf WiringOP
+                    echo -e "${GREEN}  ✓ WiringOP installed from source${NC}"
+                fi
             fi
         fi
+        echo -e "  ${CYAN}Board: $DETECTED_BOARD — using WiringOP${NC}"
     fi
 else
     echo -e "${YELLOW}  ⚠ x86 platform - GPIO hardware not available${NC}"
     echo -e "  ${CYAN}GPIO listener will run in file-based test mode.${NC}"
     echo -e "  ${CYAN}To simulate coin: echo '5' > /var/lib/pisowifi/coin_event${NC}"
 fi
+
+# Deploy shared GPIO library
+cp "$SYSTEM_DIR/usr/local/bin/aircoins-gpio-lib" /usr/local/bin/aircoins-gpio-lib
+chmod +x /usr/local/bin/aircoins-gpio-lib
+echo -e "  ✓ aircoins-gpio-lib deployed"
 
 # ============================================
 # STEP 6: Deploy configuration files

@@ -2,12 +2,15 @@
 # ============================================
 # AirCoins - GPIO Pin Test CGI Handler
 # ============================================
-# Reads the real state of a GPIO pin using WiringOP or sysfs
+# Reads the real state of a GPIO pin using board-aware methods
 # Called from admin panel "Test Pin" button
 #
 # Install to: /usr/lib/cgi-bin/test_gpio
 # Requires: lighttpd mod_cgi enabled
 # ============================================
+
+# Source the shared GPIO library
+source /usr/local/bin/aircoins-gpio-lib
 
 CONFIG_FILE="/var/lib/pisowifi/gpio_config"
 
@@ -15,6 +18,10 @@ CONFIG_FILE="/var/lib/pisowifi/gpio_config"
 if [ -f "$CONFIG_FILE" ]; then
     source "$CONFIG_FILE"
 fi
+
+# Re-detect board (config may override BOARD_MODEL)
+detect_board
+get_gpio_method
 
 # Read POST body for pin override
 read -r POST_DATA
@@ -26,48 +33,25 @@ fi
 PIN=${PIN:-$COIN_PULSE_PIN}
 PIN=${PIN:-7}
 
-# ============================================
-# METHOD 1: WiringOP (gpio command)
-# ============================================
-if command -v gpio &> /dev/null; then
-    # Set pin to input with pull-up
-    gpio mode $PIN up
-    gpio mode $PIN input
-    sleep 0.05
-
-    # Read pin state
-    PIN_STATE=$(gpio read $PIN)
-
-    if [ "$PIN_STATE" = "0" ]; then
-        STATE_TEXT="LOW (0)"
-        STATE_COLOR="#ff4444"
-    else
-        STATE_TEXT="HIGH (1)"
-        STATE_COLOR="#00ff88"
-    fi
-
+# Convert physical pin to internal GPIO number
+INTERNAL_GPIO=$(pin_to_gpio "$PIN")
+if [ $? -ne 0 ] || [ -z "$INTERNAL_GPIO" ]; then
     echo "Content-Type: application/json"
     echo ""
-    echo "{\"status\":\"ok\",\"method\":\"wiringop\",\"pin\":$PIN,\"state\":$PIN_STATE,\"state_text\":\"$STATE_TEXT\",\"state_color\":\"$STATE_COLOR\",\"pull_up\":\"enabled\"}"
+    echo "{\"status\":\"error\",\"message\":\"Invalid physical pin $PIN for board $BOARD_FAMILY/$BOARD_CHIPSET\"}"
     exit 0
 fi
 
 # ============================================
-# METHOD 2: sysfs GPIO
+# Read pin state using shared library
 # ============================================
-if [ -d /sys/class/gpio ]; then
-    # Map WiringPi pin to BCM GPIO (Orange Pi specific)
-    # This is a simplified mapping - may need adjustment per board
-    BCM_GPIO_MAP="6 1 2 3 6 7 8 9 10 13 14 11 12 21 18 19 20 16 15 0 1 3"
-    BCM_GPIO=$(echo $BCM_GPIO_MAP | cut -d' ' -f$((PIN + 1)))
-    BCM_GPIO=${BCM_GPIO:-6}
+if [ "$GPIO_METHOD" != "none" ]; then
+    # Setup pin as input with pull-up
+    gpio_setup_input "$INTERNAL_GPIO" "up"
+    sleep 0.05
 
-    # Export if not already
-    echo "$BCM_GPIO" > /sys/class/gpio/export 2>/dev/null
-    sleep 0.1
-    echo "in" > /sys/class/gpio/gpio${BCM_GPIO}/direction 2>/dev/null
-
-    PIN_STATE=$(cat /sys/class/gpio/gpio${BCM_GPIO}/value 2>/dev/null)
+    # Read pin state
+    PIN_STATE=$(gpio_read "$INTERNAL_GPIO")
     PIN_STATE=${PIN_STATE:-1}
 
     if [ "$PIN_STATE" = "0" ]; then
@@ -80,7 +64,7 @@ if [ -d /sys/class/gpio ]; then
 
     echo "Content-Type: application/json"
     echo ""
-    echo "{\"status\":\"ok\",\"method\":\"sysfs\",\"pin\":$PIN,\"bcm_gpio\":$BCM_GPIO,\"state\":$PIN_STATE,\"state_text\":\"$STATE_TEXT\",\"state_color\":\"$STATE_COLOR\",\"pull_up\":\"enabled\"}"
+    echo "{\"status\":\"ok\",\"method\":\"$GPIO_METHOD\",\"pin\":$PIN,\"gpio\":$INTERNAL_GPIO,\"state\":$PIN_STATE,\"state_text\":\"$STATE_TEXT\",\"state_color\":\"$STATE_COLOR\",\"pull_up\":\"enabled\",\"board_family\":\"$BOARD_FAMILY\",\"board_model\":\"$BOARD_MODEL\"}"
     exit 0
 fi
 
@@ -89,4 +73,4 @@ fi
 # ============================================
 echo "Content-Type: application/json"
 echo ""
-echo "{\"status\":\"error\",\"message\":\"No GPIO interface available. Ensure WiringOP is installed.\"}"
+echo "{\"status\":\"error\",\"message\":\"No GPIO interface available. Ensure WiringOP or raspi-gpio is installed.\"}"

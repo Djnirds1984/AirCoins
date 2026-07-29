@@ -33,16 +33,24 @@ func main() {
 	gpioHandler := &handlers.GPIOHandler{DB: models.DB}
 	pricingHandler := &handlers.PricingHandler{DB: models.DB}
 	systemHandler := &handlers.SystemHandler{DB: models.DB}
+	reportsHandler := &handlers.ReportsHandler{DB: models.DB}
 
 	// Setup routes
 	mux := http.NewServeMux()
 
 	// Admin routes
 	mux.HandleFunc("/api/admin/login", adminHandler.Login)
-	mux.HandleFunc("/api/admin/stats", adminHandler.GetStats)
-	mux.HandleFunc("/api/admin/sessions", adminHandler.GetSessions)
-	mux.HandleFunc("/api/admin/settings", adminHandler.Settings)
-	mux.HandleFunc("/api/admin/logs", adminHandler.GetLogs)
+	mux.HandleFunc("/api/admin/stats", handlers.AuthMiddleware(adminHandler.GetStats))
+	mux.HandleFunc("/api/admin/sessions", handlers.AuthMiddleware(adminHandler.GetSessions))
+	mux.HandleFunc("/api/admin/sessions/", handlers.AuthMiddleware(adminHandler.GetSession))
+	mux.HandleFunc("/api/admin/settings", handlers.AuthMiddleware(adminHandler.Settings))
+	mux.HandleFunc("/api/admin/logs", handlers.AuthMiddleware(adminHandler.GetLogs))
+	mux.HandleFunc("/api/admin/coin-events", handlers.AuthMiddleware(adminHandler.GetCoinEvents))
+
+	// Reports routes
+	mux.HandleFunc("/api/admin/reports/earnings", handlers.AuthMiddleware(reportsHandler.GetEarningsSummary))
+	mux.HandleFunc("/api/admin/reports/daily", handlers.AuthMiddleware(reportsHandler.GetDailyBreakdown))
+	mux.HandleFunc("/api/admin/reports/coin-events", handlers.AuthMiddleware(reportsHandler.GetCoinEvents))
 
 	// Session routes
 	mux.HandleFunc("/api/session/current", sessionHandler.GetCurrent)
@@ -58,10 +66,15 @@ func main() {
 
 	// Pricing routes
 	mux.HandleFunc("/api/pricing", pricingHandler.Handle)
+	mux.HandleFunc("/api/pricing/", pricingHandler.Handle)
 
 	// System routes
 	mux.HandleFunc("/api/system/status", systemHandler.Status)
-	mux.HandleFunc("/api/system/logs", systemHandler.Logs)
+	mux.HandleFunc("/api/system/board", handlers.AuthMiddleware(systemHandler.GetBoardInfo))
+	mux.HandleFunc("/api/system/logs", handlers.AuthMiddleware(systemHandler.Logs))
+	mux.HandleFunc("/api/system/info", handlers.AuthMiddleware(systemHandler.GetSystemInfo))
+	mux.HandleFunc("/api/system/services", handlers.AuthMiddleware(systemHandler.GetServices))
+	mux.HandleFunc("/api/system/services/", handlers.AuthMiddleware(systemHandler.ControlService))
 
 	// Health check
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {

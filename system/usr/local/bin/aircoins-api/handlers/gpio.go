@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -30,12 +31,12 @@ func (h *GPIOHandler) Config(w http.ResponseWriter, r *http.Request) {
 func (h *GPIOHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 	var config models.GPIOConfig
 	err := h.DB.QueryRow(`
-		SELECT id, pin, coin_value, pulse_mode, updated_at
+		SELECT id, pin, coin_value, pulse_mode, COALESCE(board_model, 'auto'), updated_at
 		FROM gpio_config ORDER BY id DESC LIMIT 1
-	`).Scan(&config.ID, &config.Pin, &config.CoinValue, &config.PulseMode, &config.UpdatedAt)
+	`).Scan(&config.ID, &config.Pin, &config.CoinValue, &config.PulseMode, &config.BoardModel, &config.UpdatedAt)
 
 	if err == sql.ErrNoRows {
-		sendJSON(w, http.StatusOK, models.GPIOConfig{Pin: 7, CoinValue: 1, PulseMode: "falling"})
+		sendJSON(w, http.StatusOK, models.GPIOConfig{Pin: 7, CoinValue: 1, PulseMode: "falling", BoardModel: "auto"})
 		return
 	} else if err != nil {
 		log.Printf("Error fetching GPIO config: %v", err)
@@ -53,8 +54,8 @@ func (h *GPIOHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Pin < 0 || req.Pin > 21 {
-		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid pin number (0-21)"})
+	if req.Pin < 0 || req.Pin > 40 {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid pin number (0-40)"})
 		return
 	}
 
@@ -68,11 +69,15 @@ func (h *GPIOHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.BoardModel == "" {
+		req.BoardModel = "auto"
+	}
+
 	// Insert new config (keep history)
 	_, err := h.DB.Exec(`
-		INSERT INTO gpio_config (pin, coin_value, pulse_mode, updated_at)
-		VALUES ($1, $2, $3, NOW())
-	`, req.Pin, req.CoinValue, req.PulseMode)
+		INSERT INTO gpio_config (pin, coin_value, pulse_mode, board_model, updated_at)
+		VALUES ($1, $2, $3, $4, NOW())
+	`, req.Pin, req.CoinValue, req.PulseMode, req.BoardModel)
 
 	if err != nil {
 		log.Printf("Error saving GPIO config: %v", err)
@@ -81,9 +86,9 @@ func (h *GPIOHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Write config file for gpio-coin-listener to read
-	writeGPIOConfigFile(req.Pin, req.CoinValue, req.PulseMode)
+	writeGPIOConfigFile(req.Pin, req.CoinValue, req.PulseMode, req.BoardModel)
 
-	logAction(h.DB, "INFO", "gpio", "GPIO config updated: pin="+strconv.Itoa(req.Pin))
+	logAction(h.DB, "INFO", "gpio", "GPIO config updated: pin="+strconv.Itoa(req.Pin)+" board="+req.BoardModel)
 	sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "GPIO config saved. Restart GPIO listener to apply."})
 }
 
@@ -102,7 +107,7 @@ func (h *GPIOHandler) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try WiringOP first
+	// Try all GPIO methods
 	state, method, err := readGpioPin(req.Pin)
 	if err != nil {
 		sendJSON(w, http.StatusInternalServerError, models.APIResponse{
@@ -182,16 +187,17 @@ func (h *GPIOHandler) Coin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// readGpioPin reads the state of a GPIO pin
+// readGpioPin reads the state of a GPIO pin trying multiple methods
 func readGpioPin(pin int) (int, string, error) {
-	// Try WiringOP (gpio command)
+	pinStr := strconv.Itoa(pin)
+
+	// Method 1: WiringOP (gpio command) — Orange Pi
 	gpioPath, err := exec.LookPath("gpio")
 	if err == nil {
-		// Set pin to input with pull-up
-		exec.Command(gpioPath, "mode", strconv.Itoa(pin), "up").Run()
-		exec.Command(gpioPath, "mode", strconv.Itoa(pin), "input").Run()
+		exec.Command(gpioPath, "mode", pinStr, "up").Run()
+		exec.Command(gpioPath, "mode", pinStr, "input").Run()
 
-		out, err := exec.Command(gpioPath, "read", strconv.Itoa(pin)).Output()
+		out, err := exec.Command(gpioPath, "read", pinStr).Output()
 		if err == nil {
 			stateStr := strings.TrimSpace(string(out))
 			state, _ := strconv.Atoi(stateStr)
@@ -199,16 +205,61 @@ func readGpioPin(pin int) (int, string, error) {
 		}
 	}
 
+	// Method 2: raspi-gpio — Raspberry Pi
+	raspiGpioPath, err := exec.LookPath("raspi-gpio")
+	if err == nil {
+		out, err := exec.Command(raspiGpioPath, "get", pinStr).Output()
+		if err == nil {
+			outStr := string(out)
+			if strings.Contains(outStr, "level=0") {
+				return 0, "raspi-gpio", nil
+			} else if strings.Contains(outStr, "level=1") {
+				return 1, "raspi-gpio", nil
+			}
+		}
+	}
+
+	// Method 3: libgpiod (gpioget command)
+	gpiogetPath, err := exec.LookPath("gpioget")
+	if err == nil {
+		out, err := exec.Command(gpiogetPath, "gpiochip0", pinStr).Output()
+		if err == nil {
+			stateStr := strings.TrimSpace(string(out))
+			state, _ := strconv.Atoi(stateStr)
+			return state, "libgpiod", nil
+		}
+	}
+
+	// Method 4: sysfs fallback
+	if _, err := os.Stat("/sys/class/gpio"); err == nil {
+		// Export if needed
+		if _, err := os.Stat("/sys/class/gpio/gpio" + pinStr); os.IsNotExist(err) {
+			os.WriteFile("/sys/class/gpio/export", []byte(pinStr), 0644)
+		}
+		os.WriteFile("/sys/class/gpio/gpio"+pinStr+"/direction", []byte("in"), 0644)
+
+		data, err := os.ReadFile("/sys/class/gpio/gpio" + pinStr + "/value")
+		if err == nil {
+			stateStr := strings.TrimSpace(string(data))
+			state, _ := strconv.Atoi(stateStr)
+			return state, "sysfs", nil
+		}
+	}
+
 	return 1, "none", nil // Default HIGH (pull-up)
 }
 
 // writeGPIOConfigFile writes config to file for gpio-coin-listener
-func writeGPIOConfigFile(pin, coinValue int, pulseMode string) {
+func writeGPIOConfigFile(pin, coinValue int, pulseMode, boardModel string) {
 	content := "# AirCoins GPIO Config - Written by API\n"
 	content += "COIN_PULSE_PIN=" + strconv.Itoa(pin) + "\n"
 	content += "COIN_VALUE=" + strconv.Itoa(coinValue) + "\n"
 	content += "PULSE_MODE=\"" + pulseMode + "\"\n"
+	content += "BOARD_MODEL=\"" + boardModel + "\"\n"
 
-	exec.Command("mkdir", "-p", "/var/lib/pisowifi").Run()
-	exec.Command("tee", "/var/lib/pisowifi/gpio_config").Run()
+	os.MkdirAll("/var/lib/pisowifi", 0755)
+	err := os.WriteFile("/var/lib/pisowifi/gpio_config", []byte(content), 0644)
+	if err != nil {
+		log.Printf("Failed to write GPIO config file: %v", err)
+	}
 }

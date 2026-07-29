@@ -63,11 +63,12 @@ type SystemSetting struct {
 }
 
 type GPIOConfig struct {
-	ID        int       `json:"id"`
-	Pin       int       `json:"pin"`
-	CoinValue int       `json:"coin_value"`
-	PulseMode string    `json:"pulse_mode"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         int       `json:"id"`
+	Pin        int       `json:"pin"`
+	CoinValue  int       `json:"coin_value"`
+	PulseMode  string    `json:"pulse_mode"`
+	BoardModel string    `json:"board_model"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type Pricing struct {
@@ -136,28 +137,39 @@ type LoginResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
+type StatsGroup struct {
+	Earnings float64 `json:"earnings"`
+	Coins    int     `json:"coins"`
+	Sessions int     `json:"sessions"`
+}
+
+type WeeklyStat struct {
+	Date     string `json:"date"`
+	Earnings int    `json:"earnings"`
+	Coins    int    `json:"coins"`
+	Sessions int    `json:"sessions"`
+}
+
 type StatsResponse struct {
-	TodayEarnings  float64 `json:"today_earnings"`
-	TodayCoins     int     `json:"today_coins"`
-	TodaySessions  int     `json:"today_sessions"`
-	ActiveSessions int     `json:"active_sessions"`
-	TotalEarnings  float64 `json:"total_earnings"`
-	TotalCoins     int     `json:"total_coins"`
-	TotalSessions  int     `json:"total_sessions"`
-	SystemOnline   bool    `json:"system_online"`
+	Today          StatsGroup   `json:"today"`
+	Total          StatsGroup   `json:"total"`
+	ActiveSessions int          `json:"active_sessions"`
+	SystemOnline   bool         `json:"system_online"`
+	WeeklyStats    []WeeklyStat `json:"weekly_stats,omitempty"`
 }
 
 type SessionStatusResponse struct {
-	HasActive        bool    `json:"has_active"`
+	HasActive        bool     `json:"has_active"`
 	Session          *Session `json:"session,omitempty"`
-	RemainingSeconds int     `json:"remaining_seconds"`
-	CoinsInserted    int     `json:"coins_inserted"`
+	RemainingSeconds int      `json:"remaining_seconds"`
+	CoinsInserted    int      `json:"coins_inserted"`
 }
 
 type GPIOConfigRequest struct {
-	Pin       int    `json:"pin"`
-	CoinValue int    `json:"coin_value"`
-	PulseMode string `json:"pulse_mode"`
+	Pin        int    `json:"pin"`
+	CoinValue  int    `json:"coin_value"`
+	PulseMode  string `json:"pulse_mode"`
+	BoardModel string `json:"board_model"`
 }
 
 type CoinEventRequest struct {
@@ -165,8 +177,9 @@ type CoinEventRequest struct {
 }
 
 type PricingRequest struct {
-	CoinValue int `json:"coin_value"`
-	Minutes   int `json:"minutes"`
+	CoinValue int   `json:"coin_value"`
+	Minutes   int   `json:"minutes"`
+	Active    *bool `json:"active,omitempty"`
 }
 
 type SettingsRequest struct {
@@ -177,4 +190,12 @@ type APIResponse struct {
 	Success bool        `json:"success"`
 	Message string      `json:"message,omitempty"`
 	Data    interface{} `json:"data,omitempty"`
+}
+
+type PaginatedResponse struct {
+	Success bool        `json:"success"`
+	Data    interface{} `json:"data"`
+	Total   int         `json:"total"`
+	Limit   int         `json:"limit"`
+	Offset  int         `json:"offset"`
 }

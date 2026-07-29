@@ -1,2 +1,10 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts deployed to Linux MUST use LF line endings
+*.sh text eol=lf
+*gpio-coin-listener text eol=lf
+*test_gpio text eol=lf
+*set_gpio_config text eol=lf
+*pisowifi-* text eol=lf
+*aircoins-gpio-lib text eol=lf

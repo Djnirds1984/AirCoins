@@ -4,9 +4,11 @@ import (
 	"aircoins-api/models"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -62,11 +64,13 @@ func (h *AdminHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Log the login
 	h.logAction("INFO", "admin", "Admin login successful: "+req.Username)
 
-	// Return success (in production, generate JWT token here)
+	// Generate a real auth token
+	token := GenerateToken(user.ID, user.Username)
+
 	sendJSON(w, http.StatusOK, models.LoginResponse{
 		Success: true,
 		Message: "Login successful",
-		Token:   "admin_session_" + req.Username, // Simple token for now
+		Token:   token,
 	})
 }
 
@@ -80,26 +84,28 @@ func (h *AdminHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	var stats models.StatsResponse
 
 	// Get today's stats
+	var todayEarnings int
 	err := h.DB.QueryRow(`
 		SELECT COALESCE(total_earnings, 0), COALESCE(total_coins, 0), COALESCE(total_sessions, 0)
 		FROM daily_stats WHERE date = CURRENT_DATE
-	`).Scan(&stats.TodayEarnings, &stats.TodayCoins, &stats.TodaySessions)
+	`).Scan(&todayEarnings, &stats.Today.Coins, &stats.Today.Sessions)
 	if err == sql.ErrNoRows {
-		stats.TodayEarnings = 0
-		stats.TodayCoins = 0
-		stats.TodaySessions = 0
+		todayEarnings = 0
 	} else if err != nil {
 		log.Printf("Error fetching today stats: %v", err)
 	}
+	stats.Today.Earnings = float64(todayEarnings)
 
 	// Get total stats (all time)
+	var totalEarnings int
 	err = h.DB.QueryRow(`
 		SELECT COALESCE(SUM(total_earnings), 0), COALESCE(SUM(total_coins), 0), COALESCE(SUM(total_sessions), 0)
 		FROM daily_stats
-	`).Scan(&stats.TotalEarnings, &stats.TotalCoins, &stats.TotalSessions)
+	`).Scan(&totalEarnings, &stats.Total.Coins, &stats.Total.Sessions)
 	if err != nil {
 		log.Printf("Error fetching total stats: %v", err)
 	}
+	stats.Total.Earnings = float64(totalEarnings)
 
 	// Get active sessions count
 	err = h.DB.QueryRow(`
@@ -112,23 +118,136 @@ func (h *AdminHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	// Check if system is online (lighttpd running)
 	stats.SystemOnline = checkLighttpdRunning()
 
+	// Weekly stats when period=week is requested
+	if r.URL.Query().Get("period") == "week" {
+		rows, err := h.DB.Query(`
+			SELECT date, total_earnings, total_coins, total_sessions
+			FROM daily_stats
+			WHERE date >= CURRENT_DATE - INTERVAL '7 days'
+			ORDER BY date ASC
+		`)
+		if err != nil {
+			log.Printf("Error fetching weekly stats: %v", err)
+		} else {
+			defer rows.Close()
+			stats.WeeklyStats = make([]models.WeeklyStat, 0)
+			for rows.Next() {
+				var ws models.WeeklyStat
+				if err := rows.Scan(&ws.Date, &ws.Earnings, &ws.Coins, &ws.Sessions); err != nil {
+					log.Printf("Error scanning weekly stat: %v", err)
+					continue
+				}
+				stats.WeeklyStats = append(stats.WeeklyStats, ws)
+			}
+		}
+	}
+
 	sendJSON(w, http.StatusOK, stats)
 }
 
-// GetSessions returns session history
+// GetSessions returns session history with filtering and pagination
 func (h *AdminHandler) GetSessions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	rows, err := h.DB.Query(`
-		SELECT id, client_ip, client_mac, coins_inserted, total_seconds, remaining_seconds, 
+	q := r.URL.Query()
+
+	// Parse pagination params
+	limit := 25
+	if l := q.Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	offset := 0
+	if o := q.Get("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	// Build dynamic query
+	where := []string{}
+	args := []interface{}{}
+	argIdx := 1
+
+	// status filter
+	if status := q.Get("status"); status != "" {
+		where = append(where, fmt.Sprintf("status = $%d", argIdx))
+		args = append(args, status)
+		argIdx++
+	}
+
+	// date_from filter
+	if df := q.Get("date_from"); df != "" {
+		if t, err := time.Parse(time.RFC3339, df); err == nil {
+			where = append(where, fmt.Sprintf("started_at >= $%d", argIdx))
+			args = append(args, t)
+			argIdx++
+		} else if t, err := time.Parse("2006-01-02", df); err == nil {
+			where = append(where, fmt.Sprintf("started_at >= $%d", argIdx))
+			args = append(args, t)
+			argIdx++
+		}
+	}
+
+	// date_to filter
+	if dt := q.Get("date_to"); dt != "" {
+		if t, err := time.Parse(time.RFC3339, dt); err == nil {
+			where = append(where, fmt.Sprintf("started_at <= $%d", argIdx))
+			args = append(args, t)
+			argIdx++
+		} else if t, err := time.Parse("2006-01-02", dt); err == nil {
+			// Include the whole day
+			t = t.Add(24*time.Hour - time.Second)
+			where = append(where, fmt.Sprintf("started_at <= $%d", argIdx))
+			args = append(args, t)
+			argIdx++
+		}
+	}
+
+	// search filter (client_ip ILIKE)
+	if search := q.Get("search"); search != "" {
+		where = append(where, fmt.Sprintf("client_ip ILIKE $%d", argIdx))
+		args = append(args, "%"+search+"%")
+		argIdx++
+	}
+
+	whereClause := ""
+	if len(where) > 0 {
+		whereClause = "WHERE " + strings.Join(where, " AND ")
+	}
+
+	// Count query
+	countQuery := "SELECT COUNT(*) FROM sessions " + whereClause
+	var total int
+	countArgs := make([]interface{}, len(args))
+	copy(countArgs, args)
+	err := h.DB.QueryRow(countQuery, countArgs...).Scan(&total)
+	if err != nil {
+		log.Printf("Error counting sessions: %v", err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to count sessions"})
+		return
+	}
+
+	// Data query
+	dataQuery := fmt.Sprintf(`
+		SELECT id, client_ip, client_mac, coins_inserted, total_seconds, remaining_seconds,
 		       status, started_at, activated_at, expired_at
-		FROM sessions 
-		ORDER BY started_at DESC 
-		LIMIT 100
-	`)
+		FROM sessions
+		%s
+		ORDER BY started_at DESC
+		LIMIT $%d OFFSET $%d
+	`, whereClause, argIdx, argIdx+1)
+	args = append(args, limit, offset)
+
+	rows, err := h.DB.Query(dataQuery, args...)
 	if err != nil {
 		log.Printf("Error fetching sessions: %v", err)
 		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to fetch sessions"})
@@ -136,7 +255,7 @@ func (h *AdminHandler) GetSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var sessions []models.Session
+	sessions := make([]models.Session, 0)
 	for rows.Next() {
 		var s models.Session
 		err := rows.Scan(
@@ -150,7 +269,51 @@ func (h *AdminHandler) GetSessions(w http.ResponseWriter, r *http.Request) {
 		sessions = append(sessions, s)
 	}
 
-	sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Data: sessions})
+	sendJSON(w, http.StatusOK, models.PaginatedResponse{
+		Success: true,
+		Data:    sessions,
+		Total:   total,
+		Limit:   limit,
+		Offset:  offset,
+	})
+}
+
+// GetSession returns a single session by ID
+func (h *AdminHandler) GetSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract session ID from URL path: /api/admin/sessions/{id}
+	path := strings.TrimPrefix(r.URL.Path, "/api/admin/sessions/")
+	id, err := strconv.Atoi(path)
+	if err != nil || id <= 0 {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid session ID"})
+		return
+	}
+
+	var s models.Session
+	err = h.DB.QueryRow(`
+		SELECT id, client_ip, client_mac, coins_inserted, total_seconds, remaining_seconds,
+		       status, started_at, activated_at, expired_at
+		FROM sessions
+		WHERE id = $1
+	`, id).Scan(
+		&s.ID, &s.ClientIP, &s.ClientMAC, &s.CoinsInserted, &s.TotalSeconds,
+		&s.RemainingSeconds, &s.Status, &s.StartedAt, &s.ActivatedAt, &s.ExpiredAt,
+	)
+
+	if err == sql.ErrNoRows {
+		sendJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "Session not found"})
+		return
+	} else if err != nil {
+		log.Printf("Error fetching session: %v", err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to fetch session"})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Data: s})
 }
 
 // Settings handles system settings (GET and POST)
@@ -240,6 +403,52 @@ func (h *AdminHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Data: logs})
+}
+
+// GetCoinEvents returns recent coin events
+func (h *AdminHandler) GetCoinEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse limit query param (default 10, max 100)
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	rows, err := h.DB.Query(`
+		SELECT id, coin_value, detected_at, processed, session_id
+		FROM coin_events
+		ORDER BY detected_at DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		log.Printf("Error fetching coin events: %v", err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to fetch coin events"})
+		return
+	}
+	defer rows.Close()
+
+	events := make([]models.CoinEvent, 0)
+	for rows.Next() {
+		var e models.CoinEvent
+		if err := rows.Scan(&e.ID, &e.CoinValue, &e.DetectedAt, &e.Processed, &e.SessionID); err != nil {
+			log.Printf("Error scanning coin event: %v", err)
+			continue
+		}
+		events = append(events, e)
+	}
+
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"events": events,
+	})
 }
 
 // Helper function to log actions

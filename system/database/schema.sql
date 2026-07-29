@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS gpio_config (
     pin INTEGER NOT NULL DEFAULT 7,
     coin_value INTEGER NOT NULL DEFAULT 1,
     pulse_mode VARCHAR(20) NOT NULL DEFAULT 'falling',
+    board_model VARCHAR(50) DEFAULT 'auto',
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -63,12 +64,14 @@ WHERE NOT EXISTS (SELECT 1 FROM gpio_config LIMIT 1);
 -- ============================================
 CREATE TABLE IF NOT EXISTS pricing (
     id SERIAL PRIMARY KEY,
-    coin_value INTEGER NOT NULL,
+    coin_value INTEGER NOT NULL UNIQUE,
     minutes INTEGER NOT NULL,
     active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_coin_value ON pricing(coin_value);
 
 -- Insert default pricing (only if table is empty)
 INSERT INTO pricing (coin_value, minutes)
@@ -96,6 +99,10 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_client_ip ON sessions(client_ip);
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at);
+
+-- Compound indexes for pagination and filter queries
+CREATE INDEX IF NOT EXISTS idx_sessions_started_at_desc ON sessions(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_status_started_at ON sessions(status, started_at DESC);
 
 -- ============================================
 -- COIN EVENTS (raw coin detections)

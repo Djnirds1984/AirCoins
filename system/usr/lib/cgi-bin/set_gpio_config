@@ -15,17 +15,19 @@ CONFIG_FILE="/var/lib/pisowifi/gpio_config"
 read -r POST_DATA
 
 # Parse JSON (using basic shell parsing - no jq dependency required)
-# Expected format: {"pin":7,"coin_value":1,"pulse_mode":"falling"}
+# Expected format: {"pin":7,"coin_value":1,"pulse_mode":"falling","board_model":"auto"}
 
 # Extract values using grep/sed
 PIN=$(echo "$POST_DATA" | grep -o '"pin":[0-9]*' | cut -d: -f2)
 COIN_VALUE=$(echo "$POST_DATA" | grep -o '"coin_value":[0-9]*' | cut -d: -f2)
 PULSE_MODE=$(echo "$POST_DATA" | grep -o '"pulse_mode":"[^"]*"' | cut -d'"' -f4)
+BOARD_MODEL=$(echo "$POST_DATA" | grep -o '"board_model":"[^"]*"' | cut -d'"' -f4)
 
 # Defaults
 PIN=${PIN:-7}
 COIN_VALUE=${COIN_VALUE:-1}
 PULSE_MODE=${PULSE_MODE:-falling}
+BOARD_MODEL=${BOARD_MODEL:-auto}
 
 # Write config file (bash sourceable format)
 cat > "$CONFIG_FILE" << EOF
@@ -34,15 +36,16 @@ cat > "$CONFIG_FILE" << EOF
 COIN_PULSE_PIN=$PIN
 COIN_VALUE=$COIN_VALUE
 PULSE_MODE="$PULSE_MODE"
+BOARD_MODEL="$BOARD_MODEL"
 EOF
 
 # Set permissions
 chmod 644 "$CONFIG_FILE"
 
 # Log the change
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] GPIO config updated: Pin=$PIN, Value=₱$COIN_VALUE, Mode=$PULSE_MODE" >> /var/log/pisowifi/gpio-coin.log
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] GPIO config updated: Pin=$PIN, Value=P$COIN_VALUE, Mode=$PULSE_MODE, Board=$BOARD_MODEL" >> /var/log/pisowifi/gpio-coin.log
 
 # Return success response
 echo "Content-Type: application/json"
 echo ""
-echo '{"status":"ok","pin":'$PIN',"coin_value":'$COIN_VALUE',"pulse_mode":"'$PULSE_MODE'","message":"Config saved. Restart GPIO listener to apply."}'
+echo '{"status":"ok","pin":'$PIN',"coin_value":'$COIN_VALUE',"pulse_mode":"'$PULSE_MODE'","board_model":"'$BOARD_MODEL'","message":"Config saved. Restart GPIO listener to apply."}'

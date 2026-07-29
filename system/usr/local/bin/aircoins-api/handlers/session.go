@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 )
 
 type SessionHandler struct {
@@ -305,15 +306,5 @@ func logAction(db *sql.DB, level, component, message string) {
 
 // Helper to make timestamp
 func makeTimestamp() int64 {
-	return makeTimestampFunc()
-}
-
-var makeTimestampFunc = func() int64 {
-	return int64(0) // Will be replaced with time.Now().Unix()
-}
-
-func init() {
-	makeTimestampFunc = func() int64 {
-		return int64(0)
-	}
+	return time.Now().Unix()
 }

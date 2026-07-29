@@ -33,7 +33,10 @@ while IFS= read -r line; do
     vid=$(echo "$line" | awk '{print $2}')
     cidr=$(echo "$line" | awk '{print $3}')
 
-    [ -z "$parent" ] || [ -z "$vid" ] || [ -z "$cidr" ] && continue
+    # Skip if any required field is missing
+    if [ -z "$parent" ] || [ -z "$vid" ] || [ -z "$cidr" ]; then
+        continue
+    fi
 
     name="${parent}.${vid}"
 
@@ -53,14 +56,21 @@ while IFS= read -r line; do
         logger -t aircoins-vlan "Created VLAN $name"
     fi
 
-    # Assign IP (may already exist from previous run)
+    # Bring up first
+    ip link set "$name" up 2>/dev/null
+    sleep 1
+
+    # Assign IP (remove first to handle stale state, then add fresh)
+    ip addr flush dev "$name" scope global 2>/dev/null
     ip addr add "$cidr" dev "$name" 2>/dev/null
 
-    # Bring up
-    ip link set "$name" up 2>/dev/null
+    # Verify IP was assigned
+    if ! ip addr show "$name" 2>/dev/null | grep -q "inet ${cidr%/*}"; then
+        sleep 1
+        ip addr add "$cidr" dev "$name" 2>/dev/null
+    fi
 
     # Wait for VLAN interface to be UP
-    sleep 1
     if ! ip link show "$name" 2>/dev/null | grep -q "state UP"; then
         ip link set "$name" up 2>/dev/null
         sleep 1

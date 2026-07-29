@@ -4,6 +4,7 @@ import (
 	"aircoins-api/models"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -54,8 +55,10 @@ func (h *GPIOHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Pin < 0 || req.Pin > 40 {
-		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid pin number (0-40)"})
+	// req.Pin is a PHYSICAL header pin number (1-40), translated to a
+	// kernel GPIO line by aircoins-gpio-lib / readGpioPin
+	if req.Pin < 1 || req.Pin > 40 {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid physical header pin (1-40)"})
 		return
 	}
 
@@ -88,11 +91,16 @@ func (h *GPIOHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	// Write config file for gpio-coin-listener to read
 	writeGPIOConfigFile(req.Pin, req.CoinValue, req.PulseMode, req.BoardModel)
 
-	logAction(h.DB, "INFO", "gpio", "GPIO config updated: pin="+strconv.Itoa(req.Pin)+" board="+req.BoardModel)
+	logAction(h.DB, "INFO", "gpio", "GPIO config updated: physical pin="+strconv.Itoa(req.Pin)+" board="+req.BoardModel)
 	sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "GPIO config saved. Restart GPIO listener to apply."})
 }
 
-// Test performs a real GPIO pin test
+// Test performs a real GPIO pin test.
+//
+// The incoming "pin" is a PHYSICAL HEADER PIN number (as printed on the
+// board), never a kernel/sunxi/BCM number. The test is delegated to
+// aircoins-gpio-lib so the admin panel, the CGI pin test and the coin
+// listener all resolve the pin — and report busy lines — identically.
 func (h *GPIOHandler) Test(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -107,31 +115,74 @@ func (h *GPIOHandler) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try all GPIO methods
-	state, method, err := readGpioPin(req.Pin)
+	// Preferred path: the shared shell library (knows the header map,
+	// the backend quirks and how to detect a claimed line)
+	if res, err := gpioTestPinViaLib(req.Pin); err == nil {
+		resp := map[string]interface{}{
+			"status":          firstNonEmpty(res["status"], "error"),
+			"method":          res["method"],
+			"pin":             req.Pin,
+			"pin_numbering":   "physical",
+			"gpio":            res["gpio"],
+			"label":           res["label"],
+			"chip":            res["chip"],
+			"busy":            firstNonEmpty(res["busy"], "unknown"),
+			"busy_consumer":   res["busy_consumer"],
+			"board_model":     res["board_model"],
+			"board_family":    res["board_family"],
+			"pin_map_trusted": res["pin_map_trusted"] != "0",
+		}
+		if res["warning"] != "" {
+			resp["warning"] = res["warning"]
+		}
+
+		if res["status"] != "ok" {
+			resp["message"] = firstNonEmpty(res["message"], "GPIO test failed")
+			if res["busy"] == "yes" {
+				logAction(h.DB, "ERROR", "gpio", "GPIO test: "+resp["message"].(string))
+			}
+			sendJSON(w, http.StatusOK, resp)
+			return
+		}
+
+		state, _ := strconv.Atoi(res["state"])
+		resp["state"] = state
+		resp["state_text"], resp["state_color"] = gpioStateText(state)
+		resp["pull_up"] = "enabled"
+		if res["method"] == "libgpiod" || res["method"] == "sysfs" {
+			resp["pull_up"] = "unavailable (external pull-up required)"
+		}
+		sendJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	// Fallback: library missing (e.g. running the API standalone)
+	state, method, gpioNum, err := readGpioPin(req.Pin)
 	if err != nil {
-		sendJSON(w, http.StatusInternalServerError, models.APIResponse{
-			Success: false,
-			Message: "GPIO test failed: " + err.Error(),
+		sendJSON(w, http.StatusOK, map[string]interface{}{
+			"status":        "error",
+			"pin":           req.Pin,
+			"pin_numbering": "physical",
+			"gpio":          gpioNum,
+			"method":        method,
+			"busy":          gpioBusyFlag(err),
+			"message":       "GPIO test failed: " + err.Error(),
 		})
 		return
 	}
 
-	stateText := "HIGH (1)"
-	stateColor := "#00ff88"
-	if state == 0 {
-		stateText = "LOW (0)"
-		stateColor = "#ff4444"
-	}
-
+	stateText, stateColor := gpioStateText(state)
 	sendJSON(w, http.StatusOK, map[string]interface{}{
-		"status":      "ok",
-		"method":      method,
-		"pin":         req.Pin,
-		"state":       state,
-		"state_text":  stateText,
-		"state_color": stateColor,
-		"pull_up":     "enabled",
+		"status":        "ok",
+		"method":        method,
+		"pin":           req.Pin,
+		"pin_numbering": "physical",
+		"gpio":          gpioNum,
+		"state":         state,
+		"state_text":    stateText,
+		"state_color":   stateColor,
+		"busy":          "unknown",
+		"pull_up":       "enabled",
 	})
 }
 
@@ -165,13 +216,26 @@ func (h *GPIOHandler) Coin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get pricing for this coin value to calculate seconds
-	var minutes int
-	err = h.DB.QueryRow(`
-		SELECT minutes FROM pricing WHERE coin_value = $1 AND active = true
-	`, req.CoinValue).Scan(&minutes)
+	// Resolve minutes from the pricing table only (1 peso = 1 pulse).
+	// A blank/incomplete pricing table credits nothing — the operator must
+	// add the tier in the admin panel.
+	minutes, _, err := MinutesForAmount(h.DB, req.CoinValue)
 	if err != nil {
-		minutes = req.CoinValue * 5 // Default: 5 min per peso
+		log.Printf("Error resolving pricing for P%d: %v", req.CoinValue, err)
+	}
+
+	if minutes == 0 {
+		logAction(h.DB, "ERROR", "gpio", "Coin detected: P"+strconv.Itoa(req.CoinValue)+" but NO pricing tier is configured for it — no time credited")
+		sendJSON(w, http.StatusOK, models.APIResponse{
+			Success: false,
+			Message: "Coin recorded but no pricing tier is configured for P" + strconv.Itoa(req.CoinValue),
+			Data: map[string]interface{}{
+				"coin_value": req.CoinValue,
+				"minutes":    0,
+				"seconds":    0,
+			},
+		})
+		return
 	}
 
 	logAction(h.DB, "INFO", "gpio", "Coin detected: P"+strconv.Itoa(req.CoinValue)+" = "+strconv.Itoa(minutes)+" min")
@@ -187,71 +251,175 @@ func (h *GPIOHandler) Coin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// readGpioPin reads the state of a GPIO pin trying multiple methods
-func readGpioPin(pin int) (int, string, error) {
-	pinStr := strconv.Itoa(pin)
+const gpioLibPath = "/usr/local/bin/aircoins-gpio-lib"
 
-	// Method 1: WiringOP (gpio command) — Orange Pi
-	gpioPath, err := exec.LookPath("gpio")
-	if err == nil {
-		exec.Command(gpioPath, "mode", pinStr, "up").Run()
-		exec.Command(gpioPath, "mode", pinStr, "input").Run()
+// orangePiH3PinToGPIO maps PHYSICAL header pins of the 40-pin Allwinner
+// H3/H5 Orange Pi header (PC / PC Plus / One / Lite / Plus 2E) to the
+// sunxi GPIO number (bank*32 + line, PA=0 PC=64 PD=96 PG=192). That
+// number is both the sysfs GPIO number and the gpiochip0 line number.
+//
+// Physical pin 3 = PA12 = GPIO 12 — NOT GPIO 3 (which is PA3, physical
+// pin 15). Feeding the header pin number straight to gpioget/sysfs is
+// what made the traditional PisoWifi pin-3 wiring look dead.
+var orangePiH3PinToGPIO = map[int]int{
+	3: 12, 5: 11, 7: 6, 8: 13, 10: 14, 11: 1, 12: 110, 13: 0,
+	15: 3, 16: 68, 18: 71, 19: 64, 21: 65, 22: 2, 23: 66, 24: 67,
+	26: 21, 27: 19, 28: 18, 29: 7, 31: 8, 32: 200, 33: 9, 35: 10,
+	36: 201, 37: 20, 38: 198, 40: 199,
+}
 
-		out, err := exec.Command(gpioPath, "read", pinStr).Output()
-		if err == nil {
-			stateStr := strings.TrimSpace(string(out))
-			state, _ := strconv.Atoi(stateStr)
-			return state, "wiringop", nil
-		}
+// gpioTestPinViaLib runs gpio_test_pin from the shared shell library and
+// returns its key=value output as a map.
+func gpioTestPinViaLib(pin int) (map[string]string, error) {
+	if _, err := os.Stat(gpioLibPath); err != nil {
+		return nil, err
+	}
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		return nil, err
 	}
 
-	// Method 2: raspi-gpio — Raspberry Pi
-	raspiGpioPath, err := exec.LookPath("raspi-gpio")
+	// gpio_test_pin exits non-zero on a failed/busy pin but still prints
+	// the detail lines, so parse the output before trusting the exit code.
+	out, runErr := exec.Command(bashPath, "-c",
+		"source "+gpioLibPath+" >/dev/null 2>&1; gpio_test_pin "+strconv.Itoa(pin)).Output()
+
+	res := make(map[string]string)
+	for _, line := range strings.Split(string(out), "\n") {
+		key, value, found := strings.Cut(strings.TrimRight(line, "\r"), "=")
+		if found && key != "" {
+			res[key] = value
+		}
+	}
+	if len(res) == 0 {
+		if runErr != nil {
+			return nil, runErr
+		}
+		return nil, os.ErrInvalid
+	}
+	return res, nil
+}
+
+// readGpioPin reads the state of a PHYSICAL header pin, trying multiple
+// methods. It returns the state, the method used and the kernel GPIO
+// number the physical pin resolved to.
+func readGpioPin(pin int) (int, string, int, error) {
+	pinStr := strconv.Itoa(pin)
+
+	gpioNum, ok := orangePiH3PinToGPIO[pin]
+	if !ok {
+		return 1, "none", 0, errors.New("physical pin " + pinStr +
+			" is not a usable GPIO on the 40-pin Orange Pi header")
+	}
+	gpioNumStr := strconv.Itoa(gpioNum)
+
+	// Method 1: WiringOP (gpio command) — Orange Pi.
+	// "-1" selects PHYSICAL header numbering, so pass the pin as given.
+	gpioPath, err := exec.LookPath("gpio")
 	if err == nil {
-		out, err := exec.Command(raspiGpioPath, "get", pinStr).Output()
+		exec.Command(gpioPath, "-1", "mode", pinStr, "in").Run()
+		exec.Command(gpioPath, "-1", "mode", pinStr, "up").Run()
+
+		out, err := exec.Command(gpioPath, "-1", "read", pinStr).Output()
 		if err == nil {
-			outStr := string(out)
-			if strings.Contains(outStr, "level=0") {
-				return 0, "raspi-gpio", nil
-			} else if strings.Contains(outStr, "level=1") {
-				return 1, "raspi-gpio", nil
+			stateStr := strings.TrimSpace(string(out))
+			if state, convErr := strconv.Atoi(stateStr); convErr == nil {
+				return state, "wiringop", gpioNum, nil
 			}
 		}
 	}
 
-	// Method 3: libgpiod (gpioget command)
-	gpiogetPath, err := exec.LookPath("gpioget")
+	// Method 2: raspi-gpio — Raspberry Pi (BCM numbering; this fallback
+	// map is Orange Pi only, so keep using the resolved number)
+	raspiGpioPath, err := exec.LookPath("raspi-gpio")
 	if err == nil {
-		out, err := exec.Command(gpiogetPath, "gpiochip0", pinStr).Output()
+		out, err := exec.Command(raspiGpioPath, "get", gpioNumStr).Output()
 		if err == nil {
-			stateStr := strings.TrimSpace(string(out))
-			state, _ := strconv.Atoi(stateStr)
-			return state, "libgpiod", nil
+			outStr := string(out)
+			if strings.Contains(outStr, "level=0") {
+				return 0, "raspi-gpio", gpioNum, nil
+			} else if strings.Contains(outStr, "level=1") {
+				return 1, "raspi-gpio", gpioNum, nil
+			}
 		}
 	}
 
-	// Method 4: sysfs fallback
+	// Method 3: libgpiod (gpioget command) — chip line number
+	gpiogetPath, err := exec.LookPath("gpioget")
+	if err == nil {
+		cmd := exec.Command(gpiogetPath, "gpiochip0", gpioNumStr)
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		if err == nil {
+			stateStr := strings.TrimSpace(string(out))
+			if state, convErr := strconv.Atoi(stateStr); convErr == nil {
+				return state, "libgpiod", gpioNum, nil
+			}
+		}
+		if isGpioBusy(stderr.String()) {
+			return 1, "libgpiod", gpioNum, errors.New("physical pin " + pinStr +
+				" (gpiochip0 line " + gpioNumStr + ") is busy - claimed by another driver" +
+				" (i2c/spi/uart overlay?). Disable it or pick another pin")
+		}
+	}
+
+	// Method 4: sysfs fallback — global (sunxi) GPIO number
 	if _, err := os.Stat("/sys/class/gpio"); err == nil {
 		// Export if needed
-		if _, err := os.Stat("/sys/class/gpio/gpio" + pinStr); os.IsNotExist(err) {
-			os.WriteFile("/sys/class/gpio/export", []byte(pinStr), 0644)
+		if _, err := os.Stat("/sys/class/gpio/gpio" + gpioNumStr); os.IsNotExist(err) {
+			if werr := os.WriteFile("/sys/class/gpio/export", []byte(gpioNumStr), 0644); werr != nil && isGpioBusy(werr.Error()) {
+				return 1, "sysfs", gpioNum, errors.New("physical pin " + pinStr +
+					" (GPIO " + gpioNumStr + ") is busy - claimed by another driver" +
+					" (i2c/spi/uart overlay?). Disable it or pick another pin")
+			}
 		}
-		os.WriteFile("/sys/class/gpio/gpio"+pinStr+"/direction", []byte("in"), 0644)
+		os.WriteFile("/sys/class/gpio/gpio"+gpioNumStr+"/direction", []byte("in"), 0644)
 
-		data, err := os.ReadFile("/sys/class/gpio/gpio" + pinStr + "/value")
+		data, err := os.ReadFile("/sys/class/gpio/gpio" + gpioNumStr + "/value")
 		if err == nil {
 			stateStr := strings.TrimSpace(string(data))
 			state, _ := strconv.Atoi(stateStr)
-			return state, "sysfs", nil
+			return state, "sysfs", gpioNum, nil
 		}
 	}
 
-	return 1, "none", nil // Default HIGH (pull-up)
+	return 1, "none", gpioNum, nil // Default HIGH (pull-up)
+}
+
+// isGpioBusy reports whether an error message means the GPIO line is
+// already claimed (EBUSY), e.g. by an i2c overlay on pins 3/5.
+func isGpioBusy(msg string) bool {
+	return strings.Contains(strings.ToLower(msg), "busy")
+}
+
+func gpioBusyFlag(err error) string {
+	if err != nil && isGpioBusy(err.Error()) {
+		return "yes"
+	}
+	return "unknown"
+}
+
+func gpioStateText(state int) (string, string) {
+	if state == 0 {
+		return "LOW (0)", "#ff4444"
+	}
+	return "HIGH (1)", "#00ff88"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // writeGPIOConfigFile writes config to file for gpio-coin-listener
 func writeGPIOConfigFile(pin, coinValue int, pulseMode, boardModel string) {
 	content := "# AirCoins GPIO Config - Written by API\n"
+	content += "# COIN_PULSE_PIN is a PHYSICAL HEADER PIN number (not a GPIO number)\n"
 	content += "COIN_PULSE_PIN=" + strconv.Itoa(pin) + "\n"
 	content += "COIN_VALUE=" + strconv.Itoa(coinValue) + "\n"
 	content += "PULSE_MODE=\"" + pulseMode + "\"\n"

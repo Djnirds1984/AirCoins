@@ -14,6 +14,13 @@ type PricingHandler struct {
 	DB *sql.DB
 }
 
+// PRICING MODEL
+// ------------
+// 1 peso coin = 1 pulse from the coin acceptor. A pricing row maps the
+// inserted peso amount (= number of pulses) to minutes of internet.
+// There is no rate-per-minute: minutes always come from the table, and
+// the table starts blank (the operator adds every tier manually).
+
 // Handle handles pricing GET, POST, and DELETE
 func (h *PricingHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// Check if this is a DELETE request with an ID in the path
@@ -42,6 +49,17 @@ func (h *PricingHandler) Handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PricingHandler) getPricing(w http.ResponseWriter, r *http.Request) {
+	// ?coin=N (alias ?amount=N) resolves a single inserted peso amount to
+	// minutes — used by the session manager and the captive portal.
+	amountStr := r.URL.Query().Get("coin")
+	if amountStr == "" {
+		amountStr = r.URL.Query().Get("amount")
+	}
+	if amountStr != "" {
+		h.quotePricing(w, amountStr)
+		return
+	}
+
 	includeInactive := r.URL.Query().Get("include_inactive") == "true"
 
 	query := `
@@ -61,7 +79,8 @@ func (h *PricingHandler) getPricing(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var pricing []models.Pricing
+	// Empty (not null) is the normal state of a freshly installed device
+	pricing := []models.Pricing{}
 	for rows.Next() {
 		var p models.Pricing
 		if err := rows.Scan(&p.ID, &p.CoinValue, &p.Minutes, &p.Active, &p.CreatedAt, &p.UpdatedAt); err != nil {
@@ -72,6 +91,79 @@ func (h *PricingHandler) getPricing(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Data: pricing})
+}
+
+// quotePricing answers "how many minutes does P<amount> buy?"
+func (h *PricingHandler) quotePricing(w http.ResponseWriter, amountStr string) {
+	amount, err := strconv.Atoi(amountStr)
+	if err != nil || amount <= 0 {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid coin amount"})
+		return
+	}
+
+	minutes, matched, err := MinutesForAmount(h.DB, amount)
+	if err != nil {
+		log.Printf("Error resolving pricing for P%d: %v", amount, err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to resolve pricing"})
+		return
+	}
+
+	if minutes == 0 {
+		sendJSON(w, http.StatusOK, models.APIResponse{
+			Success: false,
+			Message: "No pricing tier configured for P" + strconv.Itoa(amount),
+			Data: map[string]interface{}{
+				"coin_value": amount,
+				"minutes":    0,
+				"seconds":    0,
+				"matched":    0,
+			},
+		})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, models.APIResponse{
+		Success: true,
+		Data: map[string]interface{}{
+			"coin_value": amount,
+			"minutes":    minutes,
+			"seconds":    minutes * 60,
+			"matched":    matched,
+		},
+	})
+}
+
+// MinutesForAmount resolves an inserted peso amount (= pulse count) to
+// minutes using the pricing table only.
+//
+// Resolution order:
+//  1. exact active row for that amount
+//  2. otherwise the highest active row whose coin_value is below the amount
+//     (partial credit, e.g. P7 with tiers 1/5/10 credits the P5 tier)
+//
+// Returns minutes = 0 when the pricing table has nothing usable — callers
+// must treat that as "no time credited" and surface it to the operator.
+// The second return value is the coin_value of the row that matched.
+func MinutesForAmount(db *sql.DB, amount int) (int, int, error) {
+	if amount <= 0 {
+		return 0, 0, nil
+	}
+
+	var minutes, matched int
+	err := db.QueryRow(`
+		SELECT minutes, coin_value FROM pricing
+		WHERE active = true AND coin_value <= $1
+		ORDER BY coin_value DESC
+		LIMIT 1
+	`, amount).Scan(&minutes, &matched)
+
+	if err == sql.ErrNoRows {
+		return 0, 0, nil
+	} else if err != nil {
+		return 0, 0, err
+	}
+
+	return minutes, matched, nil
 }
 
 func (h *PricingHandler) updatePricing(w http.ResponseWriter, r *http.Request) {

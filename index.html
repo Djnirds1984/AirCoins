@@ -113,6 +113,17 @@
         }
         .coin-btn h3 { color: #ffd700; font-size: 20px; }
         .coin-btn p { color: #aaa; font-size: 14px; margin-top: 5px; }
+        /* Shown when the operator has no pricing tiers, or the API is unreachable */
+        .pricing-empty {
+            max-width: 700px;
+            margin: 30px auto;
+            padding: 25px 20px;
+            text-align: center;
+            color: #aaa;
+            font-size: 14px;
+            border: 1px dashed #444;
+            border-radius: 15px;
+        }
 
         /* TIMER PAGE */
         .timer-container {
@@ -449,23 +460,9 @@
         <h2 class="section-title">Pricing</h2>
         <p class="section-subtitle">Choose your preferred coin denomination</p>
 
-        <div class="coin-section">
-            <div class="coin-btn" onclick="insertCoin(1)">
-                <div class="coin-icon">₱1</div>
-                <h3>1 Peso</h3>
-                <p>5 Minutes</p>
-            </div>
-            <div class="coin-btn" onclick="insertCoin(5)">
-                <div class="coin-icon">₱5</div>
-                <h3>5 Pesos</h3>
-                <p>30 Minutes</p>
-            </div>
-            <div class="coin-btn" onclick="insertCoin(10)">
-                <div class="coin-icon">₱10</div>
-                <h3>10 Pesos</h3>
-                <p>1 Hour</p>
-            </div>
-        </div>
+        <!-- Rendered from /api/pricing by renderPricingCards() -->
+        <div class="coin-section" id="pricingCardsHome" style="display:none;"></div>
+        <div class="pricing-empty" id="pricingEmptyHome">Loading rates&hellip;</div>
     </div>
 
     <!-- CONNECT PAGE -->
@@ -476,23 +473,9 @@
         <div class="status-card">
             <div id="coinSlotArea">
                 <p style="color:#aaa; margin-bottom:20px;">Select a coin to insert:</p>
-                <div class="coin-section">
-                    <div class="coin-btn" onclick="insertCoin(1)">
-                        <div class="coin-icon">₱1</div>
-                        <h3>1 Peso</h3>
-                        <p>5 Minutes</p>
-                    </div>
-                    <div class="coin-btn" onclick="insertCoin(5)">
-                        <div class="coin-icon">₱5</div>
-                        <h3>5 Pesos</h3>
-                        <p>30 Minutes</p>
-                    </div>
-                    <div class="coin-btn" onclick="insertCoin(10)">
-                        <div class="coin-icon">₱10</div>
-                        <h3>10 Pesos</h3>
-                        <p>1 Hour</p>
-                    </div>
-                </div>
+                <!-- Rendered from /api/pricing by renderPricingCards() -->
+                <div class="coin-section" id="pricingCardsConnect" style="display:none;"></div>
+                <div class="pricing-empty" id="pricingEmptyConnect">Loading rates&hellip;</div>
             </div>
         </div>
     </div>
@@ -601,8 +584,11 @@
             startTime: null,
             // System
             systemOnline: true,
-            // Pricing
-            pricing: { 1: 5, 5: 30, 10: 60 },
+            // Pricing tiers fetched from /api/pricing: { coinValue: minutes }.
+            // Empty is normal — the operator configures every tier manually.
+            // The backend is authoritative; this copy is display only.
+            pricing: {},
+            pricingLoaded: false,
             // GPIO Configuration
             gpioPin: 7,
             gpioCoinValue: 1,
@@ -614,7 +600,8 @@
             const saved = localStorage.getItem('aircoins_state');
             if (saved) {
                 const parsed = JSON.parse(saved);
-                state.pricing = parsed.pricing || { 1: 5, 5: 30, 10: 60 };
+                // Pricing is deliberately NOT restored from localStorage —
+                // /api/pricing is the only source of tiers.
                 state.gpioPin = parsed.gpioPin || 7;
                 state.gpioCoinValue = parsed.gpioCoinValue || 1;
                 state.gpioPulseMode = parsed.gpioPulseMode || 'falling';
@@ -623,7 +610,6 @@
 
         function saveState() {
             localStorage.setItem('aircoins_state', JSON.stringify({
-                pricing: state.pricing,
                 gpioPin: state.gpioPin,
                 gpioCoinValue: state.gpioCoinValue,
                 gpioPulseMode: state.gpioPulseMode
@@ -647,7 +633,11 @@
                 return;
             }
 
-            const minutes = state.pricing[amount];
+            const minutes = minutesForAmount(amount);
+            if (minutes <= 0) {
+                showNotification('No rate configured for ₱' + amount + ' yet.', 'error');
+                return;
+            }
             const seconds = minutes * 60;
 
             if (state.sessionActive) {
@@ -830,20 +820,123 @@
             sessionInterval: null
         };
 
-        function updateCoinButtons() {
-            document.querySelectorAll('.coin-btn').forEach(btn => {
-                const text = btn.querySelector('h3').textContent;
-                const coinVal = parseInt(text.replace(/[^0-9]/g, ''));
-                if (state.pricing[coinVal]) {
-                    const p = btn.querySelector('p');
-                    const mins = state.pricing[coinVal];
-                    p.textContent = mins >= 60 ? (mins / 60) + ' Hour' + (mins > 60 ? 's' : '') : mins + ' Minutes';
+        // ==================== PRICING (/api/pricing) ====================
+        const PRICING_URL = '/api/pricing';
+        const PRICING_REFRESH_INTERVAL = 60000;  // re-read tiers once a minute
+
+        // Mirrors the backend MinutesForAmount(): exact tier, otherwise the
+        // highest configured tier at or below the amount, otherwise 0.
+        // Informational only — the backend decides what actually gets credited.
+        function minutesForAmount(amount) {
+            const coin = parseInt(amount, 10);
+            if (!coin || coin <= 0) return 0;
+
+            if (state.pricing[coin] > 0) return state.pricing[coin];
+
+            let bestTier = 0;
+            let bestMinutes = 0;
+            Object.keys(state.pricing).forEach(key => {
+                const tier = parseInt(key, 10);
+                if (tier > 0 && tier <= coin && tier > bestTier) {
+                    bestTier = tier;
+                    bestMinutes = state.pricing[key];
                 }
+            });
+            return bestMinutes;
+        }
+
+        function formatMinutes(mins) {
+            if (!mins || mins <= 0) return 'No rate configured';
+            if (mins < 60) return mins + ' Minute' + (mins === 1 ? '' : 's');
+            const hrs = Math.floor(mins / 60);
+            const rem = mins % 60;
+            let text = hrs + ' Hour' + (hrs > 1 ? 's' : '');
+            if (rem > 0) text += ' ' + rem + ' Min';
+            return text;
+        }
+
+        // Rebuilds the coin cards on both the home and connect pages from the
+        // tiers currently in state.pricing. An empty table is a valid state.
+        function renderPricingCards() {
+            const tiers = Object.keys(state.pricing)
+                .map(key => parseInt(key, 10))
+                .filter(coin => coin > 0)
+                .sort((a, b) => a - b);
+
+            ['Home', 'Connect'].forEach(page => {
+                const grid = document.getElementById('pricingCards' + page);
+                const empty = document.getElementById('pricingEmpty' + page);
+                if (!grid || !empty) return;
+
+                grid.innerHTML = '';
+
+                if (tiers.length === 0) {
+                    grid.style.display = 'none';
+                    empty.style.display = 'block';
+                    empty.textContent = state.pricingLoaded
+                        ? 'No rates configured. Please ask the operator to set up pricing.'
+                        : 'Rates unavailable right now.';
+                    return;
+                }
+
+                empty.style.display = 'none';
+                grid.style.display = 'grid';
+
+                tiers.forEach(coin => {
+                    const card = document.createElement('div');
+                    card.className = 'coin-btn';
+                    card.onclick = function () { insertCoin(coin); };
+
+                    const icon = document.createElement('div');
+                    icon.className = 'coin-icon';
+                    icon.textContent = '₱' + coin;
+
+                    const title = document.createElement('h3');
+                    title.textContent = coin + (coin === 1 ? ' Peso' : ' Pesos');
+
+                    const desc = document.createElement('p');
+                    desc.textContent = formatMinutes(state.pricing[coin]);
+
+                    card.appendChild(icon);
+                    card.appendChild(title);
+                    card.appendChild(desc);
+                    grid.appendChild(card);
+                });
             });
         }
 
+        // Fetch the operator's real tiers. Never rejects: when the API is not
+        // reachable (file:// preview, backend down) the portal just shows a
+        // placeholder instead of stale demo pricing.
+        function loadPricing() {
+            return fetch(PRICING_URL + '?t=' + Date.now())
+                .then(r => {
+                    if (!r.ok) throw new Error('pricing unavailable');
+                    return r.json();
+                })
+                .then(res => {
+                    const rows = (res && Array.isArray(res.data)) ? res.data : [];
+                    const tiers = {};
+                    rows.forEach(row => {
+                        const coin = parseInt(row.coin_value, 10);
+                        const mins = parseInt(row.minutes, 10);
+                        if (coin > 0 && mins > 0 && row.active !== false) {
+                            tiers[coin] = mins;
+                        }
+                    });
+                    state.pricing = tiers;
+                    state.pricingLoaded = true;
+                })
+                .catch(() => {
+                    state.pricing = {};
+                    state.pricingLoaded = false;
+                })
+                .then(renderPricingCards);
+        }
+
         loadState();
-        updateCoinButtons();
+        loadPricing();
+        setInterval(loadPricing, PRICING_REFRESH_INTERVAL);
 
         // Restore running timer if session was active
         if (state.sessionActive && state.remainingSeconds > 0) {
@@ -984,8 +1077,11 @@
             gpio.countdown = Math.max(0, gpio.expiresAt - nowSec);
             updateGpioCountdownUI();
 
-            // Add coin
-            const minutes = state.pricing[amount];
+            // Add coin. The portal mirrors the backend pricing rules, but the
+            // backend is what actually credits time — an unpriced coin is still
+            // listed, just without minutes.
+            const minutes = minutesForAmount(amount);
+            const minutesText = minutes > 0 ? '+' + minutes + ' min' : 'no rate';
             gpio.coins.push({ amount: amount, minutes: minutes, time: new Date().toLocaleTimeString() });
             gpio.totalAmount += amount;
             gpio.totalSeconds += minutes * 60;
@@ -1006,7 +1102,7 @@
             // Add to coin list
             const listItem = document.createElement('div');
             listItem.className = 'gpio-coin-item';
-            listItem.innerHTML = '<span style="color:#ffd700;">₱' + amount + '</span><span style="color:#aaa;">+' + minutes + ' min</span><span style="color:#666;">' + new Date().toLocaleTimeString() + '</span>';
+            listItem.innerHTML = '<span style="color:#ffd700;">₱' + amount + '</span><span style="color:#aaa;">' + minutesText + '</span><span style="color:#666;">' + new Date().toLocaleTimeString() + '</span>';
             document.getElementById('gpioCoinList').prepend(listItem);
 
             // Update status
@@ -1017,7 +1113,7 @@
             document.getElementById('gpioDoneBtn').style.display = 'block';
 
             // Flash notification
-            showNotification('Coin detected! ₱' + amount + ' (+' + minutes + ' min)', 'success');
+            showNotification('Coin detected! ₱' + amount + ' (' + minutesText + ')', 'success');
 
             // Brief status flash then back to listening
             setTimeout(() => {
@@ -1040,6 +1136,14 @@
 
             // Close modal
             closeGpioModal();
+
+            // No local rate for what was inserted (pricing table empty or the
+            // API unreachable). The backend is authoritative, so leave the
+            // session to it and let the status poll pick it up.
+            if (gpio.totalSeconds <= 0) {
+                showNotification('Coins accepted. Waiting for the server to credit your time...', 'info');
+                return;
+            }
 
             // If session already active, add time to it
             if (state.sessionActive) {

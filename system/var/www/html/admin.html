@@ -553,10 +553,6 @@
             display: flex;
             gap: 6px;
         }
-        .rate-cell {
-            color: #ffd700;
-            font-weight: 600;
-        }
         .inactive-row {
             opacity: 0.55;
         }
@@ -1323,6 +1319,10 @@
                     </div>
                     <button type="submit" class="btn btn-primary" id="add-pricing-btn">Add Tier</button>
                 </form>
+                <div class="gpio-info-text" style="margin-top:14px;">
+                    1 peso coin = 1 pulse. A tier maps the inserted amount (₱) to minutes of internet.
+                    The table starts empty — add every tier you accept.
+                </div>
             </div>
 
             <!-- Pricing Tiers Table -->
@@ -1333,13 +1333,12 @@
                         <tr>
                             <th>Coin Value (₱)</th>
                             <th>Minutes</th>
-                            <th>Rate (₱/min)</th>
                             <th>Active</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="pricing-tiers-body">
-                        <tr class="empty-row"><td colspan="5">Loading...</td></tr>
+                        <tr class="empty-row"><td colspan="4">Loading...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1423,7 +1422,7 @@
                     <div id="gpio-board-info" class="gpio-info-text" style="display:none;"></div>
                     <div class="settings-row">
                         <div class="settings-field">
-                            <label for="gpio-pin">GPIO Pin</label>
+                            <label for="gpio-pin">Coin Slot Pin (physical header pin)</label>
                             <select id="gpio-pin"></select>
                         </div>
                         <div class="settings-field">
@@ -1434,6 +1433,12 @@
                                 <option value="both">BOTH</option>
                             </select>
                         </div>
+                    </div>
+                    <div class="gpio-info-text">
+                        Pin numbers are PHYSICAL header pins (the numbers printed on the 40-pin header),
+                        not BCM/sunxi GPIO numbers. The kernel GPIO line is shown next to each pin
+                        &mdash; e.g. Orange Pi PC pin 3 = PA12 = GPIO 12.
+                        Pins marked with a function (I2C/SPI/UART) only work as GPIO when that overlay is disabled.
                     </div>
                     <div class="settings-row" style="gap: 12px;">
                         <button class="btn btn-ghost" onclick="testGpioPin()">Test GPIO</button>
@@ -2014,13 +2019,12 @@ async function loadPricing() {
 function renderPricingTable(tiers) {
     var tbody = document.getElementById('pricing-tiers-body');
     if (!tiers || tiers.length === 0) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="5">No pricing tiers configured</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No pricing tiers configured</td></tr>';
         return;
     }
 
     tbody.innerHTML = '';
     tiers.forEach(function(t) {
-        var rate = t.minutes > 0 ? (t.coin_value / t.minutes).toFixed(3) : '-';
         var rowClass = t.active ? '' : ' class="inactive-row"';
 
         if (editingPricingId === t.id) {
@@ -2029,7 +2033,6 @@ function renderPricingTable(tiers) {
                 '<tr class="inline-edit-row" data-id="' + t.id + '">' +
                     '<td><input type="number" id="edit-coin-value" value="' + t.coin_value + '" min="1"></td>' +
                     '<td><input type="number" id="edit-minutes" value="' + t.minutes + '" min="1"></td>' +
-                    '<td class="rate-cell" id="edit-rate">' + rate + '</td>' +
                     '<td>' +
                         '<label class="toggle-switch">' +
                             '<input type="checkbox" id="edit-active" ' + (t.active ? 'checked' : '') + '>' +
@@ -2049,7 +2052,6 @@ function renderPricingTable(tiers) {
                 '<tr' + rowClass + ' data-id="' + t.id + '">' +
                     '<td>\u20B1' + t.coin_value + '</td>' +
                     '<td>' + t.minutes + '</td>' +
-                    '<td class="rate-cell">' + rate + '</td>' +
                     '<td>' +
                         '<label class="toggle-switch">' +
                             '<input type="checkbox" ' + (t.active ? 'checked' : '') + ' onchange="togglePricingActive(' + t.id + ', ' + t.coin_value + ', ' + t.minutes + ', this.checked)">' +
@@ -2673,27 +2675,33 @@ function escapeHtml(str) {
 // SETTINGS
 // ============================================================
 
-// Pin mappings for different boards (physical pin -> {gpio, label})
+// Pin mappings for different boards: PHYSICAL header pin -> {gpio, label, note}
+// "gpio" is the kernel line number the physical pin resolves to
+// (sunxi bank*32+line on Orange Pi, BCM number on Raspberry Pi).
+// These tables mirror pin_to_gpio() in /usr/local/bin/aircoins-gpio-lib.
+// "note" flags pins whose default pinmux function must be disabled first.
 var PIN_MAPS = {
     'orangepi_h3_40': [
-        {pin:3,gpio:12,label:'PA12'},{pin:5,gpio:11,label:'PA11'},{pin:7,gpio:6,label:'PA6'},
-        {pin:8,gpio:13,label:'PA13'},{pin:10,gpio:14,label:'PA14'},{pin:11,gpio:1,label:'PA1'},
-        {pin:12,gpio:358,label:'PD14'},{pin:13,gpio:0,label:'PA0'},{pin:15,gpio:3,label:'PA3'},
-        {pin:16,gpio:68,label:'PC4'},{pin:18,gpio:71,label:'PC7'},{pin:19,gpio:64,label:'PC0'},
-        {pin:21,gpio:65,label:'PC1'},{pin:22,gpio:2,label:'PA2'},{pin:23,gpio:66,label:'PC2'},
-        {pin:24,gpio:67,label:'PC3'},{pin:26,gpio:21,label:'PA21'},{pin:27,gpio:19,label:'PA19'},
-        {pin:28,gpio:18,label:'PA18'},{pin:29,gpio:7,label:'PA7'},{pin:31,gpio:8,label:'PA8'},
-        {pin:32,gpio:200,label:'PG8'},{pin:33,gpio:201,label:'PG9'},{pin:35,gpio:198,label:'PG6'},
-        {pin:36,gpio:199,label:'PG7'},{pin:37,gpio:9,label:'PA9'},{pin:38,gpio:10,label:'PA10'},
-        {pin:40,gpio:17,label:'PA17'}
+        {pin:3,gpio:12,label:'PA12',note:'I2C TWI0_SDA'},{pin:5,gpio:11,label:'PA11',note:'I2C TWI0_SCK'},
+        {pin:7,gpio:6,label:'PA6'},{pin:8,gpio:13,label:'PA13',note:'UART3_TX'},
+        {pin:10,gpio:14,label:'PA14',note:'UART3_RX'},{pin:11,gpio:1,label:'PA1'},
+        {pin:12,gpio:110,label:'PD14'},{pin:13,gpio:0,label:'PA0'},{pin:15,gpio:3,label:'PA3'},
+        {pin:16,gpio:68,label:'PC4'},{pin:18,gpio:71,label:'PC7'},{pin:19,gpio:64,label:'PC0',note:'SPI0_MOSI'},
+        {pin:21,gpio:65,label:'PC1',note:'SPI0_MISO'},{pin:22,gpio:2,label:'PA2'},{pin:23,gpio:66,label:'PC2',note:'SPI0_CLK'},
+        {pin:24,gpio:67,label:'PC3',note:'SPI0_CS'},{pin:26,gpio:21,label:'PA21'},{pin:27,gpio:19,label:'PA19',note:'I2C TWI1_SDA'},
+        {pin:28,gpio:18,label:'PA18',note:'I2C TWI1_SCK'},{pin:29,gpio:7,label:'PA7'},{pin:31,gpio:8,label:'PA8'},
+        {pin:32,gpio:200,label:'PG8',note:'UART1_RTS'},{pin:33,gpio:9,label:'PA9'},{pin:35,gpio:10,label:'PA10'},
+        {pin:36,gpio:201,label:'PG9',note:'UART1_CTS'},{pin:37,gpio:20,label:'PA20'},{pin:38,gpio:198,label:'PG6',note:'UART1_TX'},
+        {pin:40,gpio:199,label:'PG7',note:'UART1_RX'}
     ],
     'orangepi_h2_26': [
-        {pin:3,gpio:12,label:'PA12'},{pin:5,gpio:11,label:'PA11'},{pin:7,gpio:6,label:'PA6'},
-        {pin:8,gpio:13,label:'PA13'},{pin:10,gpio:14,label:'PA14'},{pin:11,gpio:1,label:'PA1'},
-        {pin:12,gpio:358,label:'PD14'},{pin:13,gpio:0,label:'PA0'},{pin:15,gpio:3,label:'PA3'},
-        {pin:16,gpio:68,label:'PC4'},{pin:18,gpio:71,label:'PC7'},{pin:19,gpio:64,label:'PC0'},
-        {pin:21,gpio:65,label:'PC1'},{pin:22,gpio:2,label:'PA2'},{pin:23,gpio:66,label:'PC2'},
-        {pin:24,gpio:67,label:'PC3'},{pin:26,gpio:21,label:'PA21'}
+        {pin:3,gpio:12,label:'PA12',note:'I2C TWI0_SDA'},{pin:5,gpio:11,label:'PA11',note:'I2C TWI0_SCK'},
+        {pin:7,gpio:6,label:'PA6'},{pin:8,gpio:198,label:'PG6',note:'UART1_TX'},
+        {pin:10,gpio:199,label:'PG7',note:'UART1_RX'},{pin:11,gpio:1,label:'PA1'},
+        {pin:12,gpio:7,label:'PA7'},{pin:13,gpio:0,label:'PA0'},{pin:15,gpio:3,label:'PA3'},
+        {pin:16,gpio:19,label:'PA19'},{pin:18,gpio:18,label:'PA18'},{pin:19,gpio:15,label:'PA15',note:'SPI1_MOSI'},
+        {pin:21,gpio:16,label:'PA16',note:'SPI1_MISO'},{pin:22,gpio:2,label:'PA2'},{pin:23,gpio:14,label:'PA14',note:'SPI1_CLK'},
+        {pin:24,gpio:13,label:'PA13',note:'SPI1_CS'},{pin:26,gpio:10,label:'PA10'}
     ],
     'raspberrypi_40': [
         {pin:3,gpio:2,label:'GPIO2'},{pin:5,gpio:3,label:'GPIO3'},{pin:7,gpio:4,label:'GPIO4'},
@@ -2738,7 +2746,9 @@ function populatePinDropdown(boardModel) {
     map.forEach(function(p) {
         var opt = document.createElement('option');
         opt.value = p.pin;
-        opt.textContent = 'Pin ' + p.pin + ' \u2014 ' + p.label;
+        // Physical pin first, then the kernel line it maps to
+        opt.textContent = 'Pin ' + p.pin + ' \u2014 ' + p.label + ' (GPIO ' + p.gpio + ')' +
+            (p.note ? ' \u2014 ' + p.note : '');
         sel.appendChild(opt);
     });
     // Restore previous selection if still valid
@@ -2841,16 +2851,25 @@ async function testGpioPin() {
     var pin = parseInt(document.getElementById('gpio-pin').value);
     var resultEl = document.getElementById('gpio-test-result');
     resultEl.style.display = 'block';
-    resultEl.textContent = 'Testing pin ' + pin + '...';
+    resultEl.textContent = 'Testing physical pin ' + pin + '...';
     resultEl.className = 'gpio-info-text';
 
     try {
         var res = await apiCall('POST', '/gpio/test', { pin: pin });
+        var where = 'Physical pin ' + res.pin +
+            (res.label ? ' (' + res.label + ', GPIO ' + res.gpio + ')' : '');
+
         if (res.status === 'ok') {
-            resultEl.textContent = 'Pin ' + res.pin + ': ' + res.state_text + ' (method: ' + res.method + ')';
-            resultEl.className = 'gpio-info-text ' + (res.state === 1 ? 'success' : 'error');
+            var txt = where + ': ' + res.state_text + ' (method: ' + res.method + ')';
+            if (res.busy === 'yes') txt += ' \u2014 WARNING: line is claimed by another driver';
+            if (res.warning) txt += ' \u2014 ' + res.warning;
+            if (res.pull_up && res.pull_up !== 'enabled') txt += ' \u2014 pull-up ' + res.pull_up;
+            resultEl.textContent = txt;
+            resultEl.className = 'gpio-info-text ' +
+                ((res.state === 1 && res.busy !== 'yes' && !res.warning) ? 'success' : 'error');
         } else {
-            resultEl.textContent = res.message || 'Test failed';
+            resultEl.textContent = (res.busy === 'yes' ? 'BUSY: ' : '') +
+                (res.message || (where + ': test failed'));
             resultEl.className = 'gpio-info-text error';
         }
     } catch (e) {

@@ -25,10 +25,9 @@ PID_FILE="/var/run/pisowifi-session.pid"
 CONFIG_FILE="/var/lib/pisowifi/config"
 STATS_FILE="/var/lib/pisowifi/stats"
 
-# Pricing (minutes per peso)
-PRICE_1=5      # ₱1 = 5 minutes
-PRICE_5=30     # ₱5 = 30 minutes
-PRICE_10=60    # ₱10 = 60 minutes
+# Pricing comes from the database only (table `pricing`, managed from the
+# admin panel). 1 peso coin = 1 pulse; a pricing row maps the inserted peso
+# amount to minutes. There are no hardcoded prices and no rate-per-minute.
 
 # ============================================
 # LOGGING
@@ -84,9 +83,16 @@ process_coin_events() {
         local event_id=$(echo "$event" | grep -o '"id":[0-9]*' | cut -d: -f2)
 
         if [ -n "$coin_value" ] && [ "$coin_value" -gt 0 ]; then
-            # Get pricing for this coin
-            local minutes=$(curl -s "$API_URL/api/pricing?coin=$coin_value" | grep -o '"minutes":[0-9]*' | cut -d: -f2)
-            minutes=${minutes:-$((coin_value * 5))}
+            # Resolve minutes from the pricing table (no local defaults)
+            local minutes=$(curl -s "$API_URL/api/pricing?coin=$coin_value" | grep -o '"minutes":[0-9]*' | cut -d: -f2 | head -1)
+
+            if [ -z "$minutes" ] || ! [ "$minutes" -gt 0 ] 2>/dev/null; then
+                log "ERROR: no pricing tier configured for ₱$coin_value - no time credited. Add the tier in Admin > Pricing."
+                # Mark processed so the event isn't retried forever
+                curl -s -X POST "$API_URL/api/gpio/coin/$event_id/processed" > /dev/null 2>&1
+                continue
+            fi
+
             local seconds=$((minutes * 60))
 
             log "COIN EVENT: ₱$coin_value = $minutes minutes ($seconds seconds)"

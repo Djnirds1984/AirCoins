@@ -62,6 +62,13 @@ WHERE NOT EXISTS (SELECT 1 FROM gpio_config LIMIT 1);
 -- ============================================
 -- PRICING TABLE
 -- ============================================
+-- Model: 1 peso coin = 1 pulse from the coin acceptor.
+-- A row maps the inserted peso amount (= pulse count) to minutes
+-- of internet. There is no rate-per-minute anywhere in the system.
+--
+-- This table intentionally starts EMPTY — the operator enters every
+-- tier manually from the admin panel (Pricing section). Do NOT seed
+-- default rows here.
 CREATE TABLE IF NOT EXISTS pricing (
     id SERIAL PRIMARY KEY,
     coin_value INTEGER NOT NULL UNIQUE,
@@ -72,11 +79,6 @@ CREATE TABLE IF NOT EXISTS pricing (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_coin_value ON pricing(coin_value);
-
--- Insert default pricing (only if table is empty)
-INSERT INTO pricing (coin_value, minutes)
-SELECT * FROM (VALUES (1, 5), (5, 30), (10, 60)) AS v(coin_value, minutes)
-WHERE NOT EXISTS (SELECT 1 FROM pricing LIMIT 1);
 
 -- ============================================
 -- SESSIONS (must come before coin_events — FK dependency)

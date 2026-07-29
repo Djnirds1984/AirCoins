@@ -234,6 +234,17 @@ else
     echo -e "${GREEN}  ✓ Schema applied successfully${NC}"
 fi
 
+# Run idempotent migrations (safe on both fresh and existing databases)
+if [ -f "$SYSTEM_DIR/database/migrations.sql" ]; then
+    echo "  Applying database migrations..."
+    if psql -U aircoins -d aircoins -h localhost -f "$SYSTEM_DIR/database/migrations.sql" > /dev/null; then
+        echo -e "${GREEN}  ✓ Migrations applied${NC}"
+    else
+        echo -e "${YELLOW}  ⚠ Migrations failed. Run manually:${NC}"
+        echo -e "${YELLOW}    psql -U aircoins -d aircoins -h localhost -f $SYSTEM_DIR/database/migrations.sql${NC}"
+    fi
+fi
+
 echo -e "${GREEN}  ✓ PostgreSQL database ready${NC}"
 
 # ============================================

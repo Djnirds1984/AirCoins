@@ -11,8 +11,11 @@
 #
 # GPIO PIN CONFIGURATION:
 #   Configurable via Admin Panel or /var/lib/pisowifi/gpio_config
-#   Default: Physical pin 7
-#   Connect coin acceptor pulse wire to selected GPIO pin
+#   COIN_PULSE_PIN is the PHYSICAL HEADER PIN number (as printed on the
+#   40-pin header), NOT a sunxi/BCM GPIO number. On Orange Pi PC (H3)
+#   physical pin 3 = PA12 = gpiochip0 line 12; aircoins-gpio-lib does the
+#   translation. Default: physical pin 7 (PA6).
+#   Connect coin acceptor pulse wire to the selected pin
 #   Connect coin acceptor GND to board GND
 #
 # HOW IT WORKS (on-demand arm/disarm):
@@ -38,7 +41,7 @@ fi
 # CONFIGURATION
 # ============================================
 # Default values (overridden by config file)
-COIN_PULSE_PIN=7                    # Physical pin number
+COIN_PULSE_PIN=7                    # PHYSICAL header pin number
 COIN_VALUE=1                        # Peso value per pulse
 PULSE_MODE="falling"                # falling, rising, or both
 
@@ -94,18 +97,65 @@ rm -f "$ARMED_FILE"
 log "GPIO Coin Listener started (PID: $$)"
 log "Board: $BOARD_FAMILY / $BOARD_MODEL ($BOARD_CHIPSET)"
 log "GPIO method: $GPIO_METHOD"
-log "Listening on physical pin: $COIN_PULSE_PIN"
+log "Listening on PHYSICAL header pin: $COIN_PULSE_PIN"
 log "Coin value per pulse: P$COIN_VALUE"
 
 # ============================================
-# Convert physical pin to internal GPIO number
+# Resolve the physical header pin to a kernel GPIO line
 # ============================================
+# The pin in the config is a PHYSICAL header pin. All GPIO access goes
+# through aircoins-gpio-lib, which translates it per backend (physical for
+# WiringOP, sunxi/BCM number for gpiod/sysfs). Physical pin 3 is PA12/line
+# 12 on an Orange Pi PC — it is NOT GPIO 3.
 INTERNAL_GPIO=$(pin_to_gpio "$COIN_PULSE_PIN")
 if [ $? -ne 0 ] || [ -z "$INTERNAL_GPIO" ]; then
-    log "ERROR: Invalid physical pin $COIN_PULSE_PIN for board $BOARD_FAMILY/$BOARD_CHIPSET"
+    log "ERROR: physical pin $COIN_PULSE_PIN is not a usable GPIO on $BOARD_FAMILY/$BOARD_CHIPSET"
+    log "       Available physical pins: $(get_available_pins)"
     exit 1
 fi
-log "Internal GPIO number: $INTERNAL_GPIO"
+PIN_LABEL=$(pin_to_label "$COIN_PULSE_PIN")
+GPIO_CHIP_NAME=$(gpio_chip_name)
+log "Physical pin $COIN_PULSE_PIN = $PIN_LABEL = $GPIO_CHIP_NAME line $INTERNAL_GPIO"
+
+if [ "$PIN_MAP_TRUSTED" != "1" ]; then
+    log "WARNING: header pin map for '$BOARD_MODEL' is unverified; using the Orange Pi H3 40-pin map"
+fi
+
+# Warn about pins whose alternate function is usually claimed by a driver
+PIN_NOTE=$(pin_conflict_note "$COIN_PULSE_PIN")
+if [ -n "$PIN_NOTE" ]; then
+    log "NOTE: $PIN_NOTE"
+fi
+
+# ============================================
+# Is the line already claimed by another driver?
+# ============================================
+# i2c/spi/uart nodes claim their pads at boot. A claimed line cannot be
+# read as GPIO (gpiod: "Device or resource busy") and coins are silently
+# never detected — so say it loudly, once, at startup.
+check_pin_availability() {
+    gpio_line_busy "$COIN_PULSE_PIN"
+    case $? in
+        0)
+            log "ERROR: =============================================="
+            log "ERROR: physical pin $COIN_PULSE_PIN ($PIN_LABEL, $GPIO_CHIP_NAME line $INTERNAL_GPIO) IS BUSY"
+            log "ERROR: $GPIO_BUSY_REASON"
+            [ -n "$PIN_NOTE" ] && log "ERROR: $PIN_NOTE"
+            log "ERROR: NO COINS WILL BE DETECTED on this pin."
+            log "ERROR: Fix: disable the driver/overlay that owns it, or pick"
+            log "ERROR:      another pin in Admin > Settings > GPIO."
+            log "ERROR: =============================================="
+            return 1
+            ;;
+        1)
+            log "Pin availability check: line $INTERNAL_GPIO is free"
+            ;;
+        *)
+            log "Pin availability check: could not determine whether line $INTERNAL_GPIO is free"
+            ;;
+    esac
+    return 0
+}
 
 # ============================================
 # ARM/DISARM HELPERS
@@ -162,7 +212,7 @@ handle_coin_pulse() {
 
     # Wait for pin to go HIGH again (pulse ended)
     local timeout=0
-    while [ "$(gpio_read "$INTERNAL_GPIO")" = "0" ] && [ $timeout -lt 100 ]; do
+    while [ "$(gpio_read "$COIN_PULSE_PIN")" = "0" ] && [ $timeout -lt 100 ]; do
         sleep 0.01
         timeout=$((timeout + 1))
     done
@@ -174,15 +224,24 @@ handle_coin_pulse() {
 # Edge-triggered wait via libgpiod gpiomon: blocks (zero CPU) until a
 # falling edge or until the remaining armed window elapses.
 armed_loop_gpiomon() {
-    local expires now remaining
+    local expires now remaining rc
     while coinslot_armed; do
         expires=$(cat "$ARMED_FILE" 2>/dev/null | tr -d '[:space:]')
         now=$(date +%s)
         remaining=$((expires - now))
         [ "$remaining" -ge 1 ] || break
 
-        if timeout "$remaining" gpiomon --num-events=1 --falling-edge gpiochip0 "$INTERNAL_GPIO" > /dev/null 2>&1; then
+        gpio_wait_falling_edge "$COIN_PULSE_PIN" "$remaining"
+        rc=$?
+        if [ $rc -eq 0 ]; then
             handle_coin_pulse
+        elif [ $rc -eq 2 ]; then
+            # gpiomon unusable (missing tool or line grab refused) — fall
+            # back to polling for the rest of this armed window
+            log "WARNING: edge-triggered wait unavailable on pin $COIN_PULSE_PIN, falling back to polling"
+            USE_GPIOMON=0
+            armed_loop_poll
+            return
         fi
     done
 }
@@ -191,8 +250,8 @@ armed_loop_gpiomon() {
 armed_loop_poll() {
     local prev_state=1 current_state
     while coinslot_armed; do
-        # Read current pin state
-        current_state=$(gpio_read "$INTERNAL_GPIO")
+        # Read current pin state (physical pin; lib translates)
+        current_state=$(gpio_read "$COIN_PULSE_PIN")
 
         # Detect falling edge (HIGH -> LOW = coin inserted)
         if [ "$prev_state" = "1" ] && [ "$current_state" = "0" ]; then
@@ -213,8 +272,17 @@ armed_loop_poll() {
 if [ "$GPIO_METHOD" != "none" ]; then
     log "Using $GPIO_METHOD for GPIO detection"
 
-    # Set pin mode to input with pull-up
-    gpio_setup_input "$INTERNAL_GPIO" "up"
+    # Report immediately if the line is claimed by another driver
+    check_pin_availability
+    PIN_AVAILABLE=$?
+
+    # Set pin mode to input with pull-up (physical pin; lib translates)
+    gpio_setup_input "$COIN_PULSE_PIN" "up"
+
+    if [ "$GPIO_METHOD" = "libgpiod" ] || [ "$GPIO_METHOD" = "sysfs" ]; then
+        log "NOTE: $GPIO_METHOD cannot enable the internal pull-up; the coin"
+        log "      acceptor needs an external pull-up to 3.3V (or install WiringOP)"
+    fi
 
     # Initialize state file
     echo "0" > "$STATE_FILE"
@@ -239,7 +307,15 @@ if [ "$GPIO_METHOD" != "none" ]; then
         fi
 
         # ARMED: actively listen for coin pulses until window closes
-        log "Coin slot ARMED - listening for coin pulses"
+        log "Coin slot ARMED - listening for coin pulses on physical pin $COIN_PULSE_PIN ($PIN_LABEL, line $INTERNAL_GPIO)"
+
+        # Re-check on every arm if the pin was busy at startup: the operator
+        # may have disabled the conflicting overlay without restarting us.
+        if [ "$PIN_AVAILABLE" != "0" ]; then
+            check_pin_availability
+            PIN_AVAILABLE=$?
+        fi
+
         if [ "$USE_GPIOMON" = "1" ]; then
             armed_loop_gpiomon
         else

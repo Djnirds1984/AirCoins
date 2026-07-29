@@ -13,6 +13,9 @@
 *aircoins-vlans.service text eol=lf
 *dnsmasq@.service text eol=lf
 
+# SQL applied on the device with psql
+*.sql text eol=lf
+
 # Linux config files deployed verbatim
 *lighttpd.conf text eol=lf
 *captive.conf text eol=lf

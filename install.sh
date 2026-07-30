@@ -267,6 +267,36 @@ if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='www-data'
     run_pg -c 'CREATE ROLE "www-data" WITH LOGIN;'
 fi
 
+# Normalize object ownership (idempotent). On devices where the schema was
+# historically applied directly as the postgres superuser (without SET ROLE),
+# tables in schema public are owned by postgres, so migrations run under
+# SET ROLE $DB_USER fail on ALTER TABLE. Reassign all public tables/sequences/
+# views to $DB_USER. Quoted heredoc keeps $$ and %I literal; the role name is
+# injected via sed and identifier-quoted by format('%I').
+echo "  Normalizing object ownership to ${DB_USER}..."
+OWN_SQL=$(mktemp)
+cat > "$OWN_SQL" << 'OWNEOF'
+DO $$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+    EXECUTE format('ALTER TABLE public.%I OWNER TO %I', r.tablename, '__AIRCOINS_DB_USER__');
+  END LOOP;
+  FOR r IN SELECT sequencename FROM pg_sequences WHERE schemaname = 'public' LOOP
+    EXECUTE format('ALTER SEQUENCE public.%I OWNER TO %I', r.sequencename, '__AIRCOINS_DB_USER__');
+  END LOOP;
+  FOR r IN SELECT viewname FROM pg_views WHERE schemaname = 'public' LOOP
+    EXECUTE format('ALTER VIEW public.%I OWNER TO %I', r.viewname, '__AIRCOINS_DB_USER__');
+  END LOOP;
+END
+$$;
+OWNEOF
+sed -i "s/__AIRCOINS_DB_USER__/${DB_USER}/g" "$OWN_SQL"
+if ! run_pg -d "$DB_NAME" -f "$OWN_SQL" > /dev/null 2>&1; then
+    echo -e "${YELLOW}  ⚠ Could not normalize object ownership (continuing)${NC}"
+fi
+rm -f "$OWN_SQL"
+
 # Run schema (idempotent — skip if tables already exist).
 # SET ROLE keeps object ownership on $DB_USER even though psql connects as postgres.
 TABLES_EXIST=$(sudo -u postgres psql -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='sessions';" 2>/dev/null || echo "0")

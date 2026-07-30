@@ -1201,6 +1201,7 @@
                         <tr>
                             <th>ID</th>
                             <th>Client IP</th>
+                            <th>Client MAC</th>
                             <th>Coins</th>
                             <th>Time Remaining</th>
                             <th>Status</th>
@@ -1208,7 +1209,7 @@
                         </tr>
                     </thead>
                     <tbody id="recent-sessions-body">
-                        <tr class="empty-row"><td colspan="6">No sessions yet</td></tr>
+                        <tr class="empty-row"><td colspan="7">No sessions yet</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1260,8 +1261,8 @@
                     <input type="date" id="sess-filter-date-to">
                 </div>
                 <div class="form-group">
-                    <label for="sess-filter-search">Search IP</label>
-                    <input type="text" id="sess-filter-search" placeholder="Search IP...">
+                    <label for="sess-filter-search">Search IP / MAC</label>
+                    <input type="text" id="sess-filter-search" placeholder="IP or MAC...">
                 </div>
                 <button class="btn btn-primary btn-sm" onclick="applySessionFilters()">Apply Filters</button>
                 <button class="btn btn-ghost btn-sm" onclick="resetSessionFilters()">Reset</button>
@@ -1275,6 +1276,7 @@
                         <tr>
                             <th>ID</th>
                             <th>Client IP</th>
+                            <th>Client MAC</th>
                             <th>Coins Inserted</th>
                             <th>Time Remaining</th>
                             <th>Status</th>
@@ -1283,7 +1285,7 @@
                         </tr>
                     </thead>
                     <tbody id="sessions-table-body">
-                        <tr class="empty-row"><td colspan="7">Loading...</td></tr>
+                        <tr class="empty-row"><td colspan="8">Loading...</td></tr>
                     </tbody>
                 </table>
 
@@ -1924,7 +1926,7 @@ function renderSessionsTable(data) {
     }
 
     if (sessions.length === 0) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No sessions yet</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No sessions yet</td></tr>';
         return;
     }
 
@@ -1937,6 +1939,7 @@ function renderSessionsTable(data) {
             '<tr>' +
                 '<td>' + s.id + '</td>' +
                 '<td>' + (s.client_ip || '-') + '</td>' +
+                '<td>' + (s.client_mac || '-') + '</td>' +
                 '<td>' + (s.coins_inserted || 0) + '</td>' +
                 '<td>' + mins + ' min</td>' +
                 '<td style="color:' + statusColor + ';">' + (s.status || 'unknown') + '</td>' +
@@ -2205,7 +2208,7 @@ async function loadSessions(isAutoRefresh) {
 function renderSessionsAdminTable(sessions) {
     var tbody = document.getElementById('sessions-table-body');
     if (!sessions || sessions.length === 0) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No sessions found</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="8">No sessions found</td></tr>';
         return;
     }
 
@@ -2228,6 +2231,7 @@ function renderSessionsAdminTable(sessions) {
             '<tr>' +
                 '<td>' + s.id + '</td>' +
                 '<td>' + (s.client_ip || '-') + '</td>' +
+                '<td>' + (s.client_mac || '-') + '</td>' +
                 '<td>' + (s.coins_inserted || 0) + '</td>' +
                 '<td>' + mins + ' min</td>' +
                 '<td><span class="status-badge ' + badgeClass + '">' + (s.status || 'unknown') + '</span></td>' +
@@ -2313,8 +2317,8 @@ function openExtendModal(sessionId, clientIp) {
         '<div class="modal-card">' +
             '<div class="form-title">Extend Session #' + sessionId + ' (' + (clientIp || 'unknown') + ')</div>' +
             '<div class="form-group">' +
-                '<label for="extend-coins">Additional Coins</label>' +
-                '<input type="number" id="extend-coins" min="1" step="1" placeholder="e.g. 5">' +
+                '<label for="extend-minutes">Additional Minutes</label>' +
+                '<input type="number" id="extend-minutes" min="1" step="1" placeholder="e.g. 30">' +
             '</div>' +
             '<div class="modal-actions">' +
                 '<button class="btn btn-primary" onclick="submitExtend(' + sessionId + ')">Extend</button>' +
@@ -2322,7 +2326,7 @@ function openExtendModal(sessionId, clientIp) {
             '</div>' +
         '</div>';
     document.body.appendChild(overlay);
-    document.getElementById('extend-coins').focus();
+    document.getElementById('extend-minutes').focus();
 }
 
 function closeExtendModal() {
@@ -2331,15 +2335,13 @@ function closeExtendModal() {
 }
 
 async function submitExtend(sessionId) {
-    var coins = parseInt(document.getElementById('extend-coins').value, 10);
-    if (!coins || coins <= 0) {
-        showNotification('Please enter a valid number of coins', 'error');
+    var minutes = parseInt(document.getElementById('extend-minutes').value, 10);
+    if (!minutes || minutes <= 0) {
+        showNotification('Please enter a valid number of minutes', 'error');
         return;
     }
-    // Convert coins to seconds using 60s per coin as default
-    var seconds = coins * 60;
     try {
-        var res = await apiCall('POST', '/session/extend', { session_id: sessionId, coins: coins, seconds: seconds });
+        var res = await apiCall('POST', '/session/extend', { session_id: sessionId, minutes: minutes });
         if (res.success) {
             showNotification('Session extended successfully', 'success');
             closeExtendModal();
@@ -2365,8 +2367,12 @@ function openCreateSessionModal() {
                 '<input type="text" id="create-sess-ip" placeholder="e.g. 192.168.1.100">' +
             '</div>' +
             '<div class="form-group">' +
-                '<label for="create-sess-coins">Coins</label>' +
-                '<input type="number" id="create-sess-coins" min="1" step="1" placeholder="e.g. 5">' +
+                '<label for="create-sess-minutes">Minutes</label>' +
+                '<input type="number" id="create-sess-minutes" min="1" step="1" placeholder="e.g. 30">' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label for="create-sess-coins">Coins (optional, for records)</label>' +
+                '<input type="number" id="create-sess-coins" min="0" step="1" placeholder="e.g. 5">' +
             '</div>' +
             '<div class="modal-actions">' +
                 '<button class="btn btn-primary" onclick="submitCreateSession()">Create</button>' +
@@ -2384,18 +2390,20 @@ function closeCreateSessionModal() {
 
 async function submitCreateSession() {
     var ip = document.getElementById('create-sess-ip').value.trim();
-    var coins = parseInt(document.getElementById('create-sess-coins').value, 10);
+    var minutes = parseInt(document.getElementById('create-sess-minutes').value, 10);
+    var coins = parseInt(document.getElementById('create-sess-coins').value, 10) || 0;
     if (!ip) {
         showNotification('Please enter a client IP', 'error');
         return;
     }
-    if (!coins || coins <= 0) {
-        showNotification('Please enter a valid number of coins', 'error');
+    if (!minutes || minutes <= 0) {
+        showNotification('Please enter a valid number of minutes', 'error');
         return;
     }
-    var seconds = coins * 60;
     try {
-        var res = await apiCall('POST', '/session/start', { client_ip: ip, coins: coins, seconds: seconds });
+        // Authenticated admin endpoint — the public /session/start ignores
+        // its body and only credits real unprocessed coin events.
+        var res = await apiCall('POST', '/admin/session/create', { client_ip: ip, minutes: minutes, coins: coins });
         if (res.success) {
             showNotification('Session created successfully', 'success');
             closeCreateSessionModal();

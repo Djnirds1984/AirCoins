@@ -205,6 +205,31 @@ END
 $$;
 
 -- ============================================
+-- 006 - SESSIONS: wall-clock expiry (expires_at)
+-- ============================================
+-- The API enforces session expiry against sessions.expires_at (a session
+-- is alive while expires_at > NOW()); remaining_seconds is only kept as a
+-- display snapshot. Databases created from an old schema.sql lack the
+-- column, so add it and backfill still-active sessions from their
+-- remaining_seconds so a paying client is not cut off by the update.
+ALTER TABLE IF EXISTS sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
+
+UPDATE sessions
+SET expires_at = NOW() + (remaining_seconds * INTERVAL '1 second')
+WHERE status = 'active'
+  AND expires_at IS NULL
+  AND COALESCE(remaining_seconds, 0) > 0;
+
+CREATE INDEX IF NOT EXISTS idx_sessions_client_mac ON sessions(client_mac);
+CREATE INDEX IF NOT EXISTS idx_sessions_status_expires_at ON sessions(status, expires_at);
+
+-- Recreate the view wall-clock based (schema.sql keeps a legacy-safe
+-- definition because it runs before this file on old databases).
+CREATE OR REPLACE VIEW active_sessions AS
+SELECT * FROM sessions
+WHERE status = 'active' AND expires_at > NOW();
+
+-- ============================================
 -- COMPLETION
 -- ============================================
 \echo 'Migrations applied.'

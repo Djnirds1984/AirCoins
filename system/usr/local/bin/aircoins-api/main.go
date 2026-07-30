@@ -54,11 +54,16 @@ func main() {
 	mux.HandleFunc("/api/admin/reports/coin-events", handlers.AuthMiddleware(reportsHandler.GetCoinEvents))
 
 	// Session routes
+	// start/status/current are PUBLIC (portal-facing): the caller is
+	// identified by its own IP/MAC and credited only from unprocessed
+	// coin_events, so a client cannot grant itself time.
+	// extend/end/create mutate arbitrary sessions -> admin auth required.
 	mux.HandleFunc("/api/session/current", sessionHandler.GetCurrent)
 	mux.HandleFunc("/api/session/start", sessionHandler.Start)
-	mux.HandleFunc("/api/session/extend", sessionHandler.Extend)
-	mux.HandleFunc("/api/session/end", sessionHandler.End)
+	mux.HandleFunc("/api/session/extend", handlers.AuthMiddleware(sessionHandler.Extend))
+	mux.HandleFunc("/api/session/end", handlers.AuthMiddleware(sessionHandler.End))
 	mux.HandleFunc("/api/session/status", sessionHandler.Status)
+	mux.HandleFunc("/api/admin/session/create", handlers.AuthMiddleware(sessionHandler.AdminCreate))
 
 	// GPIO routes
 	mux.HandleFunc("/api/gpio/config", gpioHandler.Config)
@@ -94,6 +99,10 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok","service":"aircoins-api"}`))
 	})
+
+	// Recover iptables auth state for surviving sessions (reboot safety)
+	// and enforce wall-clock expiry every 30s in the background.
+	handlers.StartExpiryEnforcer(models.DB)
 
 	// Get port from environment or use default
 	port := getEnv("PORT", "8080")

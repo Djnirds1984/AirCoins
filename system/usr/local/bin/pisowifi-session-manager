@@ -1,33 +1,40 @@
 #!/bin/bash
 # ============================================
-# AirCoins - Session Manager
+# AirCoins - Session Manager (watchdog)
 # ============================================
-# Manages client sessions: time tracking,
-# coin events processing, and session expiry
+# The Go API (aircoins-api) is the single owner of the session lifecycle:
+#   - POST /api/session/start credits the armed window's coins, creates or
+#     extends the sessions row and authorizes the client MAC
+#     (aircoins-captive-rules auth)
+#   - a 30s ticker inside the API expires sessions past expires_at and
+#     revokes access (aircoins-captive-rules unauth), with startup
+#     recovery after reboots
+#
+# This script therefore no longer processes coin events or ticks
+# sessions. Older builds polled the API here and POSTed sessions with
+# client_ip:"local" — that created phantom sessions for no real device
+# and has been removed on purpose. Do NOT reintroduce it.
+#
+# What remains is a light watchdog loop: it logs when the API becomes
+# unreachable so an operator reading /var/log/pisowifi/session.log can
+# tell why sessions stopped moving.
 #
 # Install to: /usr/local/bin/pisowifi-session-manager
-# Runs as: systemd service
+# Runs as: systemd service (pisowifi-session.service)
 # ============================================
 
 # ============================================
 # CONFIGURATION
 # ============================================
-ETH_IFACE="eth0"
-
-# Central interface/network config (overrides the defaults above if present)
+# Central interface/network config (kept for operators who source vars)
 PISOWIFI_CONF="/etc/pisowifi/pisowifi.conf"
 [ -f "$PISOWIFI_CONF" ] && source "$PISOWIFI_CONF"
 
-SESSION_DIR="/var/lib/pisowifi/sessions"
-EVENT_FILE="/var/lib/pisowifi/coin_event"
 LOG_FILE="/var/log/pisowifi/session.log"
 PID_FILE="/var/run/pisowifi-session.pid"
-CONFIG_FILE="/var/lib/pisowifi/config"
-STATS_FILE="/var/lib/pisowifi/stats"
 
-# Pricing comes from the database only (table `pricing`, managed from the
-# admin panel). 1 peso coin = 1 pulse; a pricing row maps the inserted peso
-# amount to minutes. There are no hardcoded prices and no rate-per-minute.
+API_URL="http://localhost:8080"
+CHECK_INTERVAL=30
 
 # ============================================
 # LOGGING
@@ -50,126 +57,27 @@ trap cleanup SIGTERM SIGINT EXIT
 # ============================================
 # INIT
 # ============================================
+mkdir -p "$(dirname "$LOG_FILE")"
 echo $$ > "$PID_FILE"
-mkdir -p "$SESSION_DIR"
-log "Session Manager started (PID: $$)"
-
-# Initialize stats
-if [ ! -f "$STATS_FILE" ]; then
-    echo "total_earnings=0" > "$STATS_FILE"
-    echo "total_coins=0" >> "$STATS_FILE"
-    echo "total_sessions=0" >> "$STATS_FILE"
-fi
+log "Session Manager started (PID: $$) - watchdog mode, session lifecycle is owned by aircoins-api"
 
 # ============================================
-# API-BASED PROCESSING (PostgreSQL-backed via Go API)
+# MAIN LOOP (API health watchdog)
 # ============================================
-# NOTE: these functions MUST be defined before the main loop below,
-# otherwise the never-ending loop prevents bash from ever registering them.
-API_URL="http://localhost:8080"
-
-# Process unprocessed coin events recorded by the Go API / GPIO listener
-process_coin_events() {
-    # Get unprocessed coin events
-    local events=$(curl -s "$API_URL/api/gpio/coin?unprocessed=true" 2>/dev/null)
-
-    if [ -z "$events" ] || [ "$events" = "null" ]; then
-        return
-    fi
-
-    # Process each event
-    echo "$events" | while read -r event; do
-        local coin_value=$(echo "$event" | grep -o '"coin_value":[0-9]*' | cut -d: -f2)
-        local event_id=$(echo "$event" | grep -o '"id":[0-9]*' | cut -d: -f2)
-
-        if [ -n "$coin_value" ] && [ "$coin_value" -gt 0 ]; then
-            # Resolve minutes from the pricing table (no local defaults)
-            local minutes=$(curl -s "$API_URL/api/pricing?coin=$coin_value" | grep -o '"minutes":[0-9]*' | cut -d: -f2 | head -1)
-
-            if [ -z "$minutes" ] || ! [ "$minutes" -gt 0 ] 2>/dev/null; then
-                log "ERROR: no pricing tier configured for ₱$coin_value - no time credited. Add the tier in Admin > Pricing."
-                # Mark processed so the event isn't retried forever
-                curl -s -X POST "$API_URL/api/gpio/coin/$event_id/processed" > /dev/null 2>&1
-                continue
-            fi
-
-            local seconds=$((minutes * 60))
-
-            log "COIN EVENT: ₱$coin_value = $minutes minutes ($seconds seconds)"
-
-            # Start or extend session via API
-            curl -s -X POST "$API_URL/api/session/start" \
-                -H "Content-Type: application/json" \
-                -d "{\"client_ip\":\"local\",\"seconds\":$seconds,\"coins\":$coin_value}" > /dev/null 2>&1
-
-            log "SESSION: ₱$coin_value | $minutes minutes"
-
-            # Mark event as processed
-            curl -s -X POST "$API_URL/api/gpio/coin/$event_id/processed" > /dev/null 2>&1
-        fi
-    done
-}
-
-# Decrement remaining seconds for all active sessions (via API)
-tick_sessions() {
-    # Get all active sessions
-    local sessions=$(curl -s "$API_URL/api/admin/sessions?status=active" 2>/dev/null)
-
-    if [ -z "$sessions" ]; then
-        return
-    fi
-
-    # Decrement each session
-    echo "$sessions" | while read -r session; do
-        local session_id=$(echo "$session" | grep -o '"id":[0-9]*' | cut -d: -f2)
-        local remaining=$(echo "$session" | grep -o '"remaining_seconds":[0-9]*' | cut -d: -f2)
-
-        if [ -n "$session_id" ] && [ -n "$remaining" ] && [ "$remaining" -gt 0 ]; then
-            # Decrement via API
-            curl -s -X POST "$API_URL/api/session/tick" \
-                -H "Content-Type: application/json" \
-                -d "{\"session_id\":$session_id}" > /dev/null 2>&1
-        fi
-    done
-}
-
-# Expire sessions (via API)
-check_sessions() {
-    # Get expired sessions
-    local expired=$(curl -s "$API_URL/api/admin/sessions?status=expired" 2>/dev/null)
-
-    if [ -z "$expired" ]; then
-        return
-    fi
-
-    # Log each expired session
-    echo "$expired" | while read -r session; do
-        local session_id=$(echo "$session" | grep -o '"id":[0-9]*' | cut -d: -f2)
-
-        if [ -n "$session_id" ]; then
-            log "SESSION EXPIRED: session_id=$session_id"
-        fi
-    done
-}
-
-# ============================================
-# MAIN LOOP
-# ============================================
-log "Entering main loop (1-second tick)"
+api_was_up=1
 
 while true; do
-    # Process unprocessed coin events from database
-    process_coin_events
+    if curl -s -m 5 "$API_URL/api/health" > /dev/null 2>&1; then
+        if [ "$api_was_up" -eq 0 ]; then
+            log "aircoins-api is reachable again"
+            api_was_up=1
+        fi
+    else
+        if [ "$api_was_up" -eq 1 ]; then
+            log "WARNING: aircoins-api is NOT reachable at $API_URL - sessions will not start or expire until it is back"
+            api_was_up=0
+        fi
+    fi
 
-    # Tick all active sessions (decrement 1 second via API)
-    tick_sessions
-
-    # Check for expired sessions
-    check_sessions
-
-    # Sleep 1 second
-    sleep 1
+    sleep "$CHECK_INTERVAL"
 done
-
-# NOTE: process_coin_events / tick_sessions / check_sessions are defined
-# above, before the main loop (see "API-BASED PROCESSING" section).

@@ -107,9 +107,11 @@ func (h *AdminHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	}
 	stats.Total.Earnings = float64(totalEarnings)
 
-	// Get active sessions count
+	// Get active sessions count (expiry is wall-clock based; the stored
+	// remaining_seconds is only a snapshot, so trust status + expires_at)
 	err = h.DB.QueryRow(`
-		SELECT COUNT(*) FROM sessions WHERE status = 'active' AND remaining_seconds > 0
+		SELECT COUNT(*) FROM sessions
+		WHERE status = 'active' AND (expires_at IS NULL OR expires_at > NOW())
 	`).Scan(&stats.ActiveSessions)
 	if err != nil {
 		log.Printf("Error fetching active sessions: %v", err)
@@ -212,9 +214,9 @@ func (h *AdminHandler) GetSessions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// search filter (client_ip ILIKE)
+	// search filter (client_ip or client_mac ILIKE)
 	if search := q.Get("search"); search != "" {
-		where = append(where, fmt.Sprintf("client_ip ILIKE $%d", argIdx))
+		where = append(where, fmt.Sprintf("(client_ip ILIKE $%d OR client_mac ILIKE $%d)", argIdx, argIdx))
 		args = append(args, "%"+search+"%")
 		argIdx++
 	}
@@ -236,10 +238,14 @@ func (h *AdminHandler) GetSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Data query
+	// Data query. remaining_seconds is computed live from expires_at for
+	// active sessions so the admin table shows a real countdown.
 	dataQuery := fmt.Sprintf(`
-		SELECT id, client_ip, client_mac, coins_inserted, total_seconds, remaining_seconds,
-		       status, started_at, activated_at, expired_at
+		SELECT id, client_ip, client_mac, coins_inserted, total_seconds,
+		       CASE WHEN status = 'active' AND expires_at IS NOT NULL
+		            THEN GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW())))::int
+		            ELSE COALESCE(remaining_seconds, 0) END AS remaining_seconds,
+		       status, started_at, activated_at, expired_at, expires_at
 		FROM sessions
 		%s
 		ORDER BY started_at DESC
@@ -260,7 +266,7 @@ func (h *AdminHandler) GetSessions(w http.ResponseWriter, r *http.Request) {
 		var s models.Session
 		err := rows.Scan(
 			&s.ID, &s.ClientIP, &s.ClientMAC, &s.CoinsInserted, &s.TotalSeconds,
-			&s.RemainingSeconds, &s.Status, &s.StartedAt, &s.ActivatedAt, &s.ExpiredAt,
+			&s.RemainingSeconds, &s.Status, &s.StartedAt, &s.ActivatedAt, &s.ExpiredAt, &s.ExpiresAt,
 		)
 		if err != nil {
 			log.Printf("Error scanning session: %v", err)
@@ -295,13 +301,16 @@ func (h *AdminHandler) GetSession(w http.ResponseWriter, r *http.Request) {
 
 	var s models.Session
 	err = h.DB.QueryRow(`
-		SELECT id, client_ip, client_mac, coins_inserted, total_seconds, remaining_seconds,
-		       status, started_at, activated_at, expired_at
+		SELECT id, client_ip, client_mac, coins_inserted, total_seconds,
+		       CASE WHEN status = 'active' AND expires_at IS NOT NULL
+		            THEN GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW())))::int
+		            ELSE COALESCE(remaining_seconds, 0) END AS remaining_seconds,
+		       status, started_at, activated_at, expired_at, expires_at
 		FROM sessions
 		WHERE id = $1
 	`, id).Scan(
 		&s.ID, &s.ClientIP, &s.ClientMAC, &s.CoinsInserted, &s.TotalSeconds,
-		&s.RemainingSeconds, &s.Status, &s.StartedAt, &s.ActivatedAt, &s.ExpiredAt,
+		&s.RemainingSeconds, &s.Status, &s.StartedAt, &s.ActivatedAt, &s.ExpiredAt, &s.ExpiresAt,
 	)
 
 	if err == sql.ErrNoRows {

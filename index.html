@@ -417,9 +417,9 @@
     <nav class="navbar">
         <div class="logo">Air<span>Coins</span></div>
         <div class="nav-links">
-            <a class="active" onclick="showPage('home')">Home</a>
-            <a onclick="showPage('connect')">Connect</a>
-            <a onclick="showPage('status')">My Session</a>
+            <a class="active" data-page="home" onclick="showPage('home')">Home</a>
+            <a data-page="connect" onclick="showPage('connect')">Connect</a>
+            <a data-page="status" onclick="showPage('status')">My Session</a>
             <a href="admin.html">Admin</a>
         </div>
     </nav>
@@ -506,7 +506,6 @@
 
                 <div style="margin-top:20px;">
                     <button class="btn btn-success" onclick="addMoreTime()">Add More Coins</button>
-                    <button class="btn btn-danger" onclick="endSession()">End Session</button>
                 </div>
             </div>
         </div>
@@ -574,6 +573,10 @@
 
     <script>
         // ==================== STATE ====================
+        // The session fields below are a DISPLAY MIRROR of the server's
+        // session (GET /api/session/status). The server owns the session:
+        // it credits coins, opens/closes internet access and enforces
+        // expiry. Nothing session-related is persisted locally.
         let state = {
             systemOnline: true,
             sessionActive: false,
@@ -581,9 +584,6 @@
             remainingSeconds: 0,
             coinsInserted: 0,
             timerInterval: null,
-            startTime: null,
-            // System
-            systemOnline: true,
             // Pricing tiers fetched from /api/pricing: { coinValue: minutes }.
             // Empty is normal — the operator configures every tier manually.
             // The backend is authoritative; this copy is display only.
@@ -621,75 +621,32 @@
             document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
             document.querySelectorAll('.nav-links a').forEach(a => a.classList.remove('active'));
             document.getElementById('page-' + pageId).classList.add('active');
-            event.target.classList.add('active');
+            const navLink = document.querySelector('.nav-links a[data-page="' + pageId + '"]');
+            if (navLink) navLink.classList.add('active');
 
             if (pageId === 'status') updateSessionView();
         }
 
         // ==================== COIN INSERT ====================
+        // Payment happens at the PHYSICAL coin slot — the pricing cards are
+        // informational, so tapping one just opens the coin listener modal.
         function insertCoin(amount) {
             if (!state.systemOnline) {
                 showNotification('System is currently offline!', 'error');
                 return;
             }
-
-            const minutes = minutesForAmount(amount);
-            if (minutes <= 0) {
-                showNotification('No rate configured for ₱' + amount + ' yet.', 'error');
-                return;
-            }
-            const seconds = minutes * 60;
-
-            if (state.sessionActive) {
-                // Add time to existing session
-                state.totalSeconds += seconds;
-                state.remainingSeconds += seconds;
-                state.coinsInserted += amount;
-            } else {
-                // New session
-                state.sessionActive = true;
-                state.totalSeconds = seconds;
-                state.remainingSeconds = seconds;
-                state.coinsInserted = amount;
-                state.startTime = new Date();
-                startTimer();
-            }
-
-            // Update stats
-            state.totalEarnings += amount;
-            state.totalCoinsCount++;
-            state.sessionsCount++;
-
-            // Add log
-            const logEntry = {
-                time: new Date().toLocaleTimeString(),
-                coin: '₱' + amount,
-                duration: minutes + ' min',
-                status: 'Active'
-            };
-            state.sessionLogs.unshift(logEntry);
-            if (state.sessionLogs.length > 20) state.sessionLogs.pop();
-
-            saveState();
-
-            // Show modal
-            document.getElementById('modalCoinIcon').textContent = '₱' + amount;
-            document.getElementById('modalTitle').textContent = state.sessionActive && state.totalSeconds > seconds
-                ? 'Coins Added!' : 'Coin Accepted!';
-            document.getElementById('modalDesc').textContent = state.sessionActive && state.totalSeconds > seconds
-                ? minutes + ' minutes added to your session!' : 'Your session has started. Enjoy browsing!';
-            document.getElementById('coinModal').classList.add('active');
-
-            showNotification('₱' + amount + ' inserted! +' + minutes + ' minutes', 'success');
+            openGpioModal();
         }
 
         // ==================== TIMER ====================
+        // Smooth 1s countdown between server syncs (apiPoll re-aligns
+        // remainingSeconds with the server every few seconds).
         function startTimer() {
             if (state.timerInterval) clearInterval(state.timerInterval);
             state.timerInterval = setInterval(() => {
                 if (state.remainingSeconds <= 0) {
                     clearInterval(state.timerInterval);
-                    endSession(true);
+                    sessionExpired();
                     return;
                 }
                 state.remainingSeconds--;
@@ -728,6 +685,9 @@
             } else if (state.remainingSeconds <= 300) {
                 document.getElementById('timerDisplay').style.color = '#ffd700';
                 document.getElementById('progressFill').style.background = 'linear-gradient(90deg, #ffd700, #ffaa00)';
+            } else {
+                document.getElementById('timerDisplay').style.color = '#00d4ff';
+                document.getElementById('progressFill').style.background = 'linear-gradient(90deg, #00d4ff, #00ff88)';
             }
 
             // Update session info
@@ -755,28 +715,29 @@
             }
         }
 
-        function endSession(autoEnd) {
+        // Clears the local display mirror. The REAL session lives on the
+        // server — this only resets what the user sees.
+        function clearLocalSession() {
             if (state.timerInterval) clearInterval(state.timerInterval);
             if (gpio.sessionInterval) clearInterval(gpio.sessionInterval);
-
-            // Update log
-            if (state.sessionLogs.length > 0) {
-                state.sessionLogs[0].status = autoEnd ? 'Expired' : 'Ended';
-            }
 
             state.sessionActive = false;
             state.remainingSeconds = 0;
             state.totalSeconds = 0;
             state.coinsInserted = 0;
-            state.startTime = null;
 
-            saveState();
             updateSessionView();
-
-            // Hide running timer
             document.getElementById('runningTimerBar').classList.remove('active');
+        }
 
-            if (autoEnd) {
+        // The server expired (or terminated) the session: show the
+        // disconnected state.
+        function sessionExpired() {
+            const wasActive = state.sessionActive;
+            clearLocalSession();
+            document.getElementById('sessionStatus').textContent = 'Disconnected';
+            document.getElementById('sessionStatus').style.color = '#ff4444';
+            if (wasActive) {
                 showNotification('Session expired. Insert coins to continue.', 'info');
             }
         }
@@ -841,8 +802,8 @@
                 });
         }
 
-        // Polls run every 2s; log each distinct failure once so a broken
-        // endpoint is visible in the console without flooding it.
+        // Polls run every few seconds; log each distinct failure once so a
+        // broken endpoint is visible in the console without flooding it.
         const warnedOnce = {};
         function warnOnce(key, err) {
             if (warnedOnce[key]) return;
@@ -965,13 +926,8 @@
         loadPricing();
         setInterval(loadPricing, PRICING_REFRESH_INTERVAL);
 
-        // Restore running timer if session was active
-        if (state.sessionActive && state.remainingSeconds > 0) {
-            document.getElementById('runningTimerBar').classList.add('active');
-            document.getElementById('runningTotalCoins').textContent = '₱' + state.coinsInserted;
-            startRunningTimer();
-            startTimer();
-        }
+        // No local session restore: the status poll below mirrors whatever
+        // session the server has for this client (survives page reloads).
 
         // ==================== GPIO COIN LISTENER ====================
 
@@ -1197,56 +1153,39 @@
                 String(totalSecs).padStart(2, '0');
         }
 
+        // "Done Paying": ask the server to credit this armed window's coins
+        // and start (or extend) the session. The request carries NO body —
+        // the server sums its own unprocessed coin_events, so the client
+        // cannot grant itself time.
         function gpioDonePaying() {
             if (gpio.totalAmount <= 0) {
                 showNotification('No coins inserted yet!', 'error');
                 return;
             }
 
-            // Stop countdown
+            // Freeze the modal while the server credits the coins.
             clearInterval(gpio.countdownInterval);
             gpio.active = false;
+            document.getElementById('gpioStatus').textContent = 'Starting session...';
+            document.getElementById('gpioStatus').className = 'gpio-status detecting';
 
-            // Close modal
-            closeGpioModal();
-
-            // No local rate for what was inserted (pricing table empty or the
-            // API unreachable). The backend is authoritative, so leave the
-            // session to it and let the status poll pick it up.
-            if (gpio.totalSeconds <= 0) {
-                showNotification('Coins accepted. Waiting for the server to credit your time...', 'info');
-                return;
-            }
-
-            // If session already active, add time to it
-            if (state.sessionActive) {
-                state.totalSeconds += gpio.totalSeconds;
-                state.remainingSeconds += gpio.totalSeconds;
-                state.coinsInserted += gpio.totalAmount;
-
-                // Update stats
-                state.totalEarnings += gpio.totalAmount;
-                state.totalCoinsCount += gpio.coins.length;
-
-                // Add log
-                const logEntry = {
-                    time: new Date().toLocaleTimeString(),
-                    coin: '₱' + gpio.totalAmount,
-                    duration: Math.floor(gpio.totalSeconds / 60) + ' min',
-                    status: 'Active'
-                };
-                state.sessionLogs.unshift(logEntry);
-                if (state.sessionLogs.length > 20) state.sessionLogs.pop();
-
-                saveState();
-                updateTimerDisplay();
-                document.getElementById('runningTotalCoins').textContent = '₱' + state.coinsInserted;
-
-                showNotification('₱' + gpio.totalAmount + ' added! +' + Math.floor(gpio.totalSeconds / 60) + ' min', 'success');
-            } else {
-                // Start new session
-                startSessionFromGpio();
-            }
+            fetch(SESSION_START_URL, { method: 'POST', headers: { 'Accept': 'application/json' } })
+                .then(r => r.json().catch(() => ({})).then(body => ({ ok: r.ok, body: body })))
+                .then(res => {
+                    closeGpioModal();
+                    if (!res.ok || !res.body || !res.body.session) {
+                        const msg = (res.body && (res.body.error || res.body.message)) ||
+                            'Failed to start session. Please try again.';
+                        showNotification(msg, 'error');
+                        return;
+                    }
+                    applyServerSession(res.body.session, res.body.extended);
+                })
+                .catch(err => {
+                    closeGpioModal();
+                    warnOnce('session start', err);
+                    showNotification('Could not reach the server to start the session.', 'error');
+                });
         }
 
         function closeGpioModal() {
@@ -1269,42 +1208,37 @@
             showNotification('Coin insertion cancelled', 'info');
         }
 
-        function startSessionFromGpio() {
-            // Set session state
+        // Mirrors a session object returned by the server (POST
+        // /api/session/start) into the local display state and shows the
+        // session tab with the REAL remaining time.
+        function applyServerSession(session, extended) {
+            const remaining = parseInt(session.remaining, 10) || 0;
+            const coins = parseInt(session.coins, 10) || 0;
+            const total = parseInt(session.total, 10) || 0;
+
+            if (remaining <= 0) {
+                sessionExpired();
+                return;
+            }
+
             state.sessionActive = true;
-            state.totalSeconds = gpio.totalSeconds;
-            state.remainingSeconds = gpio.totalSeconds;
-            state.coinsInserted = gpio.totalAmount;
-            state.startTime = new Date();
+            state.remainingSeconds = remaining;
+            state.totalSeconds = Math.max(total, remaining);
+            state.coinsInserted = coins;
 
-            // Update stats
-            state.totalEarnings += gpio.totalAmount;
-            state.totalCoinsCount += gpio.coins.length;
-            state.sessionsCount++;
-
-            // Add log entry
-            const logEntry = {
-                time: new Date().toLocaleTimeString(),
-                coin: '₱' + gpio.totalAmount,
-                duration: Math.floor(gpio.totalSeconds / 60) + ' min',
-                status: 'Active'
-            };
-            state.sessionLogs.unshift(logEntry);
-            if (state.sessionLogs.length > 20) state.sessionLogs.pop();
-
-            saveState();
-
-            // Start countdown timer
-            startTimer();
-
-            // Start session running timer (dd:hh:mm:ss)
-            startRunningTimer();
-
-            // Show running timer bar on home
+            document.getElementById('sessionStatus').textContent = 'Connected';
+            document.getElementById('sessionStatus').style.color = '#00ff88';
             document.getElementById('runningTimerBar').classList.add('active');
-            document.getElementById('runningTotalCoins').textContent = '₱' + state.coinsInserted;
+            document.getElementById('runningTotalCoins').textContent = '₱' + coins;
 
-            showNotification('Session started! Enjoy browsing.', 'success');
+            updateSessionView();
+            startTimer();
+            startRunningTimer();
+            showPage('status');
+
+            showNotification(extended
+                ? 'Time added! Enjoy browsing.'
+                : 'Session started! Enjoy browsing.', 'success');
         }
 
         // Running timer on main screen (dd:hh:mm:ss) - COUNTDOWN
@@ -1360,41 +1294,51 @@
         // they arrive through /api/coinslot/status while the modal is armed.
 
         const API_ENABLED = true;           // Set false to disable API polling
-        const API_POLL_INTERVAL = 2000;     // Poll every 2 seconds
+        const API_POLL_INTERVAL = 5000;     // Server sync every 5 seconds
         const API_STATUS_URL = '/api/session/status';
+        const SESSION_START_URL = '/api/session/start';
         let apiPollTimer = null;
 
-        // Poll backend for session status and system health
+        // Poll backend for session status and system health. The local 1s
+        // countdown (startTimer) only smooths the display between these
+        // polls — the server's remaining seconds always win.
         function apiPoll() {
             if (!API_ENABLED) return;
 
             fetchJSON(API_STATUS_URL + '?t=' + Date.now())
                 .then(data => {
-                    // Sync session state from backend
-                    if (data.session && data.session.status === 'active') {
-                        const backendRemaining = parseInt(data.session.remaining) || 0;
-                        const backendCoins = parseInt(data.session.coins) || 0;
+                    const sess = data && data.session;
+                    const backendRemaining = sess ? (parseInt(sess.remaining, 10) || 0) : 0;
+                    const isActive = !!(sess && sess.status === 'active' && backendRemaining > 0);
 
-                        // Update frontend state if backend has newer data
-                        if (backendRemaining > 0 && !state.sessionActive) {
-                            // Session started on backend, sync to frontend
+                    if (isActive) {
+                        const backendCoins = parseInt(sess.coins, 10) || 0;
+                        const backendTotal = parseInt(sess.total, 10) || backendRemaining;
+
+                        if (!state.sessionActive) {
+                            // Session exists on the server (page reload or
+                            // credited elsewhere) — mirror it locally.
                             state.sessionActive = true;
-                            state.remainingSeconds = backendRemaining;
-                            state.totalSeconds = backendRemaining;
-                            state.coinsInserted = backendCoins;
+                            state.totalSeconds = Math.max(backendTotal, backendRemaining);
                             startTimer();
                             startRunningTimer();
-                            document.getElementById('runningTimerBar').classList.add('active');
-                            document.getElementById('runningTotalCoins').textContent = '₱' + backendCoins;
-                        } else if (state.sessionActive) {
-                            // Sync remaining time from backend
-                            state.remainingSeconds = backendRemaining;
-                            state.coinsInserted = backendCoins;
-                            document.getElementById('runningTotalCoins').textContent = '₱' + backendCoins;
                         }
 
-                        // Show running timer
+                        // Re-align the display with the server.
+                        state.remainingSeconds = backendRemaining;
+                        state.coinsInserted = backendCoins;
+                        if (backendTotal > state.totalSeconds) state.totalSeconds = backendTotal;
+
+                        document.getElementById('sessionStatus').textContent = 'Connected';
+                        document.getElementById('sessionStatus').style.color = '#00ff88';
                         document.getElementById('runningTimerBar').classList.add('active');
+                        document.getElementById('runningTotalCoins').textContent = '₱' + backendCoins;
+                        updateTimerDisplay();
+                        updateSessionView();
+                    } else if (state.sessionActive) {
+                        // The server no longer reports an active session:
+                        // it expired or was terminated by the admin.
+                        sessionExpired();
                     }
 
                     // Sync system status

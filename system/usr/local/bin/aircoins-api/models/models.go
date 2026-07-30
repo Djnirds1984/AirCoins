@@ -99,6 +99,7 @@ type Session struct {
 	StartedAt        time.Time  `json:"started_at"`
 	ActivatedAt      *time.Time `json:"activated_at,omitempty"`
 	ExpiredAt        *time.Time `json:"expired_at,omitempty"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 }
 

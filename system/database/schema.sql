@@ -95,13 +95,20 @@ CREATE TABLE IF NOT EXISTS sessions (
     started_at TIMESTAMP DEFAULT NOW(),
     activated_at TIMESTAMP,
     expired_at TIMESTAMP,
+    -- Wall-clock expiry: a session is alive while expires_at > NOW().
+    -- remaining_seconds above is only a snapshot for display/legacy rows.
+    expires_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Indexes for faster queries
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_client_ip ON sessions(client_ip);
+CREATE INDEX IF NOT EXISTS idx_sessions_client_mac ON sessions(client_mac);
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at);
+-- NOTE: the (status, expires_at) index is created in migrations.sql only:
+-- this file runs BEFORE migrations on updates, and pre-expires_at
+-- databases don't have the column yet at this point.
 
 -- Compound indexes for pagination and filter queries
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at_desc ON sessions(started_at DESC);
@@ -217,7 +224,11 @@ SELECT
 FROM daily_stats
 WHERE date = CURRENT_DATE;
 
--- View for active sessions
+-- View for active sessions.
+-- Deliberately references only pre-expires_at columns: this file runs
+-- BEFORE migrations.sql on updates, where old databases don't have
+-- expires_at yet. Migration 006 recreates it wall-clock based right after
+-- adding the column, so the final definition always wins.
 CREATE OR REPLACE VIEW active_sessions AS
 SELECT * FROM sessions
 WHERE status = 'active' AND remaining_seconds > 0;

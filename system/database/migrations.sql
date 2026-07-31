@@ -258,46 +258,78 @@ DO $$
 DECLARE
     r RECORD;
     v_start inet;
+    has_ip_address BOOLEAN;
+    has_start_ip   BOOLEAN;
+    has_is_portal  BOOLEAN;
 BEGIN
-    -- Only pre-split databases still have the ip_address column;
-    -- fresh installs and already-migrated databases skip this block.
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = current_schema()
-          AND table_name = 'vlan_config'
-          AND column_name = 'ip_address'
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'vlan_config'
     ) THEN
         RETURN;
     END IF;
 
-    FOR r IN EXECUTE
-        'SELECT interface, vlan_id, ip_address, COALESCE(start_ip, '''') AS start_ip
-         FROM vlan_config WHERE COALESCE(ip_address, '''') <> '''''
-    LOOP
-        BEGIN
-            IF r.start_ip <> '' THEN
-                v_start := r.start_ip::inet;
-            ELSE
-                v_start := network(r.ip_address::inet)::inet + 100;
-            END IF;
+    -- Probe EACH legacy column individually: an interrupted or partial
+    -- earlier run may have left any combination (e.g. ip_address still
+    -- present but start_ip already dropped). The conversion query below
+    -- is built from these flags so it never references a missing column.
+    SELECT
+        EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'vlan_config' AND column_name = 'ip_address'),
+        EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'vlan_config' AND column_name = 'start_ip'),
+        EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'vlan_config' AND column_name = 'is_portal')
+    INTO has_ip_address, has_start_ip, has_is_portal;
 
-            INSERT INTO portal_servers
-                (interface, portal_ip_cidr, dhcp_start, dhcp_end, dhcp_lease, enabled)
-            VALUES (
-                r.interface || '.' || r.vlan_id,
-                r.ip_address,
-                host(v_start),
-                host(v_start + 100),
-                '12h',
-                true
-            )
-            ON CONFLICT (interface) DO NOTHING;
-        EXCEPTION WHEN OTHERS THEN
-            RAISE NOTICE 'Migration 007: skipped %.% (%): %',
-                r.interface, r.vlan_id, r.ip_address, SQLERRM;
-        END;
-    END LOOP;
+    -- Fresh installs and fully-migrated databases: nothing legacy left,
+    -- exit without touching the table at all.
+    IF NOT (has_ip_address OR has_start_ip OR has_is_portal) THEN
+        RETURN;
+    END IF;
 
+    -- Convert only while legacy ip_address data is still readable. When
+    -- start_ip is already gone (partial state) substitute '' so the
+    -- remaining rows still convert — DHCP start then derives from the
+    -- network address, exactly the old Go default.
+    IF has_ip_address THEN
+        FOR r IN EXECUTE format(
+            'SELECT interface, vlan_id, ip_address, %s AS start_ip
+             FROM vlan_config WHERE COALESCE(ip_address, '''') <> ''''',
+            CASE WHEN has_start_ip
+                 THEN 'COALESCE(start_ip, '''')'
+                 ELSE '''''' END)
+        LOOP
+            BEGIN
+                IF r.start_ip <> '' THEN
+                    v_start := r.start_ip::inet;
+                ELSE
+                    v_start := network(r.ip_address::inet)::inet + 100;
+                END IF;
+
+                INSERT INTO portal_servers
+                    (interface, portal_ip_cidr, dhcp_start, dhcp_end, dhcp_lease, enabled)
+                VALUES (
+                    r.interface || '.' || r.vlan_id,
+                    r.ip_address,
+                    host(v_start),
+                    host(v_start + 100),
+                    '12h',
+                    true
+                )
+                ON CONFLICT (interface) DO NOTHING;
+            EXCEPTION WHEN OTHERS THEN
+                RAISE NOTICE 'Migration 007: skipped %.% (%): %',
+                    r.interface, r.vlan_id, r.ip_address, SQLERRM;
+            END;
+        END LOOP;
+    END IF;
+
+    -- Clear whatever legacy columns remain — safe under every partial
+    -- combination.
     ALTER TABLE vlan_config DROP COLUMN IF EXISTS ip_address;
     ALTER TABLE vlan_config DROP COLUMN IF EXISTS start_ip;
     ALTER TABLE vlan_config DROP COLUMN IF EXISTS is_portal;

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 )
 
 func main() {
@@ -26,6 +27,14 @@ func main() {
 	defer models.DB.Close()
 
 	log.Println("Connected to PostgreSQL database")
+
+	// Startup check: warn if tc (iproute2) is not installed.
+	// Traffic shaping will silently not work without it.
+	if tcPath, err := exec.LookPath("tc"); err != nil {
+		log.Printf("WARNING: tc command not found — traffic shaping (qdisc) will not work. Install iproute2: apt install iproute2")
+	} else {
+		log.Printf("tc found at %s — traffic shaping available", tcPath)
+	}
 
 	// One-time flat-file migration for the VLAN/portal split: moves any
 	// inline portal config left in vlans.conf into portals.conf so
@@ -130,6 +139,8 @@ func main() {
 
 	// Portal qdisc (traffic shaping: CAKE / FQ_CODEL)
 	mux.HandleFunc("/api/admin/portal/qdisc/apply", handlers.AuthMiddleware(qdiscHandler.ApplyQdisc))
+	mux.HandleFunc("/api/admin/portal/qdiag/installed", handlers.AuthMiddleware(qdiscHandler.QDiagInstalled))
+	mux.HandleFunc("/api/admin/portal/qdiag", handlers.AuthMiddleware(qdiscHandler.QDiag))
 	mux.HandleFunc("/api/admin/portal/qdisc", handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

@@ -268,7 +268,15 @@ func (h *QdiscHandler) ApplyQdisc(w http.ResponseWriter, r *http.Request) {
 	if req.Interface != "" {
 		// Validate interface name (same check SaveQdisc performs).
 		if !validateIfaceName(req.Interface) {
-			sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid interface name"})
+			sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid interface name: " + req.Interface})
+			return
+		}
+		// Check the interface exists before attempting tc commands
+		if out, err := exec.Command("ip", "link", "show", req.Interface).CombinedOutput(); err != nil {
+			sendJSON(w, http.StatusInternalServerError, models.APIResponse{
+				Success: false,
+				Message: fmt.Sprintf("Interface %s not found or down: %s — %s", req.Interface, err, strings.TrimSpace(string(out))),
+			})
 			return
 		}
 		// Apply a single interface
@@ -282,11 +290,9 @@ func (h *QdiscHandler) ApplyQdisc(w http.ResponseWriter, r *http.Request) {
 		}
 		partialFailures, err := applyQdiscRule(h.DB, req.Interface, rule)
 		if err != nil {
-			sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
-				"success":   false,
-				"applied":   false,
-				"interface": req.Interface,
-				"error":     err.Error(),
+			sendJSON(w, http.StatusInternalServerError, models.APIResponse{
+				Success: false,
+				Message: fmt.Sprintf("Failed to apply qdisc on %s: %v", req.Interface, err),
 			})
 			return
 		}
@@ -335,10 +341,9 @@ func (h *QdiscHandler) ApplyQdisc(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(errors) > 0 {
-		sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
-			"success": false,
-			"applied": applied,
-			"errors":  errors,
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{
+			Success: false,
+			Message: "Qdisc apply failed: " + strings.Join(errors, "; "),
 		})
 		return
 	}
@@ -458,10 +463,10 @@ func applyFQCodelGlobal(iface string, rule QdiscRule) error {
 //	tc qdisc add dev <iface> root htb default 1
 //	tc class add dev <iface> parent root: classid root:1 htb rate <global>Mbit ceil <global>Mbit
 //	tc qdisc add dev <iface> parent root:1 fq_codel
-//	# For each active session MAC:
+//	# For each active session MAC (egress = Pi→client, so match dst MAC):
 //	tc class add dev <iface> parent root: classid root:<N> htb rate <per_device>Mbit ceil <per_device>Mbit
 //	tc qdisc add dev <iface> parent root:<N> fq_codel
-//	tc filter add dev <iface> parent root: protocol ip u32 match ip src 0.0.0.0/0 match ether src <mac> flowid root:<N>
+//	tc filter add dev <iface> parent root: protocol ip u32 match ether dst <mac> flowid root:<N>
 func applyFQCodelPerDevice(db *sql.DB, iface string, rule QdiscRule) ([]string, error) {
 	globalArg := fmt.Sprintf("%dMbit", rule.GlobalBwMbps)
 	perDevArg := fmt.Sprintf("%dMbit", rule.PerDeviceBwMbps)
@@ -496,6 +501,11 @@ func applyFQCodelPerDevice(db *sql.DB, iface string, rule QdiscRule) ([]string, 
 
 // addClientClass creates a per-MAC HTB class + fq_codel leaf + u32 filter.
 // The MAC is validated before being passed to tc; invalid MACs are rejected.
+//
+// NOTE: On egress of the portal interface (Pi → client = download), the
+// Ethernet destination MAC is the client's MAC, so the filter uses
+// "match ether dst <mac>".  The previous "match ether src" never matched
+// any traffic because the source MAC on egress is the Pi's own NIC MAC.
 func addClientClass(iface, mac string, classID int, rateArg string) error {
 	if !isValidMAC(mac) {
 		return fmt.Errorf("invalid MAC format: %q — skipping tc filter", mac)
@@ -509,7 +519,7 @@ func addClientClass(iface, mac string, classID int, rateArg string) error {
 		return err
 	}
 	if err := runTC("filter", "add", "dev", iface, "parent", "root:", "protocol", "ip",
-		"u32", "match", "ip", "src", "0.0.0.0/0", "match", "ether", "src", mac,
+		"u32", "match", "ether", "dst", mac,
 		"flowid", cid); err != nil {
 		return err
 	}
@@ -526,7 +536,7 @@ func delClientClass(iface, mac string, classID int) {
 	cid := fmt.Sprintf("root:%d", classID)
 	// Delete filter first, then qdisc, then class
 	exec.Command("tc", "filter", "del", "dev", iface, "parent", "root:", "protocol", "ip",
-		"u32", "match", "ether", "src", mac, "flowid", cid).Run()
+		"u32", "match", "ether", "dst", mac, "flowid", cid).Run()
 	exec.Command("tc", "qdisc", "del", "dev", iface, "parent", cid).Run()
 	exec.Command("tc", "class", "del", "dev", iface, "parent", "root:", "classid", cid).Run()
 }
@@ -728,4 +738,66 @@ func EnsurePerDeviceClass(db *sql.DB, iface, mac, clientIP, action string) {
 	default:
 		log.Printf("EnsurePerDeviceClass: unknown action %q", action)
 	}
+}
+
+// ============================================
+// GET /api/admin/portal/qdiag
+// ============================================
+
+// QDiag runs tc diagnostic commands on an interface and returns raw output.
+// Usage: GET /api/admin/portal/qdiag?iface=end0.22
+func (h *QdiscHandler) QDiag(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	iface := r.URL.Query().Get("iface")
+	if iface == "" {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Missing 'iface' query parameter"})
+		return
+	}
+	if !validateIfaceName(iface) {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid interface name"})
+		return
+	}
+
+	runShow := func(subcmd string) string {
+		cmd := exec.Command("tc", "-s", subcmd, "show", "dev", iface)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Sprintf("(error: %v)\n%s", err, strings.TrimSpace(string(out)))
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"iface":   iface,
+		"qdisc":   runShow("qdisc"),
+		"class":   runShow("class"),
+		"filter":  runShow("filter"),
+	})
+}
+
+// ============================================
+// GET /api/admin/portal/qdiag/installed
+// ============================================
+
+// QDiagInstalled checks whether the tc binary is available on this system.
+func (h *QdiscHandler) QDiagInstalled(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	path, err := exec.LookPath("tc")
+	installed := err == nil
+	if !installed {
+		path = ""
+	}
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"installed": installed,
+		"path":      path,
+	})
 }

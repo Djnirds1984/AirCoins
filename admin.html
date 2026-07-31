@@ -1556,6 +1556,9 @@
             <!-- Bandwidth & Anti-Lag Rules card -->
             <div class="settings-card" style="max-width:640px;">
                 <div class="card-title">Bandwidth &amp; Anti-Lag Rules</div>
+                <div id="tc-missing-banner" style="display:none; background:#fdecea; border:1px solid #e57373; color:#b71c1c; padding:8px 12px; border-radius:6px; margin-bottom:10px; font-size:13px;">
+                    &#9888; <b>tc not installed</b> — traffic shaping requires <code>iproute2</code>. Run: <code>sudo apt install iproute2</code>
+                </div>
                 <div class="settings-form">
                     <div class="settings-row">
                         <div class="settings-field">
@@ -1585,8 +1588,10 @@
                     <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
                         <button class="btn btn-primary" onclick="saveQdiscRule()">Save</button>
                         <button class="btn btn-success" onclick="applyQdiscNow()">Apply Now</button>
+                        <button class="btn" style="background:#455a64;color:#fff;" onclick="runQDiag()">Run tc diagnostics</button>
                         <span id="qdisc-status" class="gpio-info-text" style="margin-left:4px;"></span>
                     </div>
+                    <pre id="qdiag-output" style="display:none; margin-top:10px; background:#1e1e2e; color:#cdd6f4; padding:12px; border-radius:6px; font-size:12px; max-height:320px; overflow:auto; white-space:pre-wrap; word-break:break-all;"></pre>
                 </div>
             </div>
 
@@ -2071,8 +2076,15 @@ async function apiCall(method, path, body) {
     if (!res.ok) {
         let msg = 'API error: ' + res.status;
         try {
-            const errData = await res.json();
-            if (errData.message) msg = errData.message;
+            const txt = await res.text();
+            try {
+                const errData = JSON.parse(txt);
+                if (errData.message) msg = errData.message;
+                else if (errData.error) msg = errData.error;
+                else if (Array.isArray(errData.errors)) msg = errData.errors.join('; ');
+            } catch (_) {
+                if (txt) msg = txt;
+            }
         } catch (_) {}
         throw new Error(msg);
     }
@@ -4254,6 +4266,8 @@ async function unbanMAC(mac) {
 
 async function loadQdiscRules() {
     try {
+        // Check if tc is installed and show/hide banner
+        checkTcInstalled();
         // Populate the interface dropdown from portal list
         var portalRes = await apiCall('GET', '/portal/list');
         var portals = portalRes.portals || [];
@@ -4323,14 +4337,47 @@ async function applyQdiscNow() {
     var iface = document.getElementById('qdisc-interface').value;
     if (!iface) { showNotification('No portal interface selected', 'error'); return; }
     var statusEl = document.getElementById('qdisc-status');
+    statusEl.style.color = '';
     statusEl.textContent = 'Applying...';
     try {
         var res = await apiCall('POST', '/admin/portal/qdisc/apply', { interface: iface });
-        statusEl.textContent = 'Applied on ' + iface;
+        if (res && res.partial_failures && res.partial_failures.length > 0) {
+            statusEl.style.color = '#b45309';
+            statusEl.textContent = 'Applied on ' + iface + ' with warnings: ' + res.partial_failures.join('; ');
+        } else {
+            statusEl.style.color = '';
+            statusEl.textContent = 'Applied on ' + iface;
+        }
         showNotification('Qdisc applied on ' + iface, 'success');
     } catch (e) {
+        statusEl.style.color = '#dc2626';
         statusEl.textContent = 'Apply failed: ' + e.message;
         showNotification('Failed to apply qdisc: ' + e.message, 'error');
+    }
+}
+
+async function checkTcInstalled() {
+    try {
+        var res = await apiCall('GET', '/admin/portal/qdiag/installed');
+        var banner = document.getElementById('tc-missing-banner');
+        if (banner) banner.style.display = res.installed ? 'none' : 'block';
+    } catch (e) { /* ignore */ }
+}
+
+async function runQDiag() {
+    var iface = document.getElementById('qdisc-interface').value;
+    if (!iface) { showNotification('No portal interface selected', 'error'); return; }
+    var pre = document.getElementById('qdiag-output');
+    pre.style.display = 'block';
+    pre.textContent = 'Running tc diagnostics on ' + iface + '...';
+    try {
+        var res = await apiCall('GET', '/admin/portal/qdiag?iface=' + encodeURIComponent(iface));
+        var out = '=== tc -s qdisc show dev ' + iface + ' ===\n' + (res.qdisc || '(empty)') + '\n\n';
+        out += '=== tc -s class show dev ' + iface + ' ===\n' + (res.class || '(empty)') + '\n\n';
+        out += '=== tc -s filter show dev ' + iface + ' ===\n' + (res.filter || '(empty)');
+        pre.textContent = out;
+    } catch (e) {
+        pre.textContent = 'Error: ' + e.message;
     }
 }
 </script>

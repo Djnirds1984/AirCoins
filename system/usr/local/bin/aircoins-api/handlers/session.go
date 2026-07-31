@@ -204,10 +204,10 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC string, coinValue, mi
 		// duplicate row for a device that is already online).
 		err = tx.QueryRow(`
 			UPDATE sessions
-			SET coins_inserted = coins_inserted + $1,
-			    total_seconds = total_seconds + $2,
-			    expires_at = GREATEST(expires_at, NOW()) + ($2 * INTERVAL '1 second'),
-			    remaining_seconds = `+remainingSQL+` + $2,
+			SET coins_inserted = coins_inserted + $1::int,
+			    total_seconds = total_seconds + $2::int,
+			    expires_at = GREATEST(expires_at, NOW()) + ($2::int * INTERVAL '1 second'),
+			    remaining_seconds = `+remainingSQL+` + $2::int,
 			    client_ip = $3,
 			    client_mac = CASE WHEN $4 <> '' THEN $4 ELSE client_mac END
 			WHERE id = $5
@@ -218,7 +218,7 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC string, coinValue, mi
 		err = tx.QueryRow(`
 			INSERT INTO sessions (client_ip, client_mac, coins_inserted, total_seconds,
 			                      remaining_seconds, status, started_at, activated_at, expires_at)
-			VALUES ($1, $2, $3, $4, $4, 'active', NOW(), NOW(), NOW() + ($4 * INTERVAL '1 second'))
+			VALUES ($1, $2, $3, $4::int, $4::int, 'active', NOW(), NOW(), NOW() + ($4::int * INTERVAL '1 second'))
 			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at
 		`, clientIP, clientMAC, coinValue, addSeconds).
 			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt)
@@ -441,10 +441,10 @@ func (h *SessionHandler) Extend(w http.ResponseWriter, r *http.Request) {
 	var mac string
 	err := h.DB.QueryRow(`
 		UPDATE sessions
-		SET coins_inserted = coins_inserted + $1,
-		    total_seconds = total_seconds + $2,
-		    expires_at = GREATEST(expires_at, NOW()) + ($2 * INTERVAL '1 second'),
-		    remaining_seconds = `+remainingSQL+` + $2
+		SET coins_inserted = coins_inserted + $1::int,
+		    total_seconds = total_seconds + $2::int,
+		    expires_at = GREATEST(expires_at, NOW()) + ($2::int * INTERVAL '1 second'),
+		    remaining_seconds = `+remainingSQL+` + $2::int
 		WHERE id = $3 AND status = 'active'
 		RETURNING COALESCE(client_mac, '')
 	`, req.Coins, addSeconds, req.SessionID).Scan(&mac)

@@ -307,6 +307,68 @@ END
 $$;
 
 -- ============================================
+-- 008 - SESSIONS: one row per device (client_mac)
+-- ============================================
+-- The Sessions admin page showed the same device several times (active,
+-- expired, expired, ...) because every new payment after expiry inserted
+-- a fresh row. The API now UPSERTs on client_mac (reusing the expired
+-- row), which requires a unique partial index. Dedupe first: per MAC keep
+-- the active row if any, otherwise the most recent one, and re-point
+-- coin_events at the survivor before deleting the duplicates.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'sessions'
+    ) THEN
+        RETURN;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = current_schema()
+          AND c.relname = 'sessions_client_mac_uniq'
+          AND c.relkind = 'i'
+    ) THEN
+        RETURN;
+    END IF;
+
+    -- Re-point coin_events at the surviving row (FK would otherwise
+    -- block the DELETE below)
+    UPDATE coin_events ce
+    SET session_id = k.keep_id
+    FROM (
+        SELECT DISTINCT ON (client_mac) id AS keep_id, client_mac
+        FROM sessions
+        WHERE client_mac IS NOT NULL AND client_mac <> '' AND client_mac <> '-'
+        ORDER BY client_mac, (status = 'active') DESC,
+                 started_at DESC NULLS LAST, id DESC
+    ) k
+    JOIN sessions dup ON dup.client_mac = k.client_mac AND dup.id <> k.keep_id
+    WHERE ce.session_id = dup.id;
+
+    DELETE FROM sessions s
+    USING (
+        SELECT DISTINCT ON (client_mac) id AS keep_id, client_mac
+        FROM sessions
+        WHERE client_mac IS NOT NULL AND client_mac <> '' AND client_mac <> '-'
+        ORDER BY client_mac, (status = 'active') DESC,
+                 started_at DESC NULLS LAST, id DESC
+    ) k
+    WHERE s.client_mac = k.client_mac
+      AND s.id <> k.keep_id;
+
+    CREATE UNIQUE INDEX sessions_client_mac_uniq
+    ON sessions(client_mac)
+    WHERE client_mac IS NOT NULL AND client_mac <> '' AND client_mac <> '-';
+
+    RAISE NOTICE 'Migration 008: sessions deduped, unique index on client_mac added';
+END
+$$;
+
+-- ============================================
 -- COMPLETION
 -- ============================================
 \echo 'Migrations applied.'

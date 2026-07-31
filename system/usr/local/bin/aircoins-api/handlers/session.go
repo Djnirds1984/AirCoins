@@ -209,16 +209,45 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC string, coinValue, mi
 			    expires_at = GREATEST(expires_at, NOW()) + ($2::int * INTERVAL '1 second'),
 			    remaining_seconds = `+remainingSQL+` + $2::int,
 			    client_ip = $3,
-			    client_mac = CASE WHEN $4 <> '' THEN $4 ELSE client_mac END
+			    client_mac = CASE WHEN $4 <> '' AND NOT EXISTS (
+			                     SELECT 1 FROM sessions x WHERE x.client_mac = $4 AND x.id <> sessions.id
+			                 ) THEN $4 ELSE client_mac END
 			WHERE id = $5
 			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at
 		`, coinValue, addSeconds, clientIP, clientMAC, existingID).
 			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt)
-	} else {
+	} else if clientMAC != "" {
+		// NEW/REUSE: one session row per device. If the MAC already owns a
+		// row in a terminal state (expired/cancelled/...), RESET that row
+		// to a fresh active session — counters start from this payment
+		// only — instead of inserting a duplicate. Requires the partial
+		// unique index sessions_client_mac_uniq (migration 008); the
+		// conflict target repeats the index predicate as Postgres demands
+		// for partial-index arbiters.
 		err = tx.QueryRow(`
 			INSERT INTO sessions (client_ip, client_mac, coins_inserted, total_seconds,
 			                      remaining_seconds, status, started_at, activated_at, expires_at)
-			VALUES ($1, $2, $3, $4::int, $4::int, 'active', NOW(), NOW(), NOW() + ($4::int * INTERVAL '1 second'))
+			VALUES ($1, $2, $3::int, $4::int, $4::int, 'active', NOW(), NOW(), NOW() + ($4::int * INTERVAL '1 second'))
+			ON CONFLICT (client_mac) WHERE client_mac IS NOT NULL AND client_mac <> '' AND client_mac <> '-'
+			DO UPDATE SET
+			    client_ip = EXCLUDED.client_ip,
+			    coins_inserted = EXCLUDED.coins_inserted,
+			    total_seconds = EXCLUDED.total_seconds,
+			    remaining_seconds = EXCLUDED.remaining_seconds,
+			    status = 'active',
+			    started_at = NOW(),
+			    activated_at = NOW(),
+			    expired_at = NULL,
+			    expires_at = EXCLUDED.expires_at
+			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at
+		`, clientIP, clientMAC, coinValue, addSeconds).
+			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt)
+	} else {
+		// No resolvable MAC: excluded from the unique index, plain insert.
+		err = tx.QueryRow(`
+			INSERT INTO sessions (client_ip, client_mac, coins_inserted, total_seconds,
+			                      remaining_seconds, status, started_at, activated_at, expires_at)
+			VALUES ($1, $2, $3::int, $4::int, $4::int, 'active', NOW(), NOW(), NOW() + ($4::int * INTERVAL '1 second'))
 			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at
 		`, clientIP, clientMAC, coinValue, addSeconds).
 			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt)

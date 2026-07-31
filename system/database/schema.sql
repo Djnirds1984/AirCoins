@@ -114,6 +114,26 @@ CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at_desc ON sessions(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_status_started_at ON sessions(status, started_at DESC);
 
+-- One session row per device: the API upserts on client_mac, reusing the
+-- expired row when the device pays again. Old databases may still hold
+-- duplicate MACs when this file runs (it runs BEFORE migrations.sql), so
+-- only create the index when the data allows it — migration 008 dedupes
+-- and creates it otherwise.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM sessions
+        WHERE client_mac IS NOT NULL AND client_mac <> '' AND client_mac <> '-'
+        GROUP BY client_mac
+        HAVING COUNT(*) > 1
+    ) THEN
+        CREATE UNIQUE INDEX IF NOT EXISTS sessions_client_mac_uniq
+        ON sessions(client_mac)
+        WHERE client_mac IS NOT NULL AND client_mac <> '' AND client_mac <> '-';
+    END IF;
+END
+$$;
+
 -- ============================================
 -- COIN EVENTS (raw coin detections)
 -- ============================================

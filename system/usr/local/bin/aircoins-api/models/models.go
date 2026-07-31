@@ -110,8 +110,8 @@ type Session struct {
 // QdiscInfo is returned alongside each admin session row so the UI knows
 // whether per-device FQ_CODEL shaping is active and what the global default is.
 type QdiscInfo struct {
-	Type           string `json:"type"`            // "fq_codel" | "cake" | ""
-	PerDeviceMbps  int    `json:"per_device_mbps"` // global per-device rate (0 = not active)
+	Type          string `json:"type"`            // "fq_codel" | "cake" | ""
+	PerDeviceMbps int    `json:"per_device_mbps"` // global per-device rate (0 = not active)
 }
 
 type SystemLog struct {

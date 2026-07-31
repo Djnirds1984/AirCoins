@@ -759,11 +759,11 @@ func (h *SessionHandler) Shape(w http.ResponseWriter, r *http.Request) {
 		sendJSON(w, http.StatusOK, map[string]interface{}{
 			"success": true,
 			"data": map[string]interface{}{
-				"session_id":   sessionID,
-				"mac":          mac,
-				"shaped_mbps":  shapedMbps,
-				"applied":      false,
-				"apply_error":  "session not found after update",
+				"session_id":  sessionID,
+				"mac":         mac,
+				"shaped_mbps": shapedMbps,
+				"applied":     false,
+				"apply_error": "session not found after update",
 			},
 		})
 		return

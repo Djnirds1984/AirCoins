@@ -93,8 +93,24 @@ func (h *CoinslotHandler) Arm(w http.ResponseWriter, r *http.Request) {
 	// handler validates the pay_ticket and releases it. This prevents a
 	// second device on the same VLAN from arming while the first device
 	// is inserting coins.
-	acquired, _, vlanKey, ticket := PayLockTryAcquire(clientIP)
+	acquired, holder, vlanKey, ticket := PayLockTryAcquire(clientIP)
 	if !acquired {
+		// If the SAME client already holds the lock (e.g. double-tap on
+		// INSERT COIN), re-issue the existing ticket so the portal keeps
+		// a valid handoff token. A different device on the same VLAN
+		// gets the standard 423 rejection.
+		if holder == clientIP {
+			// Re-read the existing ticket from the lock entry so the
+			// client's stash stays valid for Start.
+			existingTicket := payLockCurrentTicket(vlanKey)
+			sendJSON(w, http.StatusOK, map[string]interface{}{
+				"armed":      true,
+				"armed_at":   time.Now().Unix(),
+				"expires_at": time.Now().Unix() + int64(defaultArmDuration),
+				"pay_ticket": existingTicket,
+			})
+			return
+		}
 		sendJSON(w, http.StatusLocked, map[string]interface{}{
 			"success": false,
 			"armed":   false,

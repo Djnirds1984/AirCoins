@@ -225,8 +225,8 @@
         .badge.online { background: rgba(0,255,136,0.15); color: #00ff88; }
         .badge.offline { background: rgba(255,68,68,0.15); color: #ff4444; }
 
-        /* ==================== CHART ==================== */
-        .chart-container {
+        /* ==================== SYSTEM STATS ==================== */
+        .sysstats-panel {
             background: rgba(26, 26, 46, 0.7);
             backdrop-filter: blur(12px);
             border: 1px solid rgba(255,255,255,0.08);
@@ -234,45 +234,49 @@
             padding: 24px;
             margin-bottom: 24px;
         }
-        .chart-title { font-size: 16px; font-weight: 600; margin-bottom: 20px; color: #ddd; }
-        .bar-chart {
-            display: flex;
-            align-items: flex-end;
-            gap: 12px;
-            height: 160px;
+        .sysstats-title { font-size: 16px; font-weight: 600; margin-bottom: 20px; color: #ddd; }
+        .sysstats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px;
         }
-        .bar-col {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 6px;
-            height: 100%;
-            justify-content: flex-end;
+        @media (max-width: 900px) {
+            .sysstats-grid { grid-template-columns: 1fr; }
         }
-        .bar {
-            width: 100%;
-            min-height: 4px;
-            background: linear-gradient(180deg, #00d4ff, rgba(0,212,255,0.3));
-            border-radius: 6px 6px 0 0;
-            position: relative;
-            transition: height 0.4s ease;
-            cursor: pointer;
+        .sysstats-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 16px;
         }
-        .bar:hover { background: linear-gradient(180deg, #00e8ff, rgba(0,232,255,0.5)); }
-        .bar .bar-val {
-            position: absolute;
-            top: -22px;
-            left: 50%;
-            transform: translateX(-50%);
-            font-size: 11px;
-            color: #aaa;
-            white-space: nowrap;
-            opacity: 0;
-            transition: opacity 0.2s;
+        .sysstats-card-title { font-size: 13px; color: #888; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .sysstats-core-row {
+            display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
         }
-        .bar:hover .bar-val { opacity: 1; }
-        .bar-label { font-size: 12px; color: #666; }
+        .sysstats-core-label { font-size: 12px; color: #aaa; width: 50px; flex-shrink: 0; }
+        .sysstats-core-track {
+            flex: 1; height: 10px; background: rgba(255,255,255,0.06); border-radius: 5px; overflow: hidden;
+        }
+        .sysstats-core-fill {
+            height: 100%; border-radius: 5px; transition: width 0.4s ease, background 0.4s ease;
+        }
+        .sysstats-core-pct { font-size: 12px; color: #aaa; width: 44px; text-align: right; flex-shrink: 0; }
+        .sysstats-progress-track {
+            height: 14px; background: rgba(255,255,255,0.06); border-radius: 7px; overflow: hidden; margin-bottom: 8px;
+        }
+        .sysstats-progress-fill {
+            height: 100%; border-radius: 7px; transition: width 0.4s ease, background 0.4s ease; background: #00d4ff;
+        }
+        .sysstats-ram-text { font-size: 13px; color: #aaa; }
+        .sysstats-temp-value { font-size: 48px; font-weight: 700; line-height: 1; }
+        .sysstats-temp-unit { font-size: 20px; font-weight: 400; color: #888; margin-left: 2px; }
+        .ss-green { color: #00ff88; }
+        .ss-amber { color: #ffb300; }
+        .ss-red { color: #ff4444; }
+        .ss-gray { color: #555; }
+        .ss-fill-green { background: #00ff88; }
+        .ss-fill-amber { background: #ffb300; }
+        .ss-fill-red { background: #ff4444; }
 
         /* ==================== TABLES ==================== */
         .table-container {
@@ -1320,10 +1324,24 @@
                 </div>
             </div>
 
-            <!-- Weekly chart -->
-            <div class="chart-container">
-                <div class="chart-title">7-Day Earnings</div>
-                <div class="bar-chart" id="weekly-chart"></div>
+            <!-- System Stats -->
+            <div class="sysstats-panel">
+                <div class="sysstats-title">System Stats</div>
+                <div class="sysstats-grid">
+                    <div class="sysstats-card" id="sysstats-cpu">
+                        <div class="sysstats-card-title">CPU Usage</div>
+                        <div id="sysstats-cores"></div>
+                    </div>
+                    <div class="sysstats-card" id="sysstats-ram">
+                        <div class="sysstats-card-title">RAM Usage</div>
+                        <div class="sysstats-progress-track"><div class="sysstats-progress-fill" id="sysstats-ram-fill"></div></div>
+                        <div class="sysstats-ram-text" id="sysstats-ram-text">— / — MB</div>
+                    </div>
+                    <div class="sysstats-card" id="sysstats-temp">
+                        <div class="sysstats-card-title">CPU Temperature</div>
+                        <div class="sysstats-temp-value" id="sysstats-temp-value"><span class="ss-gray">—</span></div>
+                    </div>
+                </div>
             </div>
 
             <!-- Recent sessions -->
@@ -2143,12 +2161,12 @@ function restoreSidebar() {
 // ============================================================
 // DASHBOARD
 // ============================================================
-const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+var sysStatsInterval = null;
 
 async function loadDashboard() {
     try {
         var results = await Promise.all([
-            apiCall('GET', '/admin/stats?period=week'),
+            apiCall('GET', '/admin/stats'),
             apiCall('GET', '/admin/coin-events?limit=10'),
             apiCall('GET', '/admin/sessions?limit=10')
         ]);
@@ -2169,9 +2187,6 @@ async function loadDashboard() {
             statusEl.innerHTML = '<span class="badge offline">Offline</span>';
         }
 
-        // Weekly chart
-        renderWeeklyChart(stats.weekly_stats || []);
-
         // Recent sessions
         renderSessionsTable(sessionsData);
 
@@ -2185,33 +2200,51 @@ async function loadDashboard() {
     }
 }
 
-function renderWeeklyChart(weeklyStats) {
-    var container = document.getElementById('weekly-chart');
-    container.innerHTML = '';
-
-    if (weeklyStats.length === 0) {
-        container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;width:100%;color:#555;font-size:14px;">No data available</div>';
-        return;
-    }
-
-    var maxEarnings = 1;
-    weeklyStats.forEach(function(d) { if (d.earnings > maxEarnings) maxEarnings = d.earnings; });
-
-    weeklyStats.forEach(function(d) {
-        var pct = Math.max(4, (d.earnings / maxEarnings) * 100);
-        var dateObj = new Date(d.date + 'T00:00:00');
-        var dayLabel = DAY_LABELS[dateObj.getDay()];
-
-        var col = document.createElement('div');
-        col.className = 'bar-col';
-        col.innerHTML =
-            '<div class="bar" style="height:' + pct + '%;">' +
-                '<span class="bar-val">\u20B1' + d.earnings + '</span>' +
-            '</div>' +
-            '<div class="bar-label">' + dayLabel + '</div>';
-        container.appendChild(col);
-    });
+async function loadSystemStats() {
+    try {
+        var resp = await apiCall('GET', '/admin/system/stats');
+        if (!resp || !resp.success || !resp.data) return;
+        renderSystemStats(resp.data);
+    } catch (e) { /* silent */ }
 }
+
+function renderSystemStats(d) {
+    // CPU cores
+    var coresEl = document.getElementById('sysstats-cores');
+    var cores = d.cpu_cores || [];
+    var html = '';
+    cores.forEach(function(c) {
+        var pct = Math.min(100, Math.max(0, c.usage || 0));
+        var cls = pct < 50 ? 'ss-fill-green' : (pct < 80 ? 'ss-fill-amber' : 'ss-fill-red');
+        html += '<div class="sysstats-core-row">' +
+            '<span class="sysstats-core-label">Core ' + c.id + '</span>' +
+            '<div class="sysstats-core-track"><div class="sysstats-core-fill ' + cls + '" style="width:' + pct.toFixed(1) + '%;"></div></div>' +
+            '<span class="sysstats-core-pct">' + pct.toFixed(1) + '%</span>' +
+            '</div>';
+    });
+    coresEl.innerHTML = html;
+
+    // RAM
+    var ram = d.ram || {};
+    var ramPct = Math.min(100, Math.max(0, ram.used_pct || 0));
+    var ramFill = document.getElementById('sysstats-ram-fill');
+    var ramCls = ramPct < 50 ? 'ss-fill-green' : (ramPct < 80 ? 'ss-fill-amber' : 'ss-fill-red');
+    ramFill.className = 'sysstats-progress-fill ' + ramCls;
+    ramFill.style.width = ramPct.toFixed(1) + '%';
+    document.getElementById('sysstats-ram-text').textContent = (ram.used_mb || 0) + ' / ' + (ram.total_mb || 0) + ' MB (' + ramPct.toFixed(1) + '%)';
+
+    // Temperature
+    var tempEl = document.getElementById('sysstats-temp-value');
+    var temp = d.cpu_temp_c;
+    if (temp === null || temp === undefined) {
+        tempEl.innerHTML = '<span class="ss-gray">N/A</span>';
+    } else {
+        var tCls = temp < 60 ? 'ss-green' : (temp < 75 ? 'ss-amber' : 'ss-red');
+        tempEl.innerHTML = '<span class="' + tCls + '">' + temp.toFixed(1) + '</span><span class="sysstats-temp-unit">°C</span>';
+    }
+}
+
+
 
 function renderSessionsTable(data) {
     var tbody = document.getElementById('recent-sessions-body');
@@ -2278,10 +2311,22 @@ var sessionsInterval = null;
 function startDashboardRefresh() {
     if (dashboardInterval) clearInterval(dashboardInterval);
     dashboardInterval = setInterval(loadDashboard, 5000);
+    startSysStatsPoll();
 }
 
 function stopDashboardRefresh() {
     if (dashboardInterval) { clearInterval(dashboardInterval); dashboardInterval = null; }
+    stopSysStatsPoll();
+}
+
+function startSysStatsPoll() {
+    stopSysStatsPoll();
+    loadSystemStats();
+    sysStatsInterval = setInterval(loadSystemStats, 3000);
+}
+
+function stopSysStatsPoll() {
+    if (sysStatsInterval) { clearInterval(sysStatsInterval); sysStatsInterval = null; }
 }
 
 function startSessionsRefresh() {

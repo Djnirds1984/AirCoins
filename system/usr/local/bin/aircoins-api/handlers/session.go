@@ -486,9 +486,16 @@ func (h *SessionHandler) CanStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientIP := clientIPFromRequest(r)
-	acquired, _, vlanKey, _ := PayLockTryAcquire(clientIP)
+	acquired, holder, vlanKey, _ := PayLockTryAcquire(clientIP)
 	if acquired {
 		PayLockRelease(clientIP, vlanKey)
+		sendJSON(w, http.StatusOK, map[string]interface{}{"can_start": true})
+		return
+	}
+	// Lock is held — but if the holder is THIS client (same IP), they are
+	// the legitimate arm-holder doing a pre-flight check before Start.
+	// Let them through; Start will validate the ticket and release the lock.
+	if holder == clientIP {
 		sendJSON(w, http.StatusOK, map[string]interface{}{"can_start": true})
 		return
 	}

@@ -181,6 +181,26 @@ func PayLockValidateAndRelease(clientIP, ticket string) (reason string, released
 	}
 }
 
+// payLockCurrentTicket returns the current ticket stored in the lock
+// entry for the given VLAN key. Returns "" if the entry doesn't exist
+// or has no ticket. Used by the Arm handler to re-issue the existing
+// ticket when the same client re-arms (double-tap protection).
+func payLockCurrentTicket(vlanKey string) string {
+	if vlanKey == "" {
+		return ""
+	}
+	payLockRegistry.Lock()
+	entry, ok := payLockRegistry.entries[vlanKey]
+	payLockRegistry.Unlock()
+	if !ok {
+		return ""
+	}
+	entry.mu.Lock()
+	t := entry.ticket
+	entry.mu.Unlock()
+	return t
+}
+
 // PayLockRelease releases the per-VLAN lock unconditionally (used by the
 // can-start peek and by watchdog-free paths). If the watchdog already
 // drained the semaphore this is a harmless no-op (logged for post-mortem).

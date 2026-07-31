@@ -54,6 +54,7 @@ func main() {
 	mux.HandleFunc("/api/admin/settings", handlers.AuthMiddleware(adminHandler.Settings))
 	mux.HandleFunc("/api/admin/logs", handlers.AuthMiddleware(adminHandler.GetLogs))
 	mux.HandleFunc("/api/admin/coin-events", handlers.AuthMiddleware(adminHandler.GetCoinEvents))
+	mux.HandleFunc("/api/admin/system/stats", handlers.AuthMiddleware(systemHandler.GetSystemStats))
 
 	// Reports routes
 	mux.HandleFunc("/api/admin/reports/earnings", handlers.AuthMiddleware(reportsHandler.GetEarningsSummary))

@@ -70,6 +70,9 @@ func main() {
 	mux.HandleFunc("/api/session/extend", handlers.AuthMiddleware(sessionHandler.Extend))
 	mux.HandleFunc("/api/session/end", handlers.AuthMiddleware(sessionHandler.End))
 	mux.HandleFunc("/api/session/status", sessionHandler.Status)
+	mux.HandleFunc("/api/session/pause", sessionHandler.Pause)
+	mux.HandleFunc("/api/session/resume", sessionHandler.Resume)
+	mux.HandleFunc("/api/session/ban-status", sessionHandler.BanStatus)
 	mux.HandleFunc("/api/admin/session/create", handlers.AuthMiddleware(sessionHandler.AdminCreate))
 
 	// GPIO routes
@@ -114,6 +117,13 @@ func main() {
 	mux.HandleFunc("/api/portal/appearance", appearanceHandler.GetAppearance)
 	mux.HandleFunc("/api/admin/portal/appearance", handlers.AuthMiddleware(appearanceHandler.SaveAppearance))
 	mux.HandleFunc("/api/admin/portal/background", handlers.AuthMiddleware(appearanceHandler.Background))
+
+	// Portal tap/pause rules + bans
+	mux.HandleFunc("/api/portal/tap-rules", appearanceHandler.GetTapRules)
+	mux.HandleFunc("/api/admin/portal/tap-rules", handlers.AuthMiddleware(appearanceHandler.HandleTapRules))
+	mux.HandleFunc("/api/admin/portal/pause-rules", handlers.AuthMiddleware(appearanceHandler.HandlePauseRules))
+	mux.HandleFunc("/api/admin/portal/bans", handlers.AuthMiddleware(appearanceHandler.ListBans))
+	mux.HandleFunc("/api/admin/portal/ban/", handlers.AuthMiddleware(appearanceHandler.UnbanByPath))
 
 	// Health check
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {

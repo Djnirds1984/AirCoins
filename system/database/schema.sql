@@ -40,7 +40,9 @@ INSERT INTO system_settings (key, value, description) VALUES
     ('bandwidth', '50', 'Bandwidth limit in Mbps'),
     ('max_session', '120', 'Maximum session time in minutes'),
     ('eth_interface', 'eth0', 'Ethernet interface name'),
-    ('portal_ip', '', 'Portal IP address for admin access')
+    ('portal_ip', '', 'Portal IP address for admin access'),
+    ('portal_tap_rules', '{"max_taps":5,"window_seconds":60,"ban_seconds":300}', 'INSERT COIN anti-abuse limits (per MAC, per window)'),
+    ('portal_pause_rules', '{"pause_limit":0}', 'Session pause rules (pause_limit=0 means unlimited)')
 ON CONFLICT (key) DO NOTHING;
 
 -- Default captive portal appearance (dark preset). Guarded so a fresh
@@ -108,6 +110,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     -- Wall-clock expiry: a session is alive while expires_at > NOW().
     -- remaining_seconds above is only a snapshot for display/legacy rows.
     expires_at TIMESTAMP,
+    -- Pause/resume: when paused the session timer and internet access
+    -- are both frozen. paused_at is set on pause; remaining_seconds_at_pause
+    -- is the live remaining at that moment, used on resume to rebuild expires_at.
+    paused_at TIMESTAMPTZ,
+    remaining_seconds_at_pause INT,
+    pause_count INT DEFAULT 0,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -143,6 +151,29 @@ BEGIN
     END IF;
 END
 $$;
+
+-- ============================================
+-- TAP ANTI-ABUSE + SESSION PAUSE (migration 010)
+-- ============================================
+-- Per-device ban table for tap-spamming INSERT COIN, and a sliding-window
+-- tap-activity counter per MAC. Both are ephemeral and self-clearing.
+CREATE TABLE IF NOT EXISTS client_bans (
+    id SERIAL PRIMARY KEY,
+    client_mac VARCHAR(17) UNIQUE NOT NULL,
+    banned_until TIMESTAMPTZ NOT NULL,
+    reason VARCHAR(32),
+    attempts_in_window INT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_client_bans_until ON client_bans(banned_until);
+
+CREATE TABLE IF NOT EXISTS tap_activity (
+    client_mac VARCHAR(17) PRIMARY KEY,
+    counter INT NOT NULL DEFAULT 0,
+    window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- ============================================
 -- COIN EVENTS (raw coin detections)

@@ -435,6 +435,65 @@ END
 $$;
 
 -- ============================================
+-- 010 - TAP ANTI-ABUSE + SESSION PAUSE
+-- ============================================
+-- Two portal features: per-device ban for tap-spamming (INSERT COIN),
+-- and real pause/resume that also closes the client's internet while
+-- the session is frozen. Adds pause columns to sessions, two ephemeral
+-- tables (client_bans + tap_activity), and seeds the rules as JSON
+-- in system_settings.
+
+ALTER TABLE IF EXISTS sessions ADD COLUMN IF NOT EXISTS paused_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS sessions ADD COLUMN IF NOT EXISTS remaining_seconds_at_pause INT;
+ALTER TABLE IF EXISTS sessions ADD COLUMN IF NOT EXISTS pause_count INT DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS client_bans (
+    id SERIAL PRIMARY KEY,
+    client_mac VARCHAR(17) UNIQUE NOT NULL,
+    banned_until TIMESTAMPTZ NOT NULL,
+    reason VARCHAR(32),
+    attempts_in_window INT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_client_bans_until ON client_bans(banned_until);
+
+CREATE TABLE IF NOT EXISTS tap_activity (
+    client_mac VARCHAR(17) PRIMARY KEY,
+    counter INT NOT NULL DEFAULT 0,
+    window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Seed portal tap rules + pause rules IF NOT EXISTS. Guarded by a
+-- system_settings table existence check so very old databases (pre-
+-- migration 002) don't fail — they will be seeded on a later run.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'system_settings'
+    ) THEN
+        RETURN;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM system_settings WHERE key = 'portal_tap_rules') THEN
+        INSERT INTO system_settings (key, value, description)
+        VALUES ('portal_tap_rules',
+                '{"max_taps":5,"window_seconds":60,"ban_seconds":300}',
+                'INSERT COIN anti-abuse limits (per MAC, per window)');
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM system_settings WHERE key = 'portal_pause_rules') THEN
+        INSERT INTO system_settings (key, value, description)
+        VALUES ('portal_pause_rules',
+                '{"pause_limit":0}',
+                'Session pause rules (pause_limit=0 means unlimited)');
+    END IF;
+END
+$$;
+
+-- ============================================
 -- COMPLETION
 -- ============================================
 \echo 'Migrations applied.'

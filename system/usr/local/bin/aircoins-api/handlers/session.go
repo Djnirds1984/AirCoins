@@ -17,6 +17,16 @@ type SessionHandler struct {
 	DB *sql.DB
 }
 
+// banActiveError is returned by creditSession when the caller's MAC is
+// currently banned. The Start handler catches it and returns a 403.
+type banActiveError struct {
+	Until time.Time
+}
+
+func (e *banActiveError) Error() string {
+	return "temporarily banned for tap abuse"
+}
+
 // Sessions are wall-clock based: a session is alive while
 // expires_at > NOW() (DB clock). remaining_seconds is kept as a snapshot
 // for display/legacy rows only — every response computes the remaining
@@ -136,6 +146,17 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	session, extended, err := h.creditSession(clientIP, clientMAC, coins.totalValue, coins.totalMinutes, coins.ids)
 	if err != nil {
+		// Check if the error is a ban rejection (F6: ban check inside tx)
+		if banErr, ok := err.(*banActiveError); ok {
+			sendJSON(w, http.StatusForbidden, map[string]interface{}{
+				"success":      false,
+				"banned":       true,
+				"banned_until": banErr.Until.Format(time.RFC3339),
+				"reason":       "tap_abuse",
+				"message":      "Temporarily banned for tap abuse. Please try again later.",
+			})
+			return
+		}
 		log.Printf("Error crediting session for %s: %v", clientIP, err)
 		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to create session"})
 		return
@@ -180,6 +201,25 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC string, coinValue, mi
 	}
 	defer tx.Rollback()
 
+	// F6: Ban check INSIDE the creditSession transaction to close the
+	// TOCTOU window — a ban created between the pre-check and the UPSERT
+	// would otherwise be missed. The coinslot arm endpoint also rejects
+	// banned MACs as a first line of defense.
+	if clientMAC != "" {
+		var until time.Time
+		banErr := tx.QueryRow(`
+			SELECT banned_until FROM client_bans
+			WHERE client_mac = $1 AND banned_until > NOW()
+		`, clientMAC).Scan(&until)
+		if banErr == nil {
+			// Ban is active — abort the transaction
+			return nil, false, &banActiveError{Until: until}
+		}
+		if banErr != sql.ErrNoRows {
+			return nil, false, banErr
+		}
+	}
+
 	// Existing ACTIVE session for this device (MAC first, IP fallback)?
 	var existingID int
 	err = tx.QueryRow(`
@@ -223,11 +263,14 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC string, coinValue, mi
 		// only — instead of inserting a duplicate. Requires the partial
 		// unique index sessions_client_mac_uniq (migration 008); the
 		// conflict target repeats the index predicate as Postgres demands
-		// for partial-index arbiters.
+		// for partial-index arbiters. paused_at / remaining_seconds_at_pause
+		// / pause_count are cleared so a fresh start cannot inherit stale
+		// pause state.
 		err = tx.QueryRow(`
 			INSERT INTO sessions (client_ip, client_mac, coins_inserted, total_seconds,
-			                      remaining_seconds, status, started_at, activated_at, expires_at)
-			VALUES ($1, $2, $3::int, $4::int, $4::int, 'active', NOW(), NOW(), NOW() + ($4::int * INTERVAL '1 second'))
+			                      remaining_seconds, status, started_at, activated_at, expires_at,
+			                      paused_at, remaining_seconds_at_pause, pause_count)
+			VALUES ($1, $2, $3::int, $4::int, $4::int, 'active', NOW(), NOW(), NOW() + ($4::int * INTERVAL '1 second'), NULL, NULL, 0)
 			ON CONFLICT (client_mac) WHERE client_mac IS NOT NULL AND client_mac <> '' AND client_mac <> '-'
 			DO UPDATE SET
 			    client_ip = EXCLUDED.client_ip,
@@ -238,7 +281,10 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC string, coinValue, mi
 			    started_at = NOW(),
 			    activated_at = NOW(),
 			    expired_at = NULL,
-			    expires_at = EXCLUDED.expires_at
+			    expires_at = EXCLUDED.expires_at,
+			    paused_at = NULL,
+			    remaining_seconds_at_pause = NULL,
+			    pause_count = 0
 			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at
 		`, clientIP, clientMAC, coinValue, addSeconds).
 			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt)
@@ -310,16 +356,17 @@ func (h *SessionHandler) Status(w http.ResponseWriter, r *http.Request) {
 		id, coinsTotal, totalSeconds, remaining int
 		mac                                     string
 		startedAt, expiresAt                    time.Time
+		pausedAt                                sql.NullTime
 	)
 	err := h.DB.QueryRow(`
 		SELECT id, COALESCE(client_mac, ''), coins_inserted, total_seconds,
-		       `+remainingSQL+`, started_at, expires_at
+		       `+remainingSQL+`, started_at, expires_at, paused_at
 		FROM sessions
-		WHERE status = 'active' AND expires_at > NOW()
+		WHERE status = 'active' AND (paused_at IS NOT NULL OR expires_at > NOW())
 		  AND (($1 <> '' AND client_mac = $1) OR client_ip = $2)
 		ORDER BY started_at DESC
 		LIMIT 1
-	`, clientMAC, clientIP).Scan(&id, &mac, &coinsTotal, &totalSeconds, &remaining, &startedAt, &expiresAt)
+	`, clientMAC, clientIP).Scan(&id, &mac, &coinsTotal, &totalSeconds, &remaining, &startedAt, &expiresAt, &pausedAt)
 
 	if err != nil && err != sql.ErrNoRows {
 		log.Printf("Error fetching session status: %v", err)
@@ -331,6 +378,17 @@ func (h *SessionHandler) Status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err == nil {
+		paused := pausedAt.Valid
+		// When paused, remaining_seconds is frozen at the pause snapshot
+		// so the portal can display it even though expires_at is in the past
+		// relative to a paused timer.
+		if paused {
+			var snap sql.NullInt64
+			_ = h.DB.QueryRow(`SELECT remaining_seconds_at_pause FROM sessions WHERE id=$1`, id).Scan(&snap)
+			if snap.Valid {
+				remaining = int(snap.Int64)
+			}
+		}
 		response["session"] = map[string]interface{}{
 			"id":         id,
 			"status":     "active",
@@ -340,6 +398,21 @@ func (h *SessionHandler) Status(w http.ResponseWriter, r *http.Request) {
 			"started":    startedAt.Unix(),
 			"mac":        mac,
 			"expires_at": expiresAt.Format(time.RFC3339),
+			"paused":     paused,
+		}
+	}
+
+	// Ban state for the caller's MAC (portal uses this to drive the ban
+	// overlay; belt-and-braces on top of the dedicated /api/session/ban-status
+	// poll).
+	if clientMAC != "" {
+		if until, reason, attempts, banned := activeBan(h.DB, clientMAC); banned {
+			response["ban"] = map[string]interface{}{
+				"banned":             true,
+				"banned_until":       until.Format(time.RFC3339),
+				"reason":             reason,
+				"attempts_in_window": attempts,
+			}
 		}
 	}
 
@@ -539,18 +612,180 @@ func (h *SessionHandler) End(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================
+// PAUSE / RESUME (public, portal-facing)
+// ============================================
+
+// Pause freezes the caller's active session: timer stops and internet
+// access is revoked (captive-rules unauth). The remaining_seconds at
+// pause time is snapshotted so Resume can rebuild expires_at.
+func (h *SessionHandler) Pause(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	clientIP := clientIPFromRequest(r)
+	clientMAC := resolveClientMAC(clientIP)
+	if clientMAC == "" {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Cannot resolve device MAC"})
+		return
+	}
+
+	// F4: Load pause rules and check the per-session pause limit.
+	pauseRules := loadPauseRules(h.DB)
+
+	// Find the active, non-paused session for this MAC
+	var id int
+	var expiresAt time.Time
+	var pauseCount sql.NullInt64
+	err := h.DB.QueryRow(`
+		SELECT id, expires_at, COALESCE(pause_count, 0) FROM sessions
+		WHERE status = 'active' AND expires_at > NOW() AND paused_at IS NULL
+		  AND client_mac = $1
+		ORDER BY started_at DESC LIMIT 1
+	`, clientMAC).Scan(&id, &expiresAt, &pauseCount)
+	if err == sql.ErrNoRows {
+		sendJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "No active non-paused session found"})
+		return
+	} else if err != nil {
+		log.Printf("Pause: query failed: %v", err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to pause session"})
+		return
+	}
+
+	// F4: Enforce pause limit (0 = unlimited)
+	if pauseRules.PauseLimit > 0 && int(pauseCount.Int64) >= pauseRules.PauseLimit {
+		sendJSON(w, http.StatusForbidden, models.APIResponse{
+			Success: false,
+			Message: "Pause limit reached (" + strconv.Itoa(int(pauseCount.Int64)) + "/" + strconv.Itoa(pauseRules.PauseLimit) + ")",
+		})
+		return
+	}
+
+	remaining := int(time.Until(expiresAt).Seconds())
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	// F2: Tight WHERE clause prevents pausing an already-expired session.
+	// RowsAffected check catches the race where expiry ran between the
+	// SELECT above and this UPDATE.
+	res, err := h.DB.Exec(`
+		UPDATE sessions
+		SET paused_at = NOW(), remaining_seconds_at_pause = $1,
+		    pause_count = COALESCE(pause_count, 0) + 1
+		WHERE id = $2 AND status = 'active' AND expires_at > NOW() AND paused_at IS NULL
+	`, remaining, id)
+	if err != nil {
+		log.Printf("Pause: update failed: %v", err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to pause session"})
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		sendJSON(w, http.StatusConflict, models.APIResponse{Success: false, Message: "No active session to pause"})
+		return
+	}
+
+	// Close internet access for this MAC
+	runCaptiveRules(h.DB, "unauth", clientMAC, "pause")
+
+	pausedAt := time.Now()
+	logAction(h.DB, "INFO", "session", "Session "+strconv.Itoa(id)+" paused ("+clientMAC+"): "+strconv.Itoa(remaining)+"s remaining")
+
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"paused_at":         pausedAt.Format(time.RFC3339),
+			"remaining_seconds": remaining,
+		},
+	})
+}
+
+// Resume unfreezes a paused session: timer continues, internet is
+// re-authorized. expires_at is rebuilt from the snapshotted remaining.
+func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	clientIP := clientIPFromRequest(r)
+	clientMAC := resolveClientMAC(clientIP)
+	if clientMAC == "" {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Cannot resolve device MAC"})
+		return
+	}
+
+	// Find the active, currently-paused session
+	var id, remainingAtPause int
+	err := h.DB.QueryRow(`
+		SELECT id, COALESCE(remaining_seconds_at_pause, 0) FROM sessions
+		WHERE status = 'active' AND paused_at IS NOT NULL
+		  AND client_mac = $1
+		ORDER BY started_at DESC LIMIT 1
+	`, clientMAC).Scan(&id, &remainingAtPause)
+	if err == sql.ErrNoRows {
+		sendJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "No active paused session found"})
+		return
+	} else if err != nil {
+		log.Printf("Resume: query failed: %v", err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to resume session"})
+		return
+	}
+
+	newExpiresAt := time.Now().Add(time.Duration(remainingAtPause) * time.Second)
+
+	// F7: Tight WHERE clause + RowsAffected check.
+	// pause_count is NOT reset on resume (only on fresh start).
+	res, err := h.DB.Exec(`
+		UPDATE sessions
+		SET paused_at = NULL, remaining_seconds_at_pause = NULL,
+		    expires_at = NOW() + ($1::int * INTERVAL '1 second'),
+		    remaining_seconds = $1
+		WHERE id = $2 AND status = 'active' AND paused_at IS NOT NULL
+	`, remainingAtPause, id)
+	if err != nil {
+		log.Printf("Resume: update failed: %v", err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to resume session"})
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		sendJSON(w, http.StatusConflict, models.APIResponse{Success: false, Message: "No active paused session to resume"})
+		return
+	}
+
+	// Re-open internet access
+	runCaptiveRules(h.DB, "auth", clientMAC, "resume")
+
+	resumedAt := time.Now()
+	logAction(h.DB, "INFO", "session", "Session "+strconv.Itoa(id)+" resumed ("+clientMAC+"): "+strconv.Itoa(remainingAtPause)+"s remaining")
+
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"resumed_at":        resumedAt.Format(time.RFC3339),
+			"expires_at":        newExpiresAt.Format(time.RFC3339),
+			"remaining_seconds": remainingAtPause,
+		},
+	})
+}
+
+// ============================================
 // EXPIRY ENFORCEMENT
 // ============================================
 
 // ExpireOverdueSessions expires every active session whose expires_at has
 // passed (or that predates the expires_at column — legacy demo rows) and
-// closes each client's internet access. Called by the 30s ticker, lazily
-// on every /api/session/status poll, and once at startup.
+// closes each client's internet access. Paused sessions are FROZEN and
+// must never be expired here.
 func ExpireOverdueSessions(db *sql.DB, reason string) int {
 	rows, err := db.Query(`
 		UPDATE sessions
 		SET status = 'expired', expired_at = NOW(), remaining_seconds = 0
-		WHERE status = 'active' AND (expires_at <= NOW() OR expires_at IS NULL)
+		WHERE status = 'active' AND paused_at IS NULL
+		  AND (expires_at <= NOW() OR expires_at IS NULL)
 		RETURNING id, COALESCE(client_mac, ''), COALESCE(client_ip, '')
 	`)
 	if err != nil {
@@ -579,8 +814,8 @@ func ExpireOverdueSessions(db *sql.DB, reason string) int {
 }
 
 // StartExpiryEnforcer recovers the iptables state after a reboot/restart
-// (auth every still-active MAC, expire+unauth the overdue ones) and then
-// enforces expiry every 30 seconds in the background.
+// (auth every still-active non-paused MAC, expire+unauth the overdue ones)
+// and then enforces expiry every 30 seconds in the background.
 func StartExpiryEnforcer(db *sql.DB) {
 	// Startup recovery: clear the overdue first so a stale session cannot
 	// be re-authorized below.
@@ -588,9 +823,12 @@ func StartExpiryEnforcer(db *sql.DB) {
 		log.Printf("startup recovery: expired %d overdue session(s)", n)
 	}
 
+	// Re-auth only active NON-PAUSED MACs. Paused sessions have their
+	// internet closed (captive-rules unauth on pause), so they must NOT
+	// be re-authorized here.
 	rows, err := db.Query(`
 		SELECT DISTINCT client_mac FROM sessions
-		WHERE status = 'active' AND expires_at > NOW()
+		WHERE status = 'active' AND expires_at > NOW() AND paused_at IS NULL
 		  AND COALESCE(client_mac, '') <> ''
 	`)
 	if err != nil {
@@ -611,6 +849,9 @@ func StartExpiryEnforcer(db *sql.DB) {
 		defer ticker.Stop()
 		for range ticker.C {
 			ExpireOverdueSessions(db, "expire")
+			// Auto-clear expired bans (belt-and-brazes on top of
+			// the per-status-poll activeBan check).
+			CleanExpiredBans(db)
 		}
 	}()
 }

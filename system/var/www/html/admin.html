@@ -661,6 +661,7 @@
             font-weight: 600;
         }
         .status-badge.active { background: rgba(0,255,136,0.15); color: #00ff88; }
+        .status-badge.paused { background: rgba(255,215,0,0.15); color: #ffd700; }
         .status-badge.expired { background: rgba(255,68,68,0.15); color: #ff4444; }
         .status-badge.ended { background: rgba(150,150,150,0.15); color: #999; }
         .status-badge.pending { background: rgba(255,215,0,0.15); color: #ffd700; }
@@ -1480,6 +1481,60 @@
 
         <!-- Portal Section (appearance editor) -->
         <div id="section-portal" class="section" style="display:none;">
+            <!-- Tap Rules card -->
+            <div class="settings-card" style="max-width:640px;">
+                <div class="card-title">Tap Rules</div>
+                <div class="settings-form">
+                    <div class="settings-row">
+                        <div class="settings-field">
+                            <label for="tap-max-taps">Max Taps (per window)</label>
+                            <input type="number" id="tap-max-taps" min="1" placeholder="5">
+                        </div>
+                        <div class="settings-field">
+                            <label for="tap-window-sec">Window (seconds)</label>
+                            <input type="number" id="tap-window-sec" min="1" placeholder="60">
+                        </div>
+                        <div class="settings-field">
+                            <label for="tap-ban-sec">Ban Duration (seconds)</label>
+                            <input type="number" id="tap-ban-sec" min="1" placeholder="300">
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" onclick="saveTapRules()">Save Tap Rules</button>
+                </div>
+            </div>
+
+            <!-- Pause Rules card -->
+            <div class="settings-card" style="max-width:640px;">
+                <div class="card-title">Pause Rules</div>
+                <div class="settings-form">
+                    <div class="settings-row">
+                        <div class="settings-field">
+                            <label for="pause-limit">Pause Limit per Session (0 = unlimited)</label>
+                            <input type="number" id="pause-limit" min="0" placeholder="0">
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" onclick="savePauseRules()">Save Pause Rules</button>
+                </div>
+            </div>
+
+            <!-- Currently Banned table -->
+            <div class="settings-card" style="max-width:640px;">
+                <div class="card-title">Currently Banned</div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>MAC Address</th>
+                            <th>Banned Until</th>
+                            <th>Reason</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="banned-table-body">
+                        <tr class="empty-row"><td colspan="4">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
             <div class="portal-editor-grid">
                 <div>
                     <!-- Theme gallery -->
@@ -2054,6 +2109,9 @@ function showSection(name) {
         loadPricing();
     } else if (name === 'portal') {
         loadPortalAppearance();
+        loadTapRules();
+        loadPauseRules();
+        loadBannedTable();
     } else if (name === 'settings') {
         loadSettings();
     } else if (name === 'system') {
@@ -2456,7 +2514,11 @@ function renderSessionsAdminTable(sessions) {
     sessions.forEach(function(s) {
         var mins = Math.round((s.remaining_seconds || 0) / 60);
         var started = s.started_at ? new Date(s.started_at).toLocaleString() : '-';
-        var badgeClass = s.status || 'pending';
+        // F9: if status is 'active' AND paused_at is non-null, render an
+        // amber 'paused' badge instead of the green 'active' badge.
+        var isPaused = s.status === 'active' && s.paused_at;
+        var badgeClass = isPaused ? 'paused' : (s.status || 'pending');
+        var badgeLabel = isPaused ? 'paused' : (s.status || 'unknown');
         var actions = '';
         if (s.status === 'active') {
             actions =
@@ -2474,7 +2536,7 @@ function renderSessionsAdminTable(sessions) {
                 '<td>' + (s.client_mac || '-') + '</td>' +
                 '<td>' + (s.coins_inserted || 0) + '</td>' +
                 '<td>' + mins + ' min</td>' +
-                '<td><span class="status-badge ' + badgeClass + '">' + (s.status || 'unknown') + '</span></td>' +
+                '<td><span class="status-badge ' + badgeClass + '">' + badgeLabel + '</span></td>' +
                 '<td>' + started + '</td>' +
                 '<td>' + actions + '</td>' +
             '</tr>';
@@ -4007,6 +4069,99 @@ async function deletePortalServer(iface) {
         loadVLANs();
     } catch (e) {
         showNotification('Failed to delete portal server: ' + e.message, 'error');
+    }
+}
+
+// ============================================================
+// TAP RULES / PAUSE RULES / BANS (Portal section)
+// ============================================================
+
+async function loadTapRules() {
+    try {
+        var res = await apiCall('GET', '/admin/portal/tap-rules');
+        var d = res.data || {};
+        document.getElementById('tap-max-taps').value = d.max_taps || 5;
+        document.getElementById('tap-window-sec').value = d.window_seconds || 60;
+        document.getElementById('tap-ban-sec').value = d.ban_seconds || 300;
+    } catch (e) {
+        showNotification('Failed to load tap rules: ' + e.message, 'error');
+    }
+}
+
+async function saveTapRules() {
+    var body = {
+        max_taps: parseInt(document.getElementById('tap-max-taps').value, 10),
+        window_seconds: parseInt(document.getElementById('tap-window-sec').value, 10),
+        ban_seconds: parseInt(document.getElementById('tap-ban-sec').value, 10)
+    };
+    if (!body.max_taps || !body.window_seconds || !body.ban_seconds ||
+        body.max_taps < 1 || body.window_seconds < 1 || body.ban_seconds < 1) {
+        showNotification('All fields must be positive integers', 'error');
+        return;
+    }
+    try {
+        await apiCall('POST', '/admin/portal/tap-rules', body);
+        showNotification('Tap rules saved', 'success');
+    } catch (e) {
+        showNotification('Failed to save tap rules: ' + e.message, 'error');
+    }
+}
+
+async function loadPauseRules() {
+    try {
+        var res = await apiCall('GET', '/admin/portal/pause-rules');
+        var d = res.data || {};
+        document.getElementById('pause-limit').value = (d.pause_limit !== undefined) ? d.pause_limit : 0;
+    } catch (e) {
+        showNotification('Failed to load pause rules: ' + e.message, 'error');
+    }
+}
+
+async function savePauseRules() {
+    var val = parseInt(document.getElementById('pause-limit').value, 10);
+    if (isNaN(val) || val < 0) {
+        showNotification('Pause limit must be >= 0 (0 = unlimited)', 'error');
+        return;
+    }
+    try {
+        await apiCall('POST', '/admin/portal/pause-rules', { pause_limit: val });
+        showNotification('Pause rules saved', 'success');
+    } catch (e) {
+        showNotification('Failed to save pause rules: ' + e.message, 'error');
+    }
+}
+
+async function loadBannedTable() {
+    var tbody = document.getElementById('banned-table-body');
+    try {
+        var res = await apiCall('GET', '/admin/portal/bans');
+        var bans = res.bans || [];
+        if (bans.length === 0) {
+            tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No active bans</td></tr>';
+            return;
+        }
+        tbody.innerHTML = bans.map(function(b) {
+            var until = new Date(b.banned_until).toLocaleString();
+            return '<tr>' +
+                '<td>' + b.client_mac + '</td>' +
+                '<td>' + until + '</td>' +
+                '<td>' + (b.reason || '-') + '</td>' +
+                '<td><button class="btn btn-danger btn-sm" onclick="unbanMAC(\'' + b.client_mac + '\')">Unban</button></td>' +
+                '</tr>';
+        }).join('');
+    } catch (e) {
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="4">Failed to load bans</td></tr>';
+    }
+}
+
+async function unbanMAC(mac) {
+    if (!confirm('Unban ' + mac + '?')) return;
+    try {
+        await apiCall('DELETE', '/admin/portal/ban/' + encodeURIComponent(mac));
+        showNotification('Ban removed for ' + mac, 'success');
+        loadBannedTable();
+    } catch (e) {
+        showNotification('Failed to unban: ' + e.message, 'error');
     }
 }
 </script>

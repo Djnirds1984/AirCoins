@@ -418,6 +418,60 @@
             background: #000;
             border-radius: 2px;
         }
+
+        /* BAN OVERLAY */
+        .ban-badge {
+            display: none;
+            background: #ff4444;
+            color: #fff;
+            border-radius: 12px;
+            padding: 6px 16px;
+            font-size: 13px;
+            font-weight: bold;
+            text-align: center;
+            margin: 6px auto 2px;
+            max-width: 260px;
+        }
+        .ban-badge.active { display: block; }
+        .insert-coin-main-btn.banned {
+            opacity: 0.4;
+            pointer-events: none;
+            animation: none;
+        }
+
+        /* PAUSE / RESUME BUTTON */
+        .pause-resume-btn {
+            background: rgba(255,255,255,0.1);
+            color: #00d4ff;
+            border: 1px solid #00d4ff;
+            border-radius: 20px;
+            padding: 8px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 6px auto 0;
+            display: none;
+        }
+        .pause-resume-btn.active { display: inline-block; }
+        .pause-resume-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* PAUSED OVERLAY on timer card */
+        .paused-overlay {
+            display: none;
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6);
+            border-radius: 12px;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            font-weight: bold;
+            color: #ffd700;
+            letter-spacing: 2px;
+            z-index: 2;
+        }
+        .paused-overlay.active { display: flex; }
+        .running-timer-bar { position: relative; }
     </style>
 </head>
 <body>
@@ -448,6 +502,7 @@
 
         <!-- SESSION STATUS CARD (shown while /api/session/status reports an active session) -->
         <div class="running-timer-bar" id="runningTimerBar">
+            <div class="paused-overlay" id="pausedOverlay">&#9208; PAUSED</div>
             <div class="running-timer-label">Time Remaining</div>
             <div class="running-timer-value" id="runningTimerValue">00:00:00</div>
             <div style="font-size:12px; color:#aaa; margin-top:5px;">
@@ -462,6 +517,10 @@
                 <span class="coin-slot-icon"></span>
                 INSERT COIN
             </button>
+            <div class="ban-badge" id="banBadge">Banned</div>
+            <div>
+                <button class="pause-resume-btn" id="pauseResumeBtn" onclick="togglePauseResume()">&#9208; Pause</button>
+            </div>
             <div>
                 <button class="btn btn-primary" onclick="openRatesModal()">View Rates</button>
             </div>
@@ -539,10 +598,13 @@
         let state = {
             systemOnline: true,
             sessionActive: false,
+            sessionPaused: false,
             totalSeconds: 0,
             remainingSeconds: 0,
             coinsInserted: 0,
             timerInterval: null,
+            banUntil: null,     // ISO string when ban expires
+            banTimer: null,     // interval ID for ban countdown
             // Pricing tiers fetched from /api/pricing: { coinValue: minutes }.
             // Empty is normal — the operator configures every tier manually.
             // The backend is authoritative; this copy is display only.
@@ -634,12 +696,15 @@
             if (gpio.sessionInterval) clearInterval(gpio.sessionInterval);
 
             state.sessionActive = false;
+            state.sessionPaused = false;
             state.remainingSeconds = 0;
             state.totalSeconds = 0;
             state.coinsInserted = 0;
 
             updateSessionView();
             document.getElementById('runningTimerBar').classList.remove('active');
+            document.getElementById('pausedOverlay').classList.remove('active');
+            document.getElementById('pauseResumeBtn').classList.remove('active');
         }
 
         // The server expired (or terminated) the session: show the
@@ -1278,6 +1343,15 @@
                     const sess = data && data.session;
                     const backendRemaining = sess ? (parseInt(sess.remaining, 10) || 0) : 0;
                     const isActive = !!(sess && sess.status === 'active' && backendRemaining > 0);
+                    const isPaused = !!(sess && sess.paused);
+
+                    // --- Ban state ---
+                    const ban = data && data.ban;
+                    if (ban && ban.banned && ban.banned_until) {
+                        applyBanState(ban.banned_until);
+                    } else {
+                        clearBanState();
+                    }
 
                     if (isActive) {
                         const backendCoins = parseInt(sess.coins, 10) || 0;
@@ -1292,21 +1366,59 @@
                             startRunningTimer();
                         }
 
+                        // Handle pause state change
+                        if (isPaused !== state.sessionPaused) {
+                            state.sessionPaused = isPaused;
+                            if (isPaused) {
+                                // Server says paused: freeze the countdown
+                                if (state.timerInterval) clearInterval(state.timerInterval);
+                                if (gpio.sessionInterval) clearInterval(gpio.sessionInterval);
+                            } else {
+                                // Server says resumed: restart countdown
+                                startTimer();
+                                startRunningTimer();
+                            }
+                        }
+
                         // Re-align the display with the server.
-                        state.remainingSeconds = backendRemaining;
+                        // When paused, remaining is frozen by the server so
+                        // we accept it as-is without the local countdown.
+                        if (!state.sessionPaused) {
+                            state.remainingSeconds = backendRemaining;
+                        } else {
+                            state.remainingSeconds = backendRemaining;
+                        }
                         state.coinsInserted = backendCoins;
                         if (backendTotal > state.totalSeconds) state.totalSeconds = backendTotal;
 
-                        document.getElementById('sessionStatus').textContent = 'Connected';
-                        document.getElementById('sessionStatus').style.color = '#00ff88';
+                        document.getElementById('sessionStatus').textContent =
+                            isPaused ? 'Paused' : 'Connected';
+                        document.getElementById('sessionStatus').style.color =
+                            isPaused ? '#ffd700' : '#00ff88';
                         document.getElementById('runningTimerBar').classList.add('active');
                         document.getElementById('runningTotalCoins').textContent = '₱' + backendCoins;
+
+                        // PAUSED overlay
+                        var po = document.getElementById('pausedOverlay');
+                        if (isPaused) { po.classList.add('active'); }
+                        else { po.classList.remove('active'); }
+
+                        // Pause/Resume button visibility
+                        var prBtn = document.getElementById('pauseResumeBtn');
+                        prBtn.classList.add('active');
+                        prBtn.innerHTML = isPaused ? '&#9654; Resume' : '&#9208; Pause';
+
                         updateTimerDisplay();
                         updateSessionView();
-                    } else if (state.sessionActive) {
-                        // The server no longer reports an active session:
-                        // it expired or was terminated by the admin.
-                        sessionExpired();
+                    } else {
+                        if (state.sessionActive) {
+                            // The server no longer reports an active session:
+                            // it expired or was terminated by the admin.
+                            sessionExpired();
+                        }
+                        // Hide pause button when no session
+                        document.getElementById('pauseResumeBtn').classList.remove('active');
+                        document.getElementById('pausedOverlay').classList.remove('active');
                     }
 
                     // Sync system status
@@ -1335,6 +1447,82 @@
             if (apiPollTimer) clearInterval(apiPollTimer);
             apiPoll(); // Immediate first poll
             apiPollTimer = setInterval(apiPoll, API_POLL_INTERVAL);
+        }
+
+        // ==================== BAN OVERLAY ====================
+        function applyBanState(bannedUntil) {
+            state.banUntil = bannedUntil;
+            var btn = document.getElementById('insertCoinBtn');
+            var badge = document.getElementById('banBadge');
+            btn.classList.add('banned');
+            badge.classList.add('active');
+            updateBanCountdown();
+            if (!state.banTimer) {
+                state.banTimer = setInterval(updateBanCountdown, 1000);
+            }
+        }
+
+        function clearBanState() {
+            if (!state.banUntil) return;
+            state.banUntil = null;
+            if (state.banTimer) { clearInterval(state.banTimer); state.banTimer = null; }
+            document.getElementById('insertCoinBtn').classList.remove('banned');
+            document.getElementById('banBadge').classList.remove('active');
+        }
+
+        function updateBanCountdown() {
+            if (!state.banUntil) return;
+            var ms = new Date(state.banUntil).getTime() - Date.now();
+            if (ms <= 0) {
+                clearBanState();
+                return;
+            }
+            var secs = Math.ceil(ms / 1000);
+            var h = String(Math.floor(secs / 3600)).padStart(2, '0');
+            var m = String(Math.floor((secs % 3600) / 60)).padStart(2, '0');
+            var s = String(secs % 60).padStart(2, '0');
+            document.getElementById('banBadge').textContent =
+                '\u{1F6AB} Banned \u2014 try again in ' + h + ':' + m + ':' + s;
+        }
+
+        // ==================== PAUSE / RESUME ====================
+        async function togglePauseResume() {
+            var btn = document.getElementById('pauseResumeBtn');
+            btn.disabled = true;
+            try {
+                var url = state.sessionPaused ? '/api/session/resume' : '/api/session/pause';
+                var resp = await fetch(url, { method: 'POST', headers: { 'Accept': 'application/json' } });
+                var res = await resp.json();
+                if (res && res.success) {
+                    if (state.sessionPaused) {
+                        // Was paused, now resumed
+                        state.sessionPaused = false;
+                        btn.innerHTML = '&#9208; Pause';
+                        document.getElementById('pausedOverlay').classList.remove('active');
+                        document.getElementById('sessionStatus').textContent = 'Connected';
+                        document.getElementById('sessionStatus').style.color = '#00ff88';
+                        startTimer();
+                        startRunningTimer();
+                        showNotification('Session resumed', 'success');
+                    } else {
+                        // Was running, now paused
+                        state.sessionPaused = true;
+                        btn.innerHTML = '&#9654; Resume';
+                        document.getElementById('pausedOverlay').classList.add('active');
+                        document.getElementById('sessionStatus').textContent = 'Paused';
+                        document.getElementById('sessionStatus').style.color = '#ffd700';
+                        if (state.timerInterval) clearInterval(state.timerInterval);
+                        if (gpio.sessionInterval) clearInterval(gpio.sessionInterval);
+                        showNotification('Session paused', 'info');
+                    }
+                } else {
+                    showNotification((res && res.message) || 'Failed', 'error');
+                }
+            } catch (e) {
+                showNotification('Error: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         // Stop API polling

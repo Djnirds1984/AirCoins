@@ -39,10 +39,45 @@ const (
 
 // Arm handles POST /api/coinslot/arm
 // Body: {"duration_sec": 60} (optional, default 60, max 300)
+// Anti-abuse: each arm call counts as a tap in the sliding window for
+// the caller's MAC. Exceeding max_taps in window_seconds triggers a
+// per-device ban (ban_seconds long) and a 403 response.
 func (h *CoinslotHandler) Arm(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+
+	// --- Anti-abuse: record tap and enforce ban -----------------------
+	clientIP := clientIPFromRequest(r)
+	clientMAC := neighborMAC(clientIP)
+	if clientMAC != "" {
+		// Already banned?
+		if until, _, _, banned := activeBan(h.DB, clientMAC); banned {
+			sendJSON(w, http.StatusForbidden, map[string]interface{}{
+				"armed":        false,
+				"banned":       true,
+				"banned_until": until.Format(time.RFC3339),
+				"reason":       "tap_abuse",
+				"message":      "Temporarily banned for tap abuse. Please try again later.",
+			})
+			return
+		}
+		// Record tap + sliding-window check
+		rules := loadTapRules(h.DB)
+		count := recordTap(h.DB, clientMAC, rules.WindowSeconds)
+		if count > rules.MaxTaps {
+			until := time.Now().Add(time.Duration(rules.BanSeconds) * time.Second)
+			setBan(h.DB, clientMAC, until, "tap_abuse", count)
+			sendJSON(w, http.StatusForbidden, map[string]interface{}{
+				"armed":        false,
+				"banned":       true,
+				"banned_until": until.Format(time.RFC3339),
+				"reason":       "tap_abuse",
+				"message":      "Too many taps. You are temporarily banned.",
+			})
+			return
+		}
 	}
 
 	var req struct {

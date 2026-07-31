@@ -2,16 +2,22 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
     <title>AirCoins - PisoNet System</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-            min-height: 100vh;
+            /* Captive-portal webviews: lock the layout to the visible
+               viewport so the home screen never scrolls. */
+            height: 100vh;
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
             color: #fff;
-            overflow-x: hidden;
+            overflow: hidden;
         }
 
         /* NAV */
@@ -19,18 +25,20 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 15px 30px;
+            padding: 8px 16px;
             background: rgba(0,0,0,0.3);
             backdrop-filter: blur(10px);
+            flex-shrink: 0;
         }
-        .navbar .logo { font-size: 24px; font-weight: bold; color: #00d4ff; }
+        .navbar .logo { font-size: 18px; font-weight: bold; color: #00d4ff; }
         .navbar .logo span { color: #ffd700; }
-        .nav-links { display: flex; gap: 20px; }
+        .nav-links { display: flex; gap: 8px; }
         .nav-links a {
             color: #ccc;
             text-decoration: none;
-            padding: 8px 16px;
-            border-radius: 20px;
+            padding: 6px 14px;
+            border-radius: 16px;
+            font-size: 14px;
             transition: 0.3s;
             cursor: pointer;
         }
@@ -40,32 +48,52 @@
         }
 
         /* PAGES */
-        .page { display: none; padding: 30px; max-width: 1200px; margin: 0 auto; }
-        .page.active { display: block; }
+        /* The home page is a flex column filling the space under the nav;
+           sections are distributed evenly so nothing ever scrolls. If a
+           tiny screen still overflows, the page scrolls internally while
+           the document itself stays at viewport height. */
+        .page {
+            display: none;
+            padding: 10px 16px;
+            width: 100%;
+            max-width: 520px;
+            margin: 0 auto;
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        .page.active { display: flex; flex-direction: column; justify-content: space-evenly; }
+        @media (max-height: 480px) {
+            .page.active { justify-content: flex-start; }
+        }
 
         /* HOME PAGE */
         .hero {
             text-align: center;
-            padding: 60px 20px;
+            padding: 4px 0 2px;
         }
-        .hero h1 { font-size: 48px; margin-bottom: 10px; }
+        .hero h1 { font-size: 24px; margin-bottom: 2px; }
         .hero h1 span { color: #ffd700; }
-        .hero p { font-size: 18px; color: #aaa; margin-bottom: 40px; }
+        .hero p { font-size: 12px; color: #aaa; }
 
         .status-card {
             background: rgba(255,255,255,0.05);
             border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 20px;
-            padding: 40px;
-            max-width: 500px;
-            margin: 0 auto 40px;
+            border-radius: 12px;
+            padding: 10px 14px;
+            max-width: 420px;
+            width: 100%;
+            margin: 8px auto;
             text-align: center;
+            font-size: 13px;
+            flex-shrink: 0;
         }
         .status-indicator {
-            width: 20px; height: 20px;
+            width: 12px; height: 12px;
             border-radius: 50%;
             display: inline-block;
-            margin-right: 8px;
+            margin-right: 6px;
             animation: pulse 2s infinite;
         }
         .status-online { background: #00ff88; box-shadow: 0 0 10px #00ff88; }
@@ -79,15 +107,15 @@
         .coin-section {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
+            gap: 12px;
             max-width: 700px;
-            margin: 30px auto;
+            margin: 12px auto;
         }
         .coin-btn {
             background: linear-gradient(145deg, #1a1a2e, #16213e);
             border: 2px solid #ffd700;
-            border-radius: 15px;
-            padding: 30px 20px;
+            border-radius: 12px;
+            padding: 14px 12px;
             text-align: center;
             cursor: pointer;
             transition: 0.3s;
@@ -100,39 +128,40 @@
         }
         .coin-btn:active { transform: scale(0.95); }
         .coin-icon {
-            width: 60px; height: 60px;
+            width: 44px; height: 44px;
             border-radius: 50%;
             background: linear-gradient(145deg, #ffd700, #ffaa00);
             display: flex;
             align-items: center;
             justify-content: center;
-            margin: 0 auto 15px;
-            font-size: 24px;
+            margin: 0 auto 8px;
+            font-size: 17px;
             font-weight: bold;
             color: #333;
         }
-        .coin-btn h3 { color: #ffd700; font-size: 20px; }
-        .coin-btn p { color: #aaa; font-size: 14px; margin-top: 5px; }
+        .coin-btn h3 { color: #ffd700; font-size: 16px; }
+        .coin-btn p { color: #aaa; font-size: 12px; margin-top: 4px; }
         /* Shown when the operator has no pricing tiers, or the API is unreachable */
         .pricing-empty {
             max-width: 700px;
-            margin: 30px auto;
-            padding: 25px 20px;
+            margin: 12px auto;
+            padding: 16px 12px;
             text-align: center;
             color: #aaa;
-            font-size: 14px;
+            font-size: 13px;
             border: 1px dashed #444;
-            border-radius: 15px;
+            border-radius: 12px;
         }
 
         .btn {
-            padding: 12px 30px;
+            padding: 11px 24px;
             border: none;
-            border-radius: 25px;
-            font-size: 16px;
+            border-radius: 22px;
+            font-size: 14px;
+            min-height: 44px;  /* thumb-friendly touch target */
             cursor: pointer;
             transition: 0.3s;
-            margin: 5px;
+            margin: 4px;
         }
         .btn-primary { background: #00d4ff; color: #000; }
         .btn-primary:hover { background: #00b8e6; }
@@ -153,53 +182,64 @@
             z-index: 1000;
             justify-content: center;
             align-items: center;
+            padding: 16px;
         }
         .modal-overlay.active { display: flex; }
+        /* Modals are capped to the visible viewport; only the list area
+           inside them scrolls, so close buttons stay reachable. */
         .modal {
             background: #1a1a2e;
             border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 20px;
-            padding: 40px;
+            border-radius: 16px;
+            padding: 20px;
             text-align: center;
             max-width: 400px;
-            width: 90%;
+            width: 100%;
+            max-height: calc(100vh - 32px);
+            max-height: calc(100dvh - 32px);
+            display: flex;
+            flex-direction: column;
             animation: modalIn 0.3s ease;
         }
         @keyframes modalIn {
             from { transform: scale(0.8); opacity: 0; }
             to { transform: scale(1); opacity: 1; }
         }
-        .modal h2 { margin-bottom: 15px; color: #ffd700; }
-        .modal p { color: #aaa; margin-bottom: 20px; }
+        .modal h2 { margin-bottom: 10px; color: #ffd700; font-size: 20px; }
+        .modal p { color: #aaa; margin-bottom: 14px; font-size: 13px; }
 
         /* RATES MODAL (pricing tiers from /api/pricing) */
-        .rates-modal .modal {
-            max-height: 85vh;
-            overflow-y: auto;
-        }
         .rates-modal .coin-section {
             grid-template-columns: 1fr;
-            gap: 12px;
+            gap: 10px;
             max-width: none;
-            margin: 20px 0;
+            margin: 6px 0;
+            min-height: 0;
+            overflow-y: auto;  /* only the tier list scrolls */
         }
-        .rates-modal .coin-btn { padding: 18px 15px; }
-        .rates-modal .pricing-empty { margin: 20px 0; }
+        .rates-modal .coin-btn { padding: 12px; }
+        .rates-modal .pricing-empty { margin: 12px 0; }
 
-        /* RESPONSIVE */
-        @media (max-width: 768px) {
-            .hero h1 { font-size: 32px; }
-            .navbar { flex-direction: column; gap: 10px; }
-            .nav-links { flex-wrap: wrap; justify-content: center; }
+        /* DESKTOP (phone-first: scale up a little on larger screens) */
+        @media (min-width: 768px) {
+            .navbar { padding: 12px 30px; }
+            .navbar .logo { font-size: 22px; }
+            .nav-links a { font-size: 15px; }
+            .page { max-width: 640px; }
+            .hero h1 { font-size: 34px; }
+            .hero p { font-size: 15px; }
+            .status-card { font-size: 14px; padding: 14px 18px; }
         }
 
         /* NOTIFICATION */
         .notification {
             position: fixed;
-            top: 80px;
-            right: 20px;
-            padding: 15px 25px;
+            top: 56px;
+            right: 12px;
+            max-width: calc(100vw - 24px);
+            padding: 12px 18px;
             border-radius: 10px;
+            font-size: 14px;
             color: #fff;
             font-weight: bold;
             z-index: 2000;
@@ -214,23 +254,24 @@
 
         /* GPIO LISTENER MODAL */
         .gpio-modal .modal {
-            max-width: 480px;
-            padding: 30px;
+            max-width: 400px;
+            padding: 18px;
         }
         .gpio-countdown-ring {
-            width: 120px; height: 120px;
+            width: 90px; height: 90px;
             border-radius: 50%;
-            border: 5px solid rgba(255,255,255,0.1);
+            border: 4px solid rgba(255,255,255,0.1);
             display: flex;
             align-items: center;
             justify-content: center;
-            margin: 0 auto 20px;
+            margin: 0 auto 12px;
             position: relative;
+            flex-shrink: 0;
         }
         .gpio-countdown-ring svg {
             position: absolute;
-            top: -5px; left: -5px;
-            width: 120px; height: 120px;
+            top: -4px; left: -4px;
+            width: 98px; height: 98px;
             transform: rotate(-90deg);
         }
         .gpio-countdown-ring svg circle {
@@ -246,39 +287,41 @@
             transition: stroke-dashoffset 1s linear;
         }
         .gpio-countdown-number {
-            font-size: 36px;
+            font-size: 28px;
             font-weight: bold;
             color: #00d4ff;
             z-index: 1;
         }
         .gpio-status {
-            font-size: 14px;
+            font-size: 13px;
             color: #aaa;
-            margin-bottom: 15px;
-            min-height: 20px;
+            margin-bottom: 10px;
+            min-height: 18px;
         }
         .gpio-status.detecting { color: #ffd700; }
         .gpio-status.detected { color: #00ff88; }
         .gpio-coin-display {
             background: rgba(255,215,0,0.1);
             border: 1px solid rgba(255,215,0,0.3);
-            border-radius: 12px;
-            padding: 15px;
-            margin: 15px 0;
+            border-radius: 10px;
+            padding: 10px;
+            margin: 10px 0;
             display: none;
+            min-height: 0;
+            overflow-y: auto;  /* shrinks + scrolls if the modal is height-capped */
         }
         .gpio-coin-display.active { display: block; }
         .gpio-coin-list {
-            max-height: 120px;
-            overflow-y: auto;
-            margin-top: 10px;
+            max-height: 80px;
+            overflow-y: auto;  /* coin log scrolls, buttons stay put */
+            margin-top: 8px;
         }
         .gpio-coin-item {
             display: flex;
             justify-content: space-between;
-            padding: 5px 10px;
+            padding: 4px 8px;
             border-bottom: 1px solid rgba(255,255,255,0.05);
-            font-size: 14px;
+            font-size: 13px;
             animation: coinSlideIn 0.3s ease;
         }
         @keyframes coinSlideIn {
@@ -286,11 +329,11 @@
             to { transform: translateX(0); opacity: 1; }
         }
         .gpio-total-time {
-            font-size: 28px;
+            font-size: 22px;
             font-weight: bold;
             color: #ffd700;
             font-family: 'Courier New', monospace;
-            margin: 10px 0;
+            margin: 6px 0;
         }
 
         /* MAIN SCREEN RUNNING TIMER */
@@ -298,21 +341,23 @@
             display: none;
             background: rgba(0,212,255,0.1);
             border: 1px solid rgba(0,212,255,0.3);
-            border-radius: 12px;
-            padding: 12px 25px;
-            max-width: 500px;
-            margin: 20px auto;
+            border-radius: 10px;
+            padding: 8px 14px;
+            max-width: 420px;
+            width: 100%;
+            margin: 8px auto;
             text-align: center;
+            flex-shrink: 0;
         }
         .running-timer-bar.active { display: block; }
         .running-timer-label {
-            font-size: 12px;
+            font-size: 10px;
             color: #aaa;
             text-transform: uppercase;
             letter-spacing: 1px;
         }
         .running-timer-value {
-            font-size: 32px;
+            font-size: 24px;
             font-weight: bold;
             color: #00d4ff;
             font-family: 'Courier New', monospace;
@@ -325,16 +370,16 @@
             background: linear-gradient(145deg, #ffd700, #ff8c00);
             color: #000;
             border: none;
-            border-radius: 30px;
-            padding: 18px 50px;
-            font-size: 20px;
+            border-radius: 26px;
+            padding: 13px 34px;  /* >=44px tall touch target */
+            font-size: 17px;
             font-weight: bold;
             cursor: pointer;
             transition: 0.3s;
             display: inline-flex;
             align-items: center;
-            gap: 10px;
-            margin: 20px auto;
+            gap: 8px;
+            margin: 6px auto 2px;
             animation: glowPulse 2s infinite;
         }
         .insert-coin-main-btn:hover {
@@ -347,8 +392,8 @@
             50% { box-shadow: 0 0 30px rgba(255,215,0,0.6); }
         }
         .coin-slot-icon {
-            width: 30px; height: 30px;
-            border: 3px solid #000;
+            width: 24px; height: 24px;
+            border: 2px solid #000;
             border-radius: 4px;
             position: relative;
             display: inline-block;
@@ -358,7 +403,7 @@
             position: absolute;
             top: 50%; left: 50%;
             transform: translate(-50%, -50%);
-            width: 14px; height: 3px;
+            width: 12px; height: 3px;
             background: #000;
             border-radius: 2px;
         }
@@ -387,8 +432,7 @@
 
         <div class="status-card">
             <p><span class="status-indicator status-online" id="systemStatus"></span> <strong id="statusText">System Online</strong></p>
-            <p style="margin-top:10px; color:#aaa;">Network: <strong style="color:#00d4ff;">AirCoins</strong></p>
-            <p style="color:#aaa;">Speed: <strong style="color:#00ff88;">Up to 50 Mbps</strong></p>
+            <p style="margin-top:4px; color:#aaa;">Network: <strong style="color:#00d4ff;">AirCoins</strong> &nbsp;&bull;&nbsp; Speed: <strong style="color:#00ff88;">Up to 50 Mbps</strong></p>
         </div>
 
         <!-- SESSION STATUS CARD (shown while /api/session/status reports an active session) -->
@@ -402,7 +446,7 @@
         </div>
 
         <!-- INSERT COIN + RATES BUTTONS -->
-        <div style="text-align:center;">
+        <div style="text-align:center; flex-shrink:0;">
             <button class="insert-coin-main-btn" id="insertCoinBtn" onclick="openGpioModal()">
                 <span class="coin-slot-icon"></span>
                 INSERT COIN
@@ -417,11 +461,11 @@
     <div class="modal-overlay rates-modal" id="ratesModal">
         <div class="modal">
             <h2>Rates</h2>
-            <p>Coin denominations and the time they credit.</p>
+            <p style="margin-bottom:6px;">Coin denominations and the time they credit.</p>
             <!-- Rendered from /api/pricing by renderPricingCards() -->
             <div class="coin-section" id="pricingCardsRates" style="display:none;"></div>
             <div class="pricing-empty" id="pricingEmptyRates">Loading rates&hellip;</div>
-            <button class="btn btn-primary" onclick="closeRatesModal()" style="width:100%; margin-top:10px;">Close</button>
+            <button class="btn btn-primary" onclick="closeRatesModal()" style="width:100%; margin:10px 0 0;">Close</button>
         </div>
     </div>
 
@@ -437,8 +481,8 @@
     <!-- GPIO COIN LISTENER MODAL -->
     <div class="modal-overlay gpio-modal" id="gpioModal">
         <div class="modal">
-            <h2 style="margin-bottom:5px;">GPIO Coin Listener</h2>
-            <p style="font-size:13px; color:#666; margin-bottom:15px;">Waiting for coin insertion...</p>
+            <h2 style="margin-bottom:4px;">GPIO Coin Listener</h2>
+            <p style="font-size:13px; color:#666; margin-bottom:10px;">Waiting for coin insertion...</p>
 
             <!-- 60s Countdown Ring -->
             <div class="gpio-countdown-ring">
@@ -464,12 +508,12 @@
             </div>
 
             <!-- Cancel Button (always visible) -->
-            <button class="btn btn-danger" onclick="gpioCancel()" style="width:100%; margin-top:10px;">
+            <button class="btn btn-danger" onclick="gpioCancel()" style="width:100%; margin:10px 0 0; flex-shrink:0;">
                 Cancel
             </button>
 
             <!-- Done Paying Button (shown after coins inserted) -->
-            <button class="btn btn-success" id="gpioDoneBtn" onclick="gpioDonePaying()" style="width:100%; margin-top:10px; display:none;">
+            <button class="btn btn-success" id="gpioDoneBtn" onclick="gpioDonePaying()" style="width:100%; margin:10px 0 0; flex-shrink:0; display:none;">
                 Done Paying
             </button>
         </div>

@@ -49,7 +49,8 @@
 
         /* PAGES */
         /* The home page is a flex column filling the space under the nav;
-           sections are distributed evenly so nothing ever scrolls. If a
+           sections sit close together as one centered block (leftover
+           space goes above/below the group, never between items). If a
            tiny screen still overflows, the page scrolls internally while
            the document itself stays at viewport height. */
         .page {
@@ -63,7 +64,7 @@
             overflow-y: auto;
             overflow-x: hidden;
         }
-        .page.active { display: flex; flex-direction: column; justify-content: space-evenly; }
+        .page.active { display: flex; flex-direction: column; justify-content: center; gap: 14px; }
         @media (max-height: 480px) {
             .page.active { justify-content: flex-start; }
         }
@@ -84,7 +85,7 @@
             padding: 10px 14px;
             max-width: 420px;
             width: 100%;
-            margin: 8px auto;
+            margin: 0 auto;
             text-align: center;
             font-size: 13px;
             flex-shrink: 0;
@@ -345,7 +346,7 @@
             padding: 8px 14px;
             max-width: 420px;
             width: 100%;
-            margin: 8px auto;
+            margin: 0 auto;
             text-align: center;
             flex-shrink: 0;
         }

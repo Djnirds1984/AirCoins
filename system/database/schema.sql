@@ -162,16 +162,37 @@ CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_stats(date);
 -- ============================================
 -- VLAN CONFIGURATION
 -- ============================================
+-- Network identity ONLY (parent iface, 802.1Q id, name). The hotspot
+-- stack (portal IP, DHCP, DNS hijack, captive rules) lives in
+-- portal_servers below. Old databases with ip_address/start_ip/
+-- is_portal columns are converted by migration 007 in migrations.sql.
 CREATE TABLE IF NOT EXISTS vlan_config (
     id SERIAL PRIMARY KEY,
     interface VARCHAR(20) NOT NULL,
     vlan_id INTEGER NOT NULL,
-    ip_address VARCHAR(18) NOT NULL,
-    start_ip VARCHAR(15) DEFAULT '',
     description VARCHAR(100) DEFAULT '',
-    is_portal BOOLEAN DEFAULT false,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(interface, vlan_id)
+);
+
+-- ============================================
+-- PORTAL SERVERS
+-- ============================================
+-- One row provisions the full hotspot portal stack on ONE interface:
+-- portal IP, dnsmasq DHCP + wildcard DNS hijack, captive iptables
+-- rules. interface is usually a VLAN from vlan_config (e.g. end0.22)
+-- but any interface name is accepted. VLANs without a portal_servers
+-- row are plain networks (uplinks/management) — no IP, no DHCP.
+CREATE TABLE IF NOT EXISTS portal_servers (
+    id SERIAL PRIMARY KEY,
+    interface VARCHAR(32) UNIQUE NOT NULL,
+    portal_ip_cidr VARCHAR(18) NOT NULL,
+    dhcp_start VARCHAR(15) NOT NULL DEFAULT '',
+    dhcp_end VARCHAR(15) NOT NULL DEFAULT '',
+    dhcp_lease VARCHAR(20) NOT NULL DEFAULT '12h',
+    enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Default portal VLAN setting

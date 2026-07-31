@@ -230,6 +230,83 @@ SELECT * FROM sessions
 WHERE status = 'active' AND expires_at > NOW();
 
 -- ============================================
+-- 007 - VLAN/PORTAL SPLIT: portal_servers
+-- ============================================
+-- VLAN creation now provisions ONLY the 802.1Q interface; the hotspot
+-- stack (portal IP, DHCP range, DNS hijack, captive rules) moved to
+-- the new portal_servers table (one row per interface). Every old
+-- vlan_config row that carries an IP is auto-migrated into a
+-- portal_servers row so working portals (e.g. end0.22 at 10.0.22.1/24,
+-- DHCP .100-.200) keep running with zero manual reconfiguration, then
+-- the legacy vlan_config columns are dropped.
+--
+-- DHCP range derivation matches the old Go default (calculateDHCPRange):
+-- start = start_ip if set, else network+100; end = start+100.
+CREATE TABLE IF NOT EXISTS portal_servers (
+    id SERIAL PRIMARY KEY,
+    interface VARCHAR(32) UNIQUE NOT NULL,
+    portal_ip_cidr VARCHAR(18) NOT NULL,
+    dhcp_start VARCHAR(15) NOT NULL DEFAULT '',
+    dhcp_end VARCHAR(15) NOT NULL DEFAULT '',
+    dhcp_lease VARCHAR(20) NOT NULL DEFAULT '12h',
+    enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+DO $$
+DECLARE
+    r RECORD;
+    v_start inet;
+BEGIN
+    -- Only pre-split databases still have the ip_address column;
+    -- fresh installs and already-migrated databases skip this block.
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'vlan_config'
+          AND column_name = 'ip_address'
+    ) THEN
+        RETURN;
+    END IF;
+
+    FOR r IN EXECUTE
+        'SELECT interface, vlan_id, ip_address, COALESCE(start_ip, '''') AS start_ip
+         FROM vlan_config WHERE COALESCE(ip_address, '''') <> '''''
+    LOOP
+        BEGIN
+            IF r.start_ip <> '' THEN
+                v_start := r.start_ip::inet;
+            ELSE
+                v_start := network(r.ip_address::inet)::inet + 100;
+            END IF;
+
+            INSERT INTO portal_servers
+                (interface, portal_ip_cidr, dhcp_start, dhcp_end, dhcp_lease, enabled)
+            VALUES (
+                r.interface || '.' || r.vlan_id,
+                r.ip_address,
+                host(v_start),
+                host(v_start + 100),
+                '12h',
+                true
+            )
+            ON CONFLICT (interface) DO NOTHING;
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'Migration 007: skipped %.% (%): %',
+                r.interface, r.vlan_id, r.ip_address, SQLERRM;
+        END;
+    END LOOP;
+
+    ALTER TABLE vlan_config DROP COLUMN IF EXISTS ip_address;
+    ALTER TABLE vlan_config DROP COLUMN IF EXISTS start_ip;
+    ALTER TABLE vlan_config DROP COLUMN IF EXISTS is_portal;
+
+    RAISE NOTICE 'Migration 007: vlan_config split — portal data moved to portal_servers';
+END
+$$;
+
+-- ============================================
 -- COMPLETION
 -- ============================================
 \echo 'Migrations applied.'

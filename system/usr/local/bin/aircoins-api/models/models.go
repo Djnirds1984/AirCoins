@@ -126,33 +126,56 @@ type DailyStats struct {
 // ============================================
 // VLAN MODELS
 // ============================================
+// A VLAN is network identity only (parent iface + 802.1Q id + name).
+// The hotspot stack lives in the portal models below.
 
 type VLANRequest struct {
 	Interface   string `json:"interface"`
 	VLANID      int    `json:"vlan_id"`
-	IP          string `json:"ip"`
-	Netmask     string `json:"netmask"`
 	Description string `json:"description"`
-	IsPortal    bool   `json:"is_portal"`
-	StartIP     string `json:"start_ip,omitempty"`
 }
 
 type VLANInfo struct {
-	Interface   string `json:"interface"`
-	VLANID      int    `json:"vlan_id"`
-	Name        string `json:"name"`
-	IP          string `json:"ip"`
-	Description string `json:"description"`
-	IsPortal    bool   `json:"is_portal"`
-	Active      bool   `json:"active"`
-	DHCPActive  bool   `json:"dhcp_active"`
-	StartIP     string `json:"start_ip,omitempty"`
+	Interface     string `json:"interface"`
+	VLANID        int    `json:"vlan_id"`
+	Name          string `json:"name"`
+	IP            string `json:"ip"` // live IP, informational (owned by a portal server, if any)
+	Description   string `json:"description"`
+	Active        bool   `json:"active"`
+	HasPortal     bool   `json:"has_portal"`
+	PortalEnabled bool   `json:"portal_enabled"`
 }
 
 type InterfaceInfo struct {
 	Name  string `json:"name"`
 	IP    string `json:"ip"`
 	State string `json:"state"`
+}
+
+// ============================================
+// PORTAL SERVER MODELS
+// ============================================
+
+type PortalRequest struct {
+	Interface string `json:"interface"`
+	IPCIDR    string `json:"ip_cidr"`
+	DHCPStart string `json:"dhcp_start"`
+	DHCPEnd   string `json:"dhcp_end"`
+	DHCPLease string `json:"dhcp_lease"`
+}
+
+type PortalInfo struct {
+	Interface     string `json:"interface"`
+	IPCIDR        string `json:"ip_cidr"`
+	DHCPStart     string `json:"dhcp_start"`
+	DHCPEnd       string `json:"dhcp_end"`
+	DHCPLease     string `json:"dhcp_lease"`
+	Enabled       bool   `json:"enabled"`
+	IfaceExists   bool   `json:"iface_exists"`
+	IfaceUp       bool   `json:"iface_up"`
+	IPOK          bool   `json:"ip_ok"`
+	DHCPActive    bool   `json:"dhcp_active"`
+	CaptiveActive bool   `json:"captive_active"`
 }
 
 // ============================================

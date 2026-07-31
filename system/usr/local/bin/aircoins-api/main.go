@@ -27,6 +27,12 @@ func main() {
 
 	log.Println("Connected to PostgreSQL database")
 
+	// One-time flat-file migration for the VLAN/portal split: moves any
+	// inline portal config left in vlans.conf into portals.conf so
+	// existing portals keep working after the upgrade (DB side is
+	// handled by migrations.sql 007).
+	handlers.MigrateLegacyPortalConfig()
+
 	// Initialize handlers
 	adminHandler := &handlers.AdminHandler{DB: models.DB}
 	sessionHandler := &handlers.SessionHandler{DB: models.DB}
@@ -87,11 +93,19 @@ func main() {
 	mux.HandleFunc("/api/system/services", handlers.AuthMiddleware(systemHandler.GetServices))
 	mux.HandleFunc("/api/system/services/", handlers.AuthMiddleware(systemHandler.ControlService))
 
-	// VLAN routes
+	// VLAN routes (network identity only — create/delete the 802.1Q iface)
 	mux.HandleFunc("/api/vlan/list", handlers.AuthMiddleware(handlers.VLANList))
 	mux.HandleFunc("/api/vlan/create", handlers.AuthMiddleware(handlers.VLANCreate))
 	mux.HandleFunc("/api/vlan/delete", handlers.AuthMiddleware(handlers.VLANDelete))
 	mux.HandleFunc("/api/vlan/interfaces", handlers.AuthMiddleware(handlers.VLANInterfaces))
+
+	// Portal server routes (hotspot stack: portal IP + DHCP + DNS hijack
+	// + captive rules on a chosen interface)
+	mux.HandleFunc("/api/portal/list", handlers.AuthMiddleware(handlers.PortalList))
+	mux.HandleFunc("/api/portal/create", handlers.AuthMiddleware(handlers.PortalCreate))
+	mux.HandleFunc("/api/portal/enable", handlers.AuthMiddleware(handlers.PortalEnable))
+	mux.HandleFunc("/api/portal/disable", handlers.AuthMiddleware(handlers.PortalDisable))
+	mux.HandleFunc("/api/portal/delete", handlers.AuthMiddleware(handlers.PortalDelete))
 
 	// Health check
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {

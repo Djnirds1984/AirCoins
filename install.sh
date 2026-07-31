@@ -520,7 +520,8 @@ cp "$SYSTEM_DIR/usr/local/bin/pisowifi-api-update" /usr/local/bin/pisowifi-api-u
 chmod +x /usr/local/bin/pisowifi-api-update
 echo "  ✓ pisowifi-api-update"
 
-# Deploy VLAN support
+# Deploy VLAN + portal server restore script (boot: VLAN ifaces, then
+# enabled portal servers)
 cp "$SYSTEM_DIR/usr/local/bin/aircoins-vlan-apply" /usr/local/bin/
 chmod +x /usr/local/bin/aircoins-vlan-apply
 echo "  ✓ aircoins-vlan-apply"
@@ -583,11 +584,17 @@ echo -e "${YELLOW}[10/10]${NC} Configuring system..."
 chmod 755 /var/lib/pisowifi
 chmod 755 /var/log/pisowifi
 
-# Create VLAN config file if not exists
+# Create network config files if not exists.
+# VLANs carry network identity only; the hotspot stack (portal IP, DHCP,
+# DNS hijack, captive rules) is provisioned per interface via portals.conf.
 mkdir -p /etc/pisowifi
 if [ ! -f /etc/pisowifi/vlans.conf ]; then
     echo "# AirCoins VLAN Configuration" > /etc/pisowifi/vlans.conf
-    echo "# Format: interface vlan_id ip/cidr description [portal]" >> /etc/pisowifi/vlans.conf
+    echo "# Format: interface vlan_id description" >> /etc/pisowifi/vlans.conf
+fi
+if [ ! -f /etc/pisowifi/portals.conf ]; then
+    echo "# AirCoins Portal Server Configuration" > /etc/pisowifi/portals.conf
+    echo "# Format: interface ip/cidr dhcp_start dhcp_end lease enabled|disabled" >> /etc/pisowifi/portals.conf
 fi
 
 echo -e "${GREEN}  ✓ System configured${NC}"

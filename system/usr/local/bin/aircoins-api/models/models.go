@@ -89,20 +89,20 @@ type CoinEvent struct {
 }
 
 type Session struct {
-	ID                     int        `json:"id"`
-	ClientIP               string     `json:"client_ip,omitempty"`
-	ClientMAC              string     `json:"client_mac,omitempty"`
-	CoinsInserted          int        `json:"coins_inserted"`
-	TotalSeconds           int        `json:"total_seconds"`
-	RemainingSeconds       int        `json:"remaining_seconds"`
-	Status                 string     `json:"status"`
-	StartedAt              time.Time  `json:"started_at"`
-	ActivatedAt            *time.Time `json:"activated_at,omitempty"`
-	ExpiredAt              *time.Time `json:"expired_at,omitempty"`
-	ExpiresAt              *time.Time `json:"expires_at,omitempty"`
-	PausedAt               *time.Time `json:"paused_at,omitempty"`
+	ID                      int        `json:"id"`
+	ClientIP                string     `json:"client_ip,omitempty"`
+	ClientMAC               string     `json:"client_mac,omitempty"`
+	CoinsInserted           int        `json:"coins_inserted"`
+	TotalSeconds            int        `json:"total_seconds"`
+	RemainingSeconds        int        `json:"remaining_seconds"`
+	Status                  string     `json:"status"`
+	StartedAt               time.Time  `json:"started_at"`
+	ActivatedAt             *time.Time `json:"activated_at,omitempty"`
+	ExpiredAt               *time.Time `json:"expired_at,omitempty"`
+	ExpiresAt               *time.Time `json:"expires_at,omitempty"`
+	PausedAt                *time.Time `json:"paused_at,omitempty"`
 	RemainingSecondsAtPause *int       `json:"remaining_seconds_at_pause,omitempty"`
-	CreatedAt              time.Time  `json:"created_at"`
+	CreatedAt               time.Time  `json:"created_at"`
 }
 
 type SystemLog struct {

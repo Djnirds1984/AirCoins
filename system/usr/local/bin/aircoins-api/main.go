@@ -41,6 +41,7 @@ func main() {
 	systemHandler := &handlers.SystemHandler{DB: models.DB}
 	reportsHandler := &handlers.ReportsHandler{DB: models.DB}
 	coinslotHandler := &handlers.CoinslotHandler{DB: models.DB}
+	appearanceHandler := &handlers.AppearanceHandler{DB: models.DB}
 
 	// Setup routes
 	mux := http.NewServeMux()
@@ -106,6 +107,13 @@ func main() {
 	mux.HandleFunc("/api/portal/enable", handlers.AuthMiddleware(handlers.PortalEnable))
 	mux.HandleFunc("/api/portal/disable", handlers.AuthMiddleware(handlers.PortalDisable))
 	mux.HandleFunc("/api/portal/delete", handlers.AuthMiddleware(handlers.PortalDelete))
+
+	// Portal appearance routes (theme/colors/background image)
+	// GET appearance is PUBLIC — the captive portal reads it on load.
+	// Everything that mutates the appearance requires admin auth.
+	mux.HandleFunc("/api/portal/appearance", appearanceHandler.GetAppearance)
+	mux.HandleFunc("/api/admin/portal/appearance", handlers.AuthMiddleware(appearanceHandler.SaveAppearance))
+	mux.HandleFunc("/api/admin/portal/background", handlers.AuthMiddleware(appearanceHandler.Background))
 
 	// Health check
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {

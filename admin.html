@@ -1110,6 +1110,134 @@
         .badge.warn { background: rgba(255,215,0,0.15); color: #ffd700; }
         .vlan-form .form-hint { color: #888; font-size: 0.8em; margin: -8px 0 12px; }
         .btn-sm { padding: 4px 10px; font-size: 0.8em; }
+
+        /* ==================== PORTAL APPEARANCE EDITOR ==================== */
+        .portal-editor-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 380px;
+            gap: 24px;
+            align-items: start;
+        }
+        @media (max-width: 1100px) {
+            .portal-editor-grid { grid-template-columns: 1fr; }
+        }
+        .theme-gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 14px;
+        }
+        .theme-card {
+            border: 2px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 10px;
+            cursor: pointer;
+            background: rgba(255,255,255,0.03);
+            transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
+        }
+        .theme-card:hover { transform: translateY(-2px); }
+        .theme-card.selected {
+            border-color: #00d4ff;
+            box-shadow: 0 0 0 2px rgba(0,212,255,0.25);
+        }
+        .theme-swatch {
+            height: 64px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+        .theme-swatch .sw-bar {
+            position: absolute;
+            top: 8px; left: 8px; right: 8px;
+            height: 12px;
+            border-radius: 5px;
+        }
+        .theme-swatch .sw-btn {
+            position: absolute;
+            bottom: 8px; left: 50%;
+            transform: translateX(-50%);
+            font-size: 8px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            padding: 3px 10px;
+            border-radius: 9px;
+            white-space: nowrap;
+        }
+        .theme-name { font-size: 13px; text-align: center; color: #ccc; }
+        .color-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 14px;
+        }
+        .color-field { display: flex; flex-direction: column; gap: 6px; }
+        .color-field label {
+            font-size: 11px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .color-field input[type="color"] {
+            width: 100%;
+            height: 40px;
+            padding: 3px;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.05);
+            cursor: pointer;
+        }
+        .portal-bg-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .portal-bg-thumb {
+            width: 120px;
+            height: 68px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.15);
+            background-color: rgba(255,255,255,0.04);
+            background-position: center;
+            background-size: cover;
+            background-repeat: no-repeat;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #555;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+        .portal-preview {
+            border-radius: 14px;
+            border: 1px solid rgba(255,255,255,0.12);
+            padding: 26px 16px;
+            min-height: 320px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 14px;
+            text-align: center;
+        }
+        .portal-preview .pv-hero { font-size: 20px; font-weight: 700; }
+        .portal-preview .pv-card {
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 12px;
+            width: 100%;
+            max-width: 260px;
+        }
+        .portal-preview .pv-btn {
+            border: none;
+            border-radius: 22px;
+            padding: 11px 30px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: default;
+            margin-top: 6px;
+        }
+        .portal-preview .pv-btn2 {
+            background: transparent;
+            border-radius: 16px;
+            padding: 8px 20px;
+            font-size: 12px;
+            cursor: default;
+        }
     </style>
 </head>
 <body>
@@ -1144,6 +1272,9 @@
             </a>
             <a href="#" data-section="pricing" class="nav-item">
                 <span class="icon">💰</span><span class="label">Pricing</span>
+            </a>
+            <a href="#" data-section="portal" class="nav-item">
+                <span class="icon">🎨</span><span class="label">Portal</span>
             </a>
             <a href="#" data-section="settings" class="nav-item">
                 <span class="icon">⚙️</span><span class="label">Settings</span>
@@ -1344,6 +1475,63 @@
                         <tr class="empty-row"><td colspan="4">Loading...</td></tr>
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- Portal Section (appearance editor) -->
+        <div id="section-portal" class="section" style="display:none;">
+            <div class="portal-editor-grid">
+                <div>
+                    <!-- Theme gallery -->
+                    <div class="settings-card">
+                        <div class="card-title">Themes</div>
+                        <div class="theme-gallery" id="theme-gallery"></div>
+                    </div>
+
+                    <!-- Color controls -->
+                    <div class="settings-card">
+                        <div class="card-title">Colors</div>
+                        <div class="color-grid">
+                            <div class="color-field"><label for="pp-color-primary">Primary</label><input type="color" id="pp-color-primary" oninput="onPortalColorEdit()"></div>
+                            <div class="color-field"><label for="pp-color-accent">Accent</label><input type="color" id="pp-color-accent" oninput="onPortalColorEdit()"></div>
+                            <div class="color-field"><label for="pp-color-background">Background</label><input type="color" id="pp-color-background" oninput="onPortalColorEdit()"></div>
+                            <div class="color-field"><label for="pp-color-card">Card</label><input type="color" id="pp-color-card" oninput="onPortalColorEdit()"></div>
+                            <div class="color-field"><label for="pp-color-text">Text</label><input type="color" id="pp-color-text" oninput="onPortalColorEdit()"></div>
+                            <div class="color-field"><label for="pp-color-button">Button</label><input type="color" id="pp-color-button" oninput="onPortalColorEdit()"></div>
+                            <div class="color-field"><label for="pp-color-button_text">Button Text</label><input type="color" id="pp-color-button_text" oninput="onPortalColorEdit()"></div>
+                        </div>
+                    </div>
+
+                    <!-- Background image -->
+                    <div class="settings-card">
+                        <div class="card-title">Background Image</div>
+                        <div class="portal-bg-row">
+                            <div class="portal-bg-thumb" id="portal-bg-thumb">none</div>
+                            <input type="file" id="portal-bg-file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+                            <button class="btn btn-primary btn-sm" id="portal-bg-upload-btn" onclick="uploadPortalBackground()">Upload</button>
+                            <button class="btn btn-danger btn-sm" id="portal-bg-remove-btn" onclick="removePortalBackground()">Remove</button>
+                        </div>
+                        <div class="gpio-info-text" style="margin-top:12px;">
+                            JPG, PNG or WEBP, max 5 MB. Shown behind the portal with a dark overlay for readability.
+                        </div>
+                    </div>
+
+                    <div style="display:flex; gap:12px;">
+                        <button class="btn btn-primary" onclick="savePortalAppearance()">Save</button>
+                        <button class="btn btn-ghost" onclick="resetPortalToDefault()">Reset to Default</button>
+                    </div>
+                </div>
+
+                <!-- Live preview -->
+                <div class="settings-card">
+                    <div class="card-title">Live Preview</div>
+                    <div class="portal-preview" id="portal-preview">
+                        <div class="pv-hero">Welcome to <span id="pv-hero-accent">AirCoins</span></div>
+                        <div class="pv-card" id="pv-card">&#9679; System Online</div>
+                        <button class="pv-btn" id="pv-btn">&#129689; INSERT COIN</button>
+                        <button class="pv-btn2" id="pv-btn2">View Rates</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1830,11 +2018,12 @@ async function checkAuth() {
 // ============================================================
 // ROUTER
 // ============================================================
-const SECTION_NAMES = ['dashboard', 'sessions', 'pricing', 'settings', 'system', 'reports'];
+const SECTION_NAMES = ['dashboard', 'sessions', 'pricing', 'portal', 'settings', 'system', 'reports'];
 const SECTION_TITLES = {
     dashboard: 'Dashboard',
     sessions: 'Sessions',
     pricing: 'Pricing',
+    portal: 'Portal',
     settings: 'Settings',
     system: 'System',
     reports: 'Reports'
@@ -1863,6 +2052,8 @@ function showSection(name) {
         startSessionsRefresh();
     } else if (name === 'pricing') {
         loadPricing();
+    } else if (name === 'portal') {
+        loadPortalAppearance();
     } else if (name === 'settings') {
         loadSettings();
     } else if (name === 'system') {
@@ -2986,6 +3177,279 @@ async function saveAllSettings() {
     await saveNetworkSettings();
     await saveSessionSettings();
     await saveGpioConfig();
+}
+
+// ============================================================
+// PORTAL APPEARANCE
+// ============================================================
+// The 5 preset themes — single source of truth for the editor.
+// Each entry is a full colors object in the API contract shape.
+// The captive portal (index.html) hardcodes the 'dark' preset as
+// its CSS-variable fallback so it never depends on this file.
+const PORTAL_THEMES = {
+    dark: {
+        name: 'Dark',
+        colors: { primary: '#1a1a2e', accent: '#ffd700', background: '#16213e', card: '#1f2b47', text: '#eaeaea', button: '#ffa500', button_text: '#1a1a2e' }
+    },
+    light: {
+        name: 'Light',
+        colors: { primary: '#1d4ed8', accent: '#3b82f6', background: '#f4f6fb', card: '#ffffff', text: '#1f2937', button: '#f59e0b', button_text: '#1f2430' }
+    },
+    educational: {
+        name: 'Educational',
+        colors: { primary: '#2f6b4f', accent: '#3a6ea5', background: '#fdf6e3', card: '#fffdf5', text: '#3b3a30', button: '#2f6b4f', button_text: '#fdf6e3' }
+    },
+    gaming: {
+        name: 'Gaming',
+        colors: { primary: '#7b2ff7', accent: '#39ff14', background: '#0a0a12', card: '#14141f', text: '#e0e0ff', button: '#39ff14', button_text: '#0a0a12' }
+    },
+    sunset: {
+        name: 'Sunset',
+        colors: { primary: '#d94867', accent: '#ffd166', background: '#b0355a', card: '#c2476b', text: '#fff4e6', button: '#ff7f66', button_text: '#4a1526' }
+    }
+};
+
+const PORTAL_COLOR_KEYS = ['primary', 'accent', 'background', 'card', 'text', 'button', 'button_text'];
+
+// Matches the backend rule for stored background paths: one safe
+// filename directly under /portal-assets/. Anything else is ignored
+// before it can reach a CSS url() in the preview/thumbnail.
+const PORTAL_BG_RE = /^\/portal-assets\/[A-Za-z0-9._-]+$/;
+
+// The portal's built-in dark look uses gradients/rgba that the hex-only
+// API contract cannot express (index.html keeps them as :root defaults
+// and skips overrides for theme "dark"). The live preview renders the
+// dark preset with these legacy values so it matches the real portal.
+const PORTAL_DARK_LEGACY = {
+    background: 'linear-gradient(135deg, #0f0c29, #302b63, #24243e)',
+    card: 'rgba(255,255,255,0.05)',
+    text: '#fff',
+    accent: '#ffd700',
+    button: 'linear-gradient(145deg, #ffd700, #ff8c00)',
+    button_text: '#000'
+};
+
+// Currently edited (unsaved) appearance config
+var portalAppearance = null;
+
+function safePortalBg() {
+    var img = portalAppearance && portalAppearance.background_image;
+    return (img && PORTAL_BG_RE.test(img)) ? img : '';
+}
+
+// <input type="color"> only accepts #rrggbb — expand #rgb shorthand
+function expandHex(c) {
+    if (/^#[0-9a-fA-F]{3}$/.test(c)) {
+        return ('#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3]).toLowerCase();
+    }
+    return (c || '#000000').toLowerCase();
+}
+
+function matchPortalPreset(colors) {
+    var ids = Object.keys(PORTAL_THEMES);
+    for (var i = 0; i < ids.length; i++) {
+        var preset = PORTAL_THEMES[ids[i]].colors;
+        var same = PORTAL_COLOR_KEYS.every(function(k) {
+            return expandHex(preset[k]) === expandHex(colors[k]);
+        });
+        if (same) return ids[i];
+    }
+    return null;
+}
+
+function renderThemeGallery() {
+    var gal = document.getElementById('theme-gallery');
+    gal.innerHTML = '';
+    Object.keys(PORTAL_THEMES).forEach(function(id) {
+        var t = PORTAL_THEMES[id];
+        var card = document.createElement('div');
+        card.className = 'theme-card';
+        card.setAttribute('data-theme', id);
+        card.innerHTML =
+            '<div class="theme-swatch" style="background:' + t.colors.background + ';">' +
+                '<div class="sw-bar" style="background:' + t.colors.card + ';"></div>' +
+                '<div class="sw-btn" style="background:' + t.colors.button + '; color:' + t.colors.button_text + ';">INSERT COIN</div>' +
+            '</div>' +
+            '<div class="theme-name">' + t.name + '</div>';
+        card.onclick = function() { selectPortalTheme(id); };
+        gal.appendChild(card);
+    });
+    updateThemeSelection();
+}
+
+function updateThemeSelection() {
+    var current = portalAppearance ? portalAppearance.theme : '';
+    document.querySelectorAll('#theme-gallery .theme-card').forEach(function(el) {
+        el.classList.toggle('selected', el.getAttribute('data-theme') === current);
+    });
+}
+
+function selectPortalTheme(id) {
+    if (!portalAppearance || !PORTAL_THEMES[id]) return;
+    portalAppearance.theme = id;
+    portalAppearance.colors = Object.assign({}, PORTAL_THEMES[id].colors);
+    syncPortalEditor();
+}
+
+// Any manual color edit switches the theme to "custom" (unless the
+// resulting palette exactly matches a preset again)
+function onPortalColorEdit() {
+    if (!portalAppearance) return;
+    PORTAL_COLOR_KEYS.forEach(function(k) {
+        portalAppearance.colors[k] = document.getElementById('pp-color-' + k).value;
+    });
+    portalAppearance.theme = matchPortalPreset(portalAppearance.colors) || 'custom';
+    updateThemeSelection();
+    updatePortalPreview();
+}
+
+function updatePortalPreview() {
+    if (!portalAppearance) return;
+    var c = portalAppearance.colors;
+    // The dark preset previews with the legacy gradient look — exactly
+    // what the portal renders for theme "dark" (see PORTAL_DARK_LEGACY)
+    var L = PORTAL_DARK_LEGACY;
+    var isDark = portalAppearance.theme === 'dark';
+    var bg = isDark ? L.background : c.background;
+    var img = safePortalBg();
+    var pv = document.getElementById('portal-preview');
+    if (img) {
+        // Same treatment as the real portal: cover image + dark overlay
+        pv.style.background = 'linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55)), url(\'' +
+            img + '?t=' + portalBgVersion + '\') center / cover no-repeat, ' + bg;
+    } else {
+        pv.style.background = bg;
+    }
+    pv.style.color = isDark ? L.text : c.text;
+    document.getElementById('pv-hero-accent').style.color = isDark ? L.accent : c.accent;
+    var card = document.getElementById('pv-card');
+    card.style.background = isDark ? L.card : c.card;
+    card.style.color = isDark ? L.text : c.text;
+    var btn = document.getElementById('pv-btn');
+    btn.style.background = isDark ? L.button : c.button;
+    btn.style.color = isDark ? L.button_text : c.button_text;
+    var btn2 = document.getElementById('pv-btn2');
+    btn2.style.border = '1px solid ' + (isDark ? L.accent : c.accent);
+    btn2.style.color = isDark ? L.accent : c.accent;
+}
+
+// Cache-buster: the uploaded file keeps the same name, so bump this
+// after every upload to force the thumb/preview to refetch it
+var portalBgVersion = Date.now();
+
+function updatePortalBgThumb() {
+    var thumb = document.getElementById('portal-bg-thumb');
+    var img = safePortalBg();
+    if (img) {
+        thumb.style.backgroundImage = 'url(\'' + img + '?t=' + portalBgVersion + '\')';
+        thumb.textContent = '';
+    } else {
+        thumb.style.backgroundImage = 'none';
+        thumb.textContent = 'none';
+    }
+}
+
+function syncPortalEditor() {
+    if (!portalAppearance) return;
+    PORTAL_COLOR_KEYS.forEach(function(k) {
+        document.getElementById('pp-color-' + k).value = expandHex(portalAppearance.colors[k]);
+    });
+    updateThemeSelection();
+    updatePortalBgThumb();
+    updatePortalPreview();
+}
+
+async function loadPortalAppearance() {
+    renderThemeGallery();
+    try {
+        var res = await apiCall('GET', '/portal/appearance');
+        portalAppearance = {
+            theme: res.data.theme,
+            colors: Object.assign({}, PORTAL_THEMES.dark.colors, res.data.colors),
+            background_image: res.data.background_image || ''
+        };
+    } catch (e) {
+        portalAppearance = {
+            theme: 'dark',
+            colors: Object.assign({}, PORTAL_THEMES.dark.colors),
+            background_image: ''
+        };
+        showNotification('Failed to load portal appearance: ' + e.message, 'error');
+    }
+    syncPortalEditor();
+}
+
+async function savePortalAppearance() {
+    if (!portalAppearance) return;
+    try {
+        // background_image is deliberately NOT sent: the server owns it
+        // (the upload/remove endpoints persist it themselves) and ignores
+        // whatever a client would put here.
+        await apiCall('POST', '/admin/portal/appearance', {
+            theme: portalAppearance.theme,
+            colors: portalAppearance.colors
+        });
+        showNotification('Portal appearance saved', 'success');
+    } catch (e) {
+        showNotification('Failed to save portal appearance: ' + e.message, 'error');
+    }
+}
+
+// Loads the dark preset into the editor only — nothing is persisted
+// until Save is pressed
+function resetPortalToDefault() {
+    if (!portalAppearance) return;
+    selectPortalTheme('dark');
+    showNotification('Editor reset to the Dark preset — press Save to apply', 'info');
+}
+
+async function uploadPortalBackground() {
+    var input = document.getElementById('portal-bg-file');
+    if (!input.files || !input.files[0]) {
+        showNotification('Choose an image file first', 'error');
+        return;
+    }
+    var fd = new FormData();
+    fd.append('image', input.files[0]);
+    var btn = document.getElementById('portal-bg-upload-btn');
+    btn.disabled = true;
+    try {
+        // apiCall forces a JSON Content-Type, so multipart goes via raw fetch
+        var res = await fetch(API_BASE + '/admin/portal/background', {
+            method: 'POST',
+            headers: authToken ? { 'Authorization': 'Bearer ' + authToken } : {},
+            body: fd
+        });
+        if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
+        var data = null;
+        try { data = await res.json(); } catch (_) {}
+        if (!res.ok || !data || !data.success) {
+            throw new Error((data && data.message) || ('Upload failed: HTTP ' + res.status));
+        }
+        // The API already persisted background_image in the stored config
+        portalAppearance.background_image = data.data.path;
+        portalBgVersion = Date.now();
+        input.value = '';
+        updatePortalBgThumb();
+        updatePortalPreview();
+        showNotification('Background image uploaded', 'success');
+    } catch (e) {
+        showNotification(e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function removePortalBackground() {
+    try {
+        await apiCall('DELETE', '/admin/portal/background');
+        if (portalAppearance) portalAppearance.background_image = '';
+        updatePortalBgThumb();
+        updatePortalPreview();
+        showNotification('Background image removed', 'success');
+    } catch (e) {
+        showNotification('Failed to remove background: ' + e.message, 'error');
+    }
 }
 
 // ============================================================

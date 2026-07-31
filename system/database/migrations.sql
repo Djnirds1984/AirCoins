@@ -401,6 +401,40 @@ END
 $$;
 
 -- ============================================
+-- 009 - PORTAL APPEARANCE: seed default config
+-- ============================================
+-- The captive portal look (theme id, colors, background image) is ONE
+-- JSON document in system_settings under key 'portal_appearance',
+-- served by GET /api/portal/appearance and edited from the admin
+-- "Portal" page. Seed the default dark preset ONLY when the key does
+-- not exist yet, so an operator's saved theme is never overwritten by
+-- a reinstall.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'system_settings'
+    ) THEN
+        RETURN;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM system_settings WHERE key = 'portal_appearance'
+    ) THEN
+        INSERT INTO system_settings (key, value, description)
+        VALUES (
+            'portal_appearance',
+            '{"theme":"dark","colors":{"primary":"#1a1a2e","accent":"#ffd700","background":"#16213e","card":"#1f2b47","text":"#eaeaea","button":"#ffa500","button_text":"#1a1a2e"},"background_image":""}',
+            'Captive portal appearance (theme, colors, background image) as a JSON document'
+        )
+        ON CONFLICT (key) DO NOTHING;
+
+        RAISE NOTICE 'Migration 009: default portal_appearance seeded';
+    END IF;
+END
+$$;
+
+-- ============================================
 -- COMPLETION
 -- ============================================
 \echo 'Migrations applied.'

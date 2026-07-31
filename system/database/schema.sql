@@ -43,6 +43,16 @@ INSERT INTO system_settings (key, value, description) VALUES
     ('portal_ip', '', 'Portal IP address for admin access')
 ON CONFLICT (key) DO NOTHING;
 
+-- Default captive portal appearance (dark preset). Guarded so a fresh
+-- install matches migration 009 exactly and an existing operator theme
+-- is never overwritten (this file also runs on updates, before
+-- migrations.sql).
+INSERT INTO system_settings (key, value, description) VALUES
+    ('portal_appearance',
+     '{"theme":"dark","colors":{"primary":"#1a1a2e","accent":"#ffd700","background":"#16213e","card":"#1f2b47","text":"#eaeaea","button":"#ffa500","button_text":"#1a1a2e"},"background_image":""}',
+     'Captive portal appearance (theme, colors, background image) as a JSON document')
+ON CONFLICT (key) DO NOTHING;
+
 -- ============================================
 -- GPIO CONFIGURATION
 -- ============================================

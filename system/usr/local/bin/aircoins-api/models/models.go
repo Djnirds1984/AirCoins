@@ -179,6 +179,31 @@ type PortalInfo struct {
 }
 
 // ============================================
+// PORTAL APPEARANCE MODELS
+// ============================================
+// The whole portal look is ONE JSON document stored in system_settings
+// under key 'portal_appearance' (seeded by migration 009). The same
+// shape is served by GET /api/portal/appearance and accepted by
+// POST /api/admin/portal/appearance.
+
+type PortalColors struct {
+	Primary    string `json:"primary"`
+	Accent     string `json:"accent"`
+	Background string `json:"background"`
+	Card       string `json:"card"`
+	Text       string `json:"text"`
+	Button     string `json:"button"`
+	ButtonText string `json:"button_text"`
+}
+
+type PortalAppearance struct {
+	Theme           string       `json:"theme"`
+	Colors          PortalColors `json:"colors"`
+	BackgroundImage string       `json:"background_image"`
+	UpdatedAt       string       `json:"updated_at,omitempty"`
+}
+
+// ============================================
 // REQUEST/RESPONSE TYPES
 // ============================================
 

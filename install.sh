@@ -457,6 +457,11 @@ echo -e "${YELLOW}[7/10]${NC} Deploying web portal..."
 
 mkdir -p /var/www/html
 mkdir -p /var/www/html/api
+# Uploaded portal backgrounds live here (admin Portal page). The dir is
+# created but its contents are NEVER touched, so an operator's uploaded
+# background survives reinstalls. The API runs as root so it can write
+# here; www-data ownership (below) lets lighttpd serve the files.
+mkdir -p /var/www/html/portal-assets
 cp "$SCRIPT_DIR/index.html" /var/www/html/index.html
 cp "$SCRIPT_DIR/admin.html" /var/www/html/admin.html
 chown -R www-data:www-data /var/www/html

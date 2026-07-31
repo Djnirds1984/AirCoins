@@ -7,16 +7,29 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { height: 100%; }
+        /* Portal appearance variables — the defaults below are EXACTLY the
+           built-in dark look. GET /api/portal/appearance (edited on the
+           admin "Portal" page) overrides them at runtime; when the API is
+           unreachable these defaults stand and nothing changes visually. */
+        :root {
+            --pp-primary: #1a1a2e;
+            --pp-accent: #ffd700;
+            --pp-bg: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            --pp-card: rgba(255,255,255,0.05);
+            --pp-text: #fff;
+            --pp-btn: linear-gradient(145deg, #ffd700, #ff8c00);
+            --pp-btn-text: #000;
+        }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            background: var(--pp-bg);
             /* Captive-portal webviews: lock the layout to the visible
                viewport so the home screen never scrolls. */
             height: 100vh;
             height: 100dvh;
             display: flex;
             flex-direction: column;
-            color: #fff;
+            color: var(--pp-text);
             overflow: hidden;
         }
 
@@ -72,11 +85,11 @@
             padding: 4px 0 2px;
         }
         .hero h1 { font-size: 24px; margin-bottom: 2px; }
-        .hero h1 span { color: #ffd700; }
+        .hero h1 span { color: var(--pp-accent); }
         .hero p { font-size: 12px; color: #aaa; }
 
         .status-card {
-            background: rgba(255,255,255,0.05);
+            background: var(--pp-card);
             border: 1px solid rgba(255,255,255,0.1);
             border-radius: 12px;
             padding: 10px 14px;
@@ -110,8 +123,8 @@
             margin: 12px auto;
         }
         .coin-btn {
-            background: linear-gradient(145deg, #1a1a2e, #16213e);
-            border: 2px solid #ffd700;
+            background: linear-gradient(145deg, var(--pp-primary), #16213e);
+            border: 2px solid var(--pp-accent);
             border-radius: 12px;
             padding: 14px 12px;
             text-align: center;
@@ -137,7 +150,7 @@
             font-weight: bold;
             color: #333;
         }
-        .coin-btn h3 { color: #ffd700; font-size: 16px; }
+        .coin-btn h3 { color: var(--pp-accent); font-size: 16px; }
         .coin-btn p { color: #aaa; font-size: 12px; margin-top: 4px; }
         /* Shown when the operator has no pricing tiers, or the API is unreachable */
         .pricing-empty {
@@ -186,7 +199,7 @@
         /* Modals are capped to the visible viewport; only the list area
            inside them scrolls, so close buttons stay reachable. */
         .modal {
-            background: #1a1a2e;
+            background: var(--pp-primary);
             border: 1px solid rgba(255,255,255,0.1);
             border-radius: 16px;
             padding: 20px;
@@ -203,7 +216,7 @@
             from { transform: scale(0.8); opacity: 0; }
             to { transform: scale(1); opacity: 1; }
         }
-        .modal h2 { margin-bottom: 10px; color: #ffd700; font-size: 20px; }
+        .modal h2 { margin-bottom: 10px; color: var(--pp-accent); font-size: 20px; }
         .modal p { color: #aaa; margin-bottom: 14px; font-size: 13px; }
 
         /* RATES MODAL (pricing tiers from /api/pricing) */
@@ -329,7 +342,7 @@
         .gpio-total-time {
             font-size: 22px;
             font-weight: bold;
-            color: #ffd700;
+            color: var(--pp-accent);
             font-family: 'Courier New', monospace;
             margin: 6px 0;
         }
@@ -361,12 +374,12 @@
             font-family: 'Courier New', monospace;
             text-shadow: 0 0 15px rgba(0,212,255,0.4);
         }
-        .running-timer-value span { color: #ffd700; }
+        .running-timer-value span { color: var(--pp-accent); }
 
         /* INSERT COIN MAIN BUTTON */
         .insert-coin-main-btn {
-            background: linear-gradient(145deg, #ffd700, #ff8c00);
-            color: #000;
+            background: var(--pp-btn);
+            color: var(--pp-btn-text);
             border: none;
             border-radius: 26px;
             padding: 13px 34px;  /* >=44px tall touch target */
@@ -828,6 +841,61 @@
         loadState();
         loadPricing();
         setInterval(loadPricing, PRICING_REFRESH_INTERVAL);
+
+        // ==================== PORTAL APPEARANCE ====================
+        // Theme colors come from GET /api/portal/appearance (edited on the
+        // admin "Portal" page). The :root defaults ARE the dark theme, so
+        // on any failure or unexpected payload we silently keep the
+        // built-in look — the captive portal must never break or flash
+        // because the API is down.
+        const APPEARANCE_URL = '/api/portal/appearance';
+        const PP_HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+        // Matches the backend rule: one safe filename directly under
+        // /portal-assets/. Anything else is ignored so an unexpected
+        // value can never be interpolated into the CSS url() below.
+        const PP_BG_RE = /^\/portal-assets\/[A-Za-z0-9._-]+$/;
+
+        function applyPortalAppearance() {
+            fetchJSON(APPEARANCE_URL + '?t=' + Date.now())
+                .then(res => {
+                    if (!res || !res.success || !res.data || !res.data.colors) return;
+                    const c = res.data.colors;
+                    const keys = ['primary', 'accent', 'background', 'card', 'text', 'button', 'button_text'];
+                    if (!keys.every(k => PP_HEX_RE.test(c[k] || ''))) return;
+
+                    const img = PP_BG_RE.test(res.data.background_image || '')
+                        ? res.data.background_image : '';
+
+                    // The :root defaults ARE the dark theme, with the legacy
+                    // gradients the hex-only API contract cannot express.
+                    // Dark without an image therefore changes nothing — the
+                    // portal stays pixel-identical to the built-in look.
+                    const isDark = res.data.theme === 'dark';
+                    if (isDark && !img) return;
+
+                    const rs = document.documentElement.style;
+                    if (!isDark) {
+                        rs.setProperty('--pp-primary', c.primary);
+                        rs.setProperty('--pp-accent', c.accent);
+                        rs.setProperty('--pp-card', c.card);
+                        rs.setProperty('--pp-text', c.text);
+                        rs.setProperty('--pp-btn', c.button);
+                        rs.setProperty('--pp-btn-text', c.button_text);
+                    }
+
+                    if (img) {
+                        // Cover image + dark overlay keeps the text readable
+                        rs.setProperty('--pp-bg',
+                            'linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55)), ' +
+                            'url("' + img + '") center / cover no-repeat, ' + c.background);
+                    } else {
+                        rs.setProperty('--pp-bg', c.background);
+                    }
+                })
+                .catch(err => warnOnce('appearance', err));
+        }
+
+        applyPortalAppearance();
 
         // No local session restore: the status poll below mirrors whatever
         // session the server has for this client (survives page reloads).

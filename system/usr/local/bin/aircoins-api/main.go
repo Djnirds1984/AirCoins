@@ -42,6 +42,7 @@ func main() {
 	reportsHandler := &handlers.ReportsHandler{DB: models.DB}
 	coinslotHandler := &handlers.CoinslotHandler{DB: models.DB}
 	appearanceHandler := &handlers.AppearanceHandler{DB: models.DB}
+	qdiscHandler := &handlers.QdiscHandler{DB: models.DB}
 
 	// Setup routes
 	mux := http.NewServeMux()
@@ -127,6 +128,19 @@ func main() {
 	mux.HandleFunc("/api/admin/portal/bans", handlers.AuthMiddleware(appearanceHandler.ListBans))
 	mux.HandleFunc("/api/admin/portal/ban/", handlers.AuthMiddleware(appearanceHandler.UnbanByPath))
 
+	// Portal qdisc (traffic shaping: CAKE / FQ_CODEL)
+	mux.HandleFunc("/api/admin/portal/qdisc/apply", handlers.AuthMiddleware(qdiscHandler.ApplyQdisc))
+	mux.HandleFunc("/api/admin/portal/qdisc", handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			qdiscHandler.GetQdisc(w, r)
+		case http.MethodPost:
+			qdiscHandler.SaveQdisc(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))
+
 	// Health check
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -137,6 +151,11 @@ func main() {
 	// Recover iptables auth state for surviving sessions (reboot safety)
 	// and enforce wall-clock expiry every 30s in the background.
 	handlers.StartExpiryEnforcer(models.DB)
+
+	// Re-apply saved qdisc (traffic shaping) rules on boot.
+	// Runs in a goroutine so it doesn't block the HTTP listener;
+	// includes a 30 s delayed retry for VLAN interfaces not yet up.
+	handlers.ApplyQdiscOnBootWithRetry(models.DB)
 
 	// Get port from environment or use default
 	port := getEnv("PORT", "8080")

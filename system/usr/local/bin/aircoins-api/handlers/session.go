@@ -222,6 +222,9 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	// Open the client's internet access. Non-fatal if the iptables layer
 	// is absent (dev box) — the session row exists either way.
 	runCaptiveRules(h.DB, "auth", clientMAC, reason)
+	// Add per-device tc class+filter for FQ_CODEL per-device mode.
+	// Failures log but never block the session state change.
+	EnsurePerDeviceClass(h.DB, "", clientMAC, clientIP, "add")
 
 	// The purchase is complete: close the armed window so the GPIO
 	// listener goes back to idle.
@@ -585,6 +588,8 @@ func (h *SessionHandler) AdminCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runCaptiveRules(h.DB, "auth", clientMAC, "admin-create")
+	// Add per-device tc class+filter for FQ_CODEL per-device mode.
+	EnsurePerDeviceClass(h.DB, "", clientMAC, req.ClientIP, "add")
 	logAction(h.DB, "INFO", "session", "Admin session for "+req.ClientIP+" ("+clientMAC+"): "+strconv.Itoa(req.Minutes)+" min")
 
 	sendJSON(w, http.StatusOK, map[string]interface{}{
@@ -670,13 +675,13 @@ func (h *SessionHandler) End(w http.ResponseWriter, r *http.Request) {
 		status = "cancelled"
 	}
 
-	var mac string
+	var mac, clientIP string
 	err := h.DB.QueryRow(`
 		UPDATE sessions
 		SET status = $1, expired_at = NOW(), expires_at = NOW(), remaining_seconds = 0
 		WHERE id = $2
-		RETURNING COALESCE(client_mac, '')
-	`, status, req.SessionID).Scan(&mac)
+		RETURNING COALESCE(client_mac, ''), COALESCE(client_ip, '')
+	`, status, req.SessionID).Scan(&mac, &clientIP)
 
 	if err == sql.ErrNoRows {
 		sendJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "Session not found"})
@@ -688,6 +693,8 @@ func (h *SessionHandler) End(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runCaptiveRules(h.DB, "unauth", mac, "admin-terminate")
+	// Remove per-device tc class+filter for FQ_CODEL per-device mode.
+	EnsurePerDeviceClass(h.DB, "", mac, clientIP, "remove")
 
 	logAction(h.DB, "INFO", "session", "Session "+strconv.Itoa(req.SessionID)+" ended by admin: "+status)
 	sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "Session ended"})
@@ -771,6 +778,8 @@ func (h *SessionHandler) Pause(w http.ResponseWriter, r *http.Request) {
 
 	// Close internet access for this MAC
 	runCaptiveRules(h.DB, "unauth", clientMAC, "pause")
+	// Remove per-device tc class+filter for FQ_CODEL per-device mode.
+	EnsurePerDeviceClass(h.DB, "", clientMAC, clientIP, "remove")
 
 	pausedAt := time.Now()
 	logAction(h.DB, "INFO", "session", "Session "+strconv.Itoa(id)+" paused ("+clientMAC+"): "+strconv.Itoa(remaining)+"s remaining")
@@ -840,6 +849,8 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 
 	// Re-open internet access
 	runCaptiveRules(h.DB, "auth", clientMAC, "resume")
+	// Add per-device tc class+filter for FQ_CODEL per-device mode.
+	EnsurePerDeviceClass(h.DB, "", clientMAC, clientIP, "add")
 
 	resumedAt := time.Now()
 	logAction(h.DB, "INFO", "session", "Session "+strconv.Itoa(id)+" resumed ("+clientMAC+"): "+strconv.Itoa(remainingAtPause)+"s remaining")
@@ -888,6 +899,8 @@ func ExpireOverdueSessions(db *sql.DB, reason string) int {
 		log.Printf("session %d expired (%s, ip=%s, mac=%s)", id, reason, ip, mac)
 		logAction(db, "INFO", "session", "Session "+strconv.Itoa(id)+" expired ("+ip+")")
 		runCaptiveRules(db, "unauth", mac, reason)
+		// Remove per-device tc class+filter for FQ_CODEL per-device mode.
+		EnsurePerDeviceClass(db, "", mac, ip, "remove")
 	}
 	if err := rows.Err(); err != nil {
 		log.Printf("Error reading expired sessions: %v", err)

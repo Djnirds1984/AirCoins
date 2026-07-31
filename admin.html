@@ -1553,6 +1553,43 @@
                 </table>
             </div>
 
+            <!-- Bandwidth & Anti-Lag Rules card -->
+            <div class="settings-card" style="max-width:640px;">
+                <div class="card-title">Bandwidth &amp; Anti-Lag Rules</div>
+                <div class="settings-form">
+                    <div class="settings-row">
+                        <div class="settings-field">
+                            <label for="qdisc-interface">Interface</label>
+                            <select id="qdisc-interface"><!-- populated from portal list --></select>
+                        </div>
+                        <div class="settings-field">
+                            <label for="qdisc-type">Qdisc Type</label>
+                            <select id="qdisc-type">
+                                <option value="cake" title="CAKE: heavier CPU but best fairness">CAKE</option>
+                                <option value="fq_codel" title="FQ_CODEL: lighter, needs HTB wrapper for rate control">FQ_CODEL</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="settings-row">
+                        <div class="settings-field">
+                            <label for="qdisc-global-bw">Global Bandwidth (Mbps)</label>
+                            <input type="number" id="qdisc-global-bw" min="1" value="1000" placeholder="1000">
+                            <div class="gpio-info-text" style="margin-top:4px;">Total cap on this portal's interface.</div>
+                        </div>
+                        <div class="settings-field">
+                            <label for="qdisc-per-device-bw">Per-Device Bandwidth (Mbps)</label>
+                            <input type="number" id="qdisc-per-device-bw" min="0" value="0" placeholder="0">
+                            <div class="gpio-info-text" style="margin-top:4px;">Per-MAC cap. 0 = use global limit only. Ignored by CAKE.</div>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                        <button class="btn btn-primary" onclick="saveQdiscRule()">Save</button>
+                        <button class="btn btn-success" onclick="applyQdiscNow()">Apply Now</button>
+                        <span id="qdisc-status" class="gpio-info-text" style="margin-left:4px;"></span>
+                    </div>
+                </div>
+            </div>
+
             <div class="portal-editor-grid">
                 <div>
                     <!-- Theme gallery -->
@@ -2130,6 +2167,7 @@ function showSection(name) {
         loadTapRules();
         loadPauseRules();
         loadBannedTable();
+        loadQdiscRules();
     } else if (name === 'settings') {
         loadSettings();
     } else if (name === 'system') {
@@ -4207,6 +4245,92 @@ async function unbanMAC(mac) {
         loadBannedTable();
     } catch (e) {
         showNotification('Failed to unban: ' + e.message, 'error');
+    }
+}
+
+// ============================================================
+// BANDWIDTH & ANTI-LAG RULES (Portal section, qdisc)
+// ============================================================
+
+async function loadQdiscRules() {
+    try {
+        // Populate the interface dropdown from portal list
+        var portalRes = await apiCall('GET', '/portal/list');
+        var portals = portalRes.portals || [];
+        var sel = document.getElementById('qdisc-interface');
+        sel.innerHTML = portals.length === 0
+            ? '<option value="">No portals</option>'
+            : portals.map(function(p) { return '<option value="' + p.interface + '">' + p.interface + '</option>'; }).join('');
+
+        // Load saved rules
+        var res = await apiCall('GET', '/admin/portal/qdisc');
+        var ifaces = (res.data && res.data.interfaces) || {};
+        var currentIface = sel.value;
+        if (currentIface && ifaces[currentIface]) {
+            applyQdiscForm(ifaces[currentIface]);
+        }
+        // When interface changes, load its rule (or reset to defaults)
+        sel.onchange = function() {
+            var iface = sel.value;
+            if (ifaces[iface]) {
+                applyQdiscForm(ifaces[iface]);
+            } else {
+                applyQdiscForm({ qdisc: 'cake', global_bw_mbps: 1000, per_device_bw_mbps: 0 });
+            }
+            document.getElementById('qdisc-status').textContent = '';
+        };
+    } catch (e) {
+        showNotification('Failed to load qdisc rules: ' + e.message, 'error');
+    }
+}
+
+function applyQdiscForm(rule) {
+    document.getElementById('qdisc-type').value = rule.qdisc || 'cake';
+    document.getElementById('qdisc-global-bw').value = rule.global_bw_mbps || 1000;
+    document.getElementById('qdisc-per-device-bw').value = rule.per_device_bw_mbps || 0;
+}
+
+async function saveQdiscRule() {
+    var iface = document.getElementById('qdisc-interface').value;
+    if (!iface) { showNotification('No portal interface selected', 'error'); return; }
+    var body = {
+        interface: iface,
+        qdisc: document.getElementById('qdisc-type').value,
+        global_bw_mbps: parseInt(document.getElementById('qdisc-global-bw').value, 10),
+        per_device_bw_mbps: parseInt(document.getElementById('qdisc-per-device-bw').value, 10)
+    };
+    if (!body.global_bw_mbps || body.global_bw_mbps < 1) {
+        showNotification('Global bandwidth must be a positive integer', 'error'); return;
+    }
+    if (isNaN(body.per_device_bw_mbps) || body.per_device_bw_mbps < 0) {
+        showNotification('Per-device bandwidth must be >= 0', 'error'); return;
+    }
+    if (body.qdisc === 'cake' && body.global_bw_mbps > 200) {
+        if (!confirm('CAKE above 200 Mbps on Orange Pi hardware may overload the CPU. Continue?')) {
+            return;
+        }
+    }
+    try {
+        await apiCall('POST', '/admin/portal/qdisc', body);
+        document.getElementById('qdisc-status').textContent = 'Saved.';
+        showNotification('Qdisc rule saved for ' + iface, 'success');
+    } catch (e) {
+        showNotification('Failed to save qdisc rule: ' + e.message, 'error');
+    }
+}
+
+async function applyQdiscNow() {
+    var iface = document.getElementById('qdisc-interface').value;
+    if (!iface) { showNotification('No portal interface selected', 'error'); return; }
+    var statusEl = document.getElementById('qdisc-status');
+    statusEl.textContent = 'Applying...';
+    try {
+        var res = await apiCall('POST', '/admin/portal/qdisc/apply', { interface: iface });
+        statusEl.textContent = 'Applied on ' + iface;
+        showNotification('Qdisc applied on ' + iface, 'success');
+    } catch (e) {
+        statusEl.textContent = 'Apply failed: ' + e.message;
+        showNotification('Failed to apply qdisc: ' + e.message, 'error');
     }
 }
 </script>

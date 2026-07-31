@@ -49,8 +49,8 @@
 
         /* PAGES */
         /* The home page is a flex column filling the space under the nav;
-           sections sit close together as one centered block (leftover
-           space goes above/below the group, never between items). If a
+           sections sit close together as one top-anchored block (leftover
+           space goes below the group, never between items). If a
            tiny screen still overflows, the page scrolls internally while
            the document itself stays at viewport height. */
         .page {
@@ -64,10 +64,7 @@
             overflow-y: auto;
             overflow-x: hidden;
         }
-        .page.active { display: flex; flex-direction: column; justify-content: center; gap: 14px; }
-        @media (max-height: 480px) {
-            .page.active { justify-content: flex-start; }
-        }
+        .page.active { display: flex; flex-direction: column; justify-content: flex-start; gap: 14px; padding-top: 20px; }
 
         /* HOME PAGE */
         .hero {

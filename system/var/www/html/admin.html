@@ -1567,9 +1567,9 @@
                         </div>
                         <div class="settings-field">
                             <label for="qdisc-type">Qdisc Type</label>
-                            <select id="qdisc-type">
-                                <option value="cake" title="CAKE: heavier CPU but best fairness">CAKE</option>
-                                <option value="fq_codel" title="FQ_CODEL: lighter, needs HTB wrapper for rate control">FQ_CODEL</option>
+                            <select id="qdisc-type" onchange="onQdiscTypeChange()">
+                                <option value="cake" title="CAKE: best fairness, heavier CPU. Bandwidth parameter is link-cap tuning, NOT per-device cap. Use FQ_CODEL for per-device Mbps limits.">CAKE</option>
+                                <option value="fq_codel" title="FQ_CODEL: lighter, supports per-device Mbps caps via HTB wrapper">FQ_CODEL</option>
                             </select>
                         </div>
                     </div>
@@ -1582,13 +1582,14 @@
                         <div class="settings-field">
                             <label for="qdisc-per-device-bw">Per-Device Bandwidth (Mbps)</label>
                             <input type="number" id="qdisc-per-device-bw" min="0" value="0" placeholder="0">
-                            <div class="gpio-info-text" style="margin-top:4px;">Per-MAC cap. 0 = use global limit only. Ignored by CAKE.</div>
+                            <div class="gpio-info-text" id="qdisc-per-device-hint" style="margin-top:4px;">Per-MAC cap. 0 = use global limit only. Ignored by CAKE.</div>
                         </div>
                     </div>
                     <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
                         <button class="btn btn-primary" onclick="saveQdiscRule()">Save</button>
                         <button class="btn btn-success" onclick="applyQdiscNow()">Apply Now</button>
                         <button class="btn" style="background:#455a64;color:#fff;" onclick="runQDiag()">Run tc diagnostics</button>
+                        <input type="text" id="qdiag-client-ip" placeholder="Client IP (optional)" style="width:170px; padding:5px 8px; border:1px solid #555; border-radius:4px; background:#2a2a3e; color:#cdd6f4; font-size:13px;">
                         <span id="qdisc-status" class="gpio-info-text" style="margin-left:4px;"></span>
                     </div>
                     <pre id="qdiag-output" style="display:none; margin-top:10px; background:#1e1e2e; color:#cdd6f4; padding:12px; border-radius:6px; font-size:12px; max-height:320px; overflow:auto; white-space:pre-wrap; word-break:break-all;"></pre>
@@ -4302,6 +4303,22 @@ function applyQdiscForm(rule) {
     document.getElementById('qdisc-type').value = rule.qdisc || 'cake';
     document.getElementById('qdisc-global-bw').value = rule.global_bw_mbps || 1000;
     document.getElementById('qdisc-per-device-bw').value = rule.per_device_bw_mbps || 0;
+    onQdiscTypeChange();
+}
+
+function onQdiscTypeChange() {
+    var qdisc = document.getElementById('qdisc-type').value;
+    var perDevInput = document.getElementById('qdisc-per-device-bw');
+    var hint = document.getElementById('qdisc-per-device-hint');
+    if (qdisc === 'cake') {
+        perDevInput.style.opacity = '0.4';
+        perDevInput.disabled = true;
+        if (hint) hint.textContent = 'CAKE has no per-client rate limit — it uses host fairness internally. To cap individual devices at a fixed Mbps, use FQ_CODEL with a per-device Mbps value.';
+    } else {
+        perDevInput.style.opacity = '1';
+        perDevInput.disabled = false;
+        if (hint) hint.textContent = 'Per-MAC cap. 0 = use global limit only.';
+    }
 }
 
 async function saveQdiscRule() {
@@ -4311,7 +4328,7 @@ async function saveQdiscRule() {
         interface: iface,
         qdisc: document.getElementById('qdisc-type').value,
         global_bw_mbps: parseInt(document.getElementById('qdisc-global-bw').value, 10),
-        per_device_bw_mbps: parseInt(document.getElementById('qdisc-per-device-bw').value, 10)
+        per_device_bw_mbps: document.getElementById('qdisc-per-device-bw').disabled ? 0 : parseInt(document.getElementById('qdisc-per-device-bw').value, 10)
     };
     if (!body.global_bw_mbps || body.global_bw_mbps < 1) {
         showNotification('Global bandwidth must be a positive integer', 'error'); return;
@@ -4370,11 +4387,17 @@ async function runQDiag() {
     var pre = document.getElementById('qdiag-output');
     pre.style.display = 'block';
     pre.textContent = 'Running tc diagnostics on ' + iface + '...';
+    var url = '/admin/portal/qdiag?iface=' + encodeURIComponent(iface);
+    var clientIP = (document.getElementById('qdiag-client-ip').value || '').trim();
+    if (clientIP) url += '&client_ip=' + encodeURIComponent(clientIP);
     try {
-        var res = await apiCall('GET', '/admin/portal/qdiag?iface=' + encodeURIComponent(iface));
+        var res = await apiCall('GET', url);
         var out = '=== tc -s qdisc show dev ' + iface + ' ===\n' + (res.qdisc || '(empty)') + '\n\n';
         out += '=== tc -s class show dev ' + iface + ' ===\n' + (res.class || '(empty)') + '\n\n';
         out += '=== tc -s filter show dev ' + iface + ' ===\n' + (res.filter || '(empty)');
+        if (res.route !== undefined) {
+            out += '\n\n=== ip route get ' + clientIP + ' ===\n' + res.route;
+        }
         pre.textContent = out;
     } catch (e) {
         pre.textContent = 'Error: ' + e.message;

@@ -437,20 +437,20 @@ func applyCAKE(iface string, rule QdiscRule) error {
 // applyFQCodelGlobal: HTB root with a single default class at global rate,
 // fq_codel leaf qdisc on that class.
 //
-//	tc qdisc add dev <iface> root htb default 1
-//	tc class add dev <iface> parent root: classid root:1 htb rate <X>Mbit ceil <X>Mbit
-//	tc qdisc add dev <iface> parent root:1 fq_codel
+//	tc qdisc add dev <iface> root handle 1: htb default 1
+//	tc class add dev <iface> parent 1: classid 1:1 htb rate <X>Mbit ceil <X>Mbit
+//	tc qdisc add dev <iface> parent 1:1 fq_codel
 func applyFQCodelGlobal(iface string, rule QdiscRule) error {
 	bwArg := fmt.Sprintf("%dMbit", rule.GlobalBwMbps)
 
-	if err := runTC("qdisc", "add", "dev", iface, "root", "htb", "default", "1"); err != nil {
+	if err := runTC("qdisc", "add", "dev", iface, "root", "handle", "1:", "htb", "default", "1"); err != nil {
 		return err
 	}
-	if err := runTC("class", "add", "dev", iface, "parent", "root:", "classid", "root:1",
+	if err := runTC("class", "add", "dev", iface, "parent", "1:", "classid", "1:1",
 		"htb", "rate", bwArg, "ceil", bwArg); err != nil {
 		return err
 	}
-	if err := runTC("qdisc", "add", "dev", iface, "parent", "root:1", "fq_codel"); err != nil {
+	if err := runTC("qdisc", "add", "dev", iface, "parent", "1:1", "fq_codel"); err != nil {
 		return err
 	}
 	_, verr := verifyQdisc(iface)
@@ -460,25 +460,25 @@ func applyFQCodelGlobal(iface string, rule QdiscRule) error {
 // applyFQCodelPerDevice: HTB root with a default class at global rate +
 // per-MAC classes at per_device rate for each active session on this iface.
 //
-//	tc qdisc add dev <iface> root htb default 1
-//	tc class add dev <iface> parent root: classid root:1 htb rate <global>Mbit ceil <global>Mbit
-//	tc qdisc add dev <iface> parent root:1 fq_codel
+//	tc qdisc add dev <iface> root handle 1: htb default 1
+//	tc class add dev <iface> parent 1: classid 1:1 htb rate <global>Mbit ceil <global>Mbit
+//	tc qdisc add dev <iface> parent 1:1 fq_codel
 //	# For each active session MAC (egress = Pi→client, so match dst MAC):
-//	tc class add dev <iface> parent root: classid root:<N> htb rate <per_device>Mbit ceil <per_device>Mbit
-//	tc qdisc add dev <iface> parent root:<N> fq_codel
-//	tc filter add dev <iface> parent root: protocol ip u32 match ether dst <mac> flowid root:<N>
+//	tc class add dev <iface> parent 1: classid 1:<N> htb rate <per_device>Mbit ceil <per_device>Mbit
+//	tc qdisc add dev <iface> parent 1:<N> fq_codel
+//	tc filter add dev <iface> parent 1: protocol ip u32 match ether dst <mac> flowid 1:<N>
 func applyFQCodelPerDevice(db *sql.DB, iface string, rule QdiscRule) ([]string, error) {
 	globalArg := fmt.Sprintf("%dMbit", rule.GlobalBwMbps)
 	perDevArg := fmt.Sprintf("%dMbit", rule.PerDeviceBwMbps)
 
-	if err := runTC("qdisc", "add", "dev", iface, "root", "htb", "default", "1"); err != nil {
+	if err := runTC("qdisc", "add", "dev", iface, "root", "handle", "1:", "htb", "default", "1"); err != nil {
 		return nil, err
 	}
-	if err := runTC("class", "add", "dev", iface, "parent", "root:", "classid", "root:1",
+	if err := runTC("class", "add", "dev", iface, "parent", "1:", "classid", "1:1",
 		"htb", "rate", globalArg, "ceil", globalArg); err != nil {
 		return nil, err
 	}
-	if err := runTC("qdisc", "add", "dev", iface, "parent", "root:1", "fq_codel"); err != nil {
+	if err := runTC("qdisc", "add", "dev", iface, "parent", "1:1", "fq_codel"); err != nil {
 		return nil, err
 	}
 
@@ -510,15 +510,15 @@ func addClientClass(iface, mac string, classID int, rateArg string) error {
 	if !isValidMAC(mac) {
 		return fmt.Errorf("invalid MAC format: %q — skipping tc filter", mac)
 	}
-	cid := fmt.Sprintf("root:%d", classID)
-	if err := runTC("class", "add", "dev", iface, "parent", "root:", "classid", cid,
+	cid := fmt.Sprintf("1:%d", classID)
+	if err := runTC("class", "add", "dev", iface, "parent", "1:", "classid", cid,
 		"htb", "rate", rateArg, "ceil", rateArg); err != nil {
 		return err
 	}
 	if err := runTC("qdisc", "add", "dev", iface, "parent", cid, "fq_codel"); err != nil {
 		return err
 	}
-	if err := runTC("filter", "add", "dev", iface, "parent", "root:", "protocol", "ip",
+	if err := runTC("filter", "add", "dev", iface, "parent", "1:", "protocol", "ip",
 		"u32", "match", "ether", "dst", mac,
 		"flowid", cid); err != nil {
 		return err
@@ -533,12 +533,12 @@ func delClientClass(iface, mac string, classID int) {
 		log.Printf("delClientClass: invalid MAC format %q on %s — skipping", mac, iface)
 		return
 	}
-	cid := fmt.Sprintf("root:%d", classID)
+	cid := fmt.Sprintf("1:%d", classID)
 	// Delete filter first, then qdisc, then class
-	exec.Command("tc", "filter", "del", "dev", iface, "parent", "root:", "protocol", "ip",
+	exec.Command("tc", "filter", "del", "dev", iface, "parent", "1:", "protocol", "ip",
 		"u32", "match", "ether", "dst", mac, "flowid", cid).Run()
 	exec.Command("tc", "qdisc", "del", "dev", iface, "parent", cid).Run()
-	exec.Command("tc", "class", "del", "dev", iface, "parent", "root:", "classid", cid).Run()
+	exec.Command("tc", "class", "del", "dev", iface, "parent", "1:", "classid", cid).Run()
 }
 
 // activeSessionMACs returns distinct MACs of active sessions whose client
@@ -745,7 +745,10 @@ func EnsurePerDeviceClass(db *sql.DB, iface, mac, clientIP, action string) {
 // ============================================
 
 // QDiag runs tc diagnostic commands on an interface and returns raw output.
-// Usage: GET /api/admin/portal/qdiag?iface=end0.22
+// Usage: GET /api/admin/portal/qdiag?iface=end0.22[&client_ip=10.0.22.110]
+// When client_ip is provided, runs `ip -o route get <client_ip>` and includes
+// the output as a "route" field so the admin can verify traffic flows through
+// the expected interface (a common cause of "CAKE applies but doesn't shape").
 func (h *QdiscHandler) QDiag(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -771,13 +774,32 @@ func (h *QdiscHandler) QDiag(w http.ResponseWriter, r *http.Request) {
 		return strings.TrimSpace(string(out))
 	}
 
-	sendJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"success": true,
 		"iface":   iface,
 		"qdisc":   runShow("qdisc"),
 		"class":   runShow("class"),
 		"filter":  runShow("filter"),
-	})
+	}
+
+	// Optional: route lookup for a client IP to verify traffic path.
+	clientIP := r.URL.Query().Get("client_ip")
+	if clientIP != "" {
+		// Validate IP to prevent shell injection via the ip command.
+		if net.ParseIP(clientIP) == nil {
+			resp["route"] = "(error: invalid IP address)"
+		} else {
+			cmd := exec.Command("ip", "-o", "route", "get", clientIP)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				resp["route"] = fmt.Sprintf("(error: %v)\n%s", err, strings.TrimSpace(string(out)))
+			} else {
+				resp["route"] = strings.TrimSpace(string(out))
+			}
+		}
+	}
+
+	sendJSON(w, http.StatusOK, resp)
 }
 
 // ============================================

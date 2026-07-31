@@ -134,6 +134,39 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		log.Printf("session start: no MAC resolved for %s (continuing IP-only)", clientIP)
 	}
 
+	// F6: Pre-lock ban check — mirrors Arm's pattern so a banned client
+	// never acquires the per-VLAN lock (the in-tx check stays as TOCTOU net).
+	if clientMAC != "" {
+		if until, _, _, banned := activeBan(h.DB, clientMAC); banned {
+			sendJSON(w, http.StatusForbidden, map[string]interface{}{
+				"success":      false,
+				"banned":       true,
+				"banned_until": until.Format(time.RFC3339),
+				"reason":       "tap_abuse",
+				"message":      "Temporarily banned for tap abuse. Please try again later.",
+			})
+			return
+		}
+	}
+
+	// --- Per-VLAN pay lock: serialize session creation ----------------
+	// The lock is held around unprocessedWindowCoins + creditSession so
+	// two clients on the same VLAN cannot race to create/extend sessions
+	// from the same unprocessed coin_events rows. A watchdog in paylock.go
+	// force-releases after payLockTimeout (60s) as a deadlock guard.
+	// F8: vlanKey is captured from TryAcquire and passed to Release.
+	if acquired, _, vlanKey := PayLockTryAcquire(clientIP); !acquired {
+		// F3: ALL CAPS message, F4: no holder IP leak
+		sendJSON(w, http.StatusLocked, map[string]interface{}{
+			"success": false,
+			"code":    "paying",
+			"message": "SOMEBODY IS PAYING, PLEASE WAIT FOR YOUR TURN",
+		})
+		return
+	} else {
+		defer PayLockRelease(clientIP, vlanKey)
+	}
+
 	coins := h.unprocessedWindowCoins()
 	if coins.totalMinutes == 0 {
 		msg := "no credited coins"
@@ -422,6 +455,31 @@ func (h *SessionHandler) Status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSON(w, http.StatusOK, response)
+}
+
+// CanStart is a lightweight pre-flight check (F10): the portal calls
+// this BEFORE /api/session/start to surface "SOMEBODY IS PAYING" without
+// consuming the user's arm. It does a non-blocking TryAcquire + immediate
+// Release and returns {can_start: true} or {can_start: false, code: "paying"}.
+// PUBLIC — no auth required.
+func (h *SessionHandler) CanStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	clientIP := clientIPFromRequest(r)
+	acquired, _, vlanKey := PayLockTryAcquire(clientIP)
+	if acquired {
+		PayLockRelease(clientIP, vlanKey)
+		sendJSON(w, http.StatusOK, map[string]interface{}{"can_start": true})
+		return
+	}
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"can_start": false,
+		"code":      "paying",
+		"message":   "SOMEBODY IS PAYING, PLEASE WAIT FOR YOUR TURN",
+	})
 }
 
 // GetCurrent returns the active session for a client IP (legacy shape)

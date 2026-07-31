@@ -80,6 +80,27 @@ func (h *CoinslotHandler) Arm(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// --- Per-VLAN pay lock: reject if another client is mid-payment ---
+	// The lock is checked here (non-blocking try) so the portal gets an
+	// immediate 423 and can show a clear "somebody is paying" message
+	// instead of arming the GPIO and letting the user insert coins that
+	// will be credited to someone else's session.
+	if acquired, _, vlanKey := PayLockTryAcquire(clientIP); !acquired {
+		// F3: ALL CAPS message, F4: no holder IP leak, F5: armed:false
+		sendJSON(w, http.StatusLocked, map[string]interface{}{
+			"success": false,
+			"armed":   false,
+			"code":    "paying",
+			"message": "SOMEBODY IS PAYING, PLEASE WAIT FOR YOUR TURN",
+		})
+		return
+	} else {
+		// We acquired the lock just to CHECK — release immediately.
+		// The actual critical section is in the session Start handler
+		// around creditSession. We only peek here to fail fast.
+		PayLockRelease(clientIP, vlanKey)
+	}
+
 	var req struct {
 		DurationSec int `json:"duration_sec"`
 	}

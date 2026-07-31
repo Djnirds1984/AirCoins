@@ -67,6 +67,7 @@ func main() {
 	// extend/end/create mutate arbitrary sessions -> admin auth required.
 	mux.HandleFunc("/api/session/current", sessionHandler.GetCurrent)
 	mux.HandleFunc("/api/session/start", sessionHandler.Start)
+	mux.HandleFunc("/api/session/can-start", sessionHandler.CanStart)
 	mux.HandleFunc("/api/session/extend", handlers.AuthMiddleware(sessionHandler.Extend))
 	mux.HandleFunc("/api/session/end", handlers.AuthMiddleware(sessionHandler.End))
 	mux.HandleFunc("/api/session/status", sessionHandler.Status)

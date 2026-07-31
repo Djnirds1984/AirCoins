@@ -80,13 +80,21 @@ func (h *CoinslotHandler) Arm(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// --- Per-VLAN pay lock: reject if another client is mid-payment ---
-	// The lock is checked here (non-blocking try) so the portal gets an
-	// immediate 423 and can show a clear "somebody is paying" message
-	// instead of arming the GPIO and letting the user insert coins that
-	// will be credited to someone else's session.
-	if acquired, _, vlanKey := PayLockTryAcquire(clientIP); !acquired {
-		// F3: ALL CAPS message, F4: no holder IP leak, F5: armed:false
+	// --- Parse body BEFORE acquiring lock (body is optional) -----------
+	var req struct {
+		DurationSec int `json:"duration_sec"`
+	}
+	if r.Body != nil {
+		json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	// --- Per-VLAN pay lock: HOLD across arm→start lifecycle -----------
+	// The lock is acquired here and NOT released until the session Start
+	// handler validates the pay_ticket and releases it. This prevents a
+	// second device on the same VLAN from arming while the first device
+	// is inserting coins.
+	acquired, _, vlanKey, ticket := PayLockTryAcquire(clientIP)
+	if !acquired {
 		sendJSON(w, http.StatusLocked, map[string]interface{}{
 			"success": false,
 			"armed":   false,
@@ -94,20 +102,15 @@ func (h *CoinslotHandler) Arm(w http.ResponseWriter, r *http.Request) {
 			"message": "SOMEBODY IS PAYING, PLEASE WAIT FOR YOUR TURN",
 		})
 		return
-	} else {
-		// We acquired the lock just to CHECK — release immediately.
-		// The actual critical section is in the session Start handler
-		// around creditSession. We only peek here to fail fast.
-		PayLockRelease(clientIP, vlanKey)
 	}
-
-	var req struct {
-		DurationSec int `json:"duration_sec"`
-	}
-	// Body is optional; ignore decode errors and fall back to default
-	if r.Body != nil {
-		json.NewDecoder(r.Body).Decode(&req)
-	}
+	// Lock is HELD — the ticket is returned to the client and will be
+	// validated by Start. If anything below fails, release the lock.
+	lockHeld := true
+	defer func() {
+		if lockHeld {
+			PayLockRelease(clientIP, vlanKey)
+		}
+	}()
 
 	duration := req.DurationSec
 	if duration <= 0 {
@@ -139,10 +142,14 @@ func (h *CoinslotHandler) Arm(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Failed to record coin slot arm time: %v", err)
 	}
 
+	// Arm succeeded — don't release the lock in the defer (Start will).
+	lockHeld = false
+
 	sendJSON(w, http.StatusOK, map[string]interface{}{
 		"armed":      true,
 		"armed_at":   armedAt,
 		"expires_at": expiresAt,
+		"pay_ticket": ticket,
 	})
 }
 
@@ -155,6 +162,15 @@ func (h *CoinslotHandler) Disarm(w http.ResponseWriter, r *http.Request) {
 
 	os.Remove(armedFile)
 	os.Remove(armedAtFile)
+
+	// Release the per-VLAN lock if this client still holds it
+	// (e.g. user cancelled the modal before tapping Done Paying).
+	// PayLockRelease is safe to call even if no lock is held.
+	clientIP := clientIPFromRequest(r)
+	vlan := resolveVLAN(clientIP)
+	if vlan != "" {
+		PayLockRelease(clientIP, vlan)
+	}
 
 	sendJSON(w, http.StatusOK, map[string]interface{}{
 		"armed": false,

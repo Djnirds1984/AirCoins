@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"log"
 	"os/exec"
 	"strings"
@@ -12,20 +14,21 @@ import (
 // released. Protects against a client that armed, walked away and never
 // called /api/session/start — the next client would otherwise be stuck
 // until the API process restarts.
-// F2: Bumped from 15s to 60s — creditSession on a loaded Pi with slow DB
-// can exceed 15s. Combined with the generation counter (F1) this gives a
-// proper safety ceiling without spurious force-releases.
-const payLockTimeout = 60 * time.Second
+// 120s covers the full arm→coins→done-paying window with headroom.
+// The gen-counter mechanism prevents stale watchdogs from draining newer
+// holders' semaphores.
+const payLockTimeout = 120 * time.Second
 
 // payLockEntry is one per-VLAN semaphore (buffered channel of size 1)
-// together with the IP of the current holder for diagnostics and a
-// generation counter to prevent stale watchdogs from draining a newer
-// holder's semaphore (F1).
+// together with the IP of the current holder for diagnostics, a ticket
+// for the arm→start handoff, and a generation counter to prevent stale
+// watchdogs from draining a newer holder's semaphore.
 type payLockEntry struct {
 	sem    chan struct{} // capacity 1: empty = free, full = held
 	holder string        // IP of the current holder (empty when free)
+	ticket string        // random token issued on Arm, validated on Start
 	gen    uint64        // incremented on each acquire; watchdog checks gen
-	mu     sync.Mutex    // protects holder + gen writes
+	mu     sync.Mutex    // protects holder + ticket + gen writes
 }
 
 // payLockRegistry is the process-wide map of per-VLAN locks. The API
@@ -48,35 +51,48 @@ func getOrCreateEntry(vlanKey string) *payLockEntry {
 	return e
 }
 
+// generateTicket produces a 16-hex-char random token using crypto/rand.
+func generateTicket() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback: extremely unlikely on any supported OS.
+		log.Printf("paylock: crypto/rand failed: %v — using timestamp fallback", err)
+		return hex.EncodeToString([]byte(time.Now().Format("150405.000")))
+	}
+	return hex.EncodeToString(b)
+}
+
 // PayLockTryAcquire attempts a non-blocking lock on the caller's VLAN.
-// Returns true on success (caller MUST call PayLockRelease when done),
-// false when another client on the same VLAN already holds the lock.
-// holder receives the current holder's IP (may be empty).
+// On success it generates a random ticket, stores it in the entry, and
+// returns (true, "", vlanKey, ticket). The caller MUST pass the ticket
+// to PayLockValidateAndRelease when done (e.g. in session Start).
+//
+// Returns (false, holderIP, vlanKey, "") when another client on the same
+// VLAN already holds the lock.
 //
 // If the caller's IP cannot be resolved to a VLAN (e.g. admin from WAN),
-// the lock is skipped and true is returned — unknown callers are never
-// blocked, only known same-VLAN races are serialized.
-//
-// F8: the resolved VLAN key is returned so Release can reuse it without
-// a second syscall.
-func PayLockTryAcquire(clientIP string) (acquired bool, holder string, vlanKey string) {
+// the lock is skipped and (true, "", "", "") is returned — unknown callers
+// are never blocked, only known same-VLAN races are serialized.
+func PayLockTryAcquire(clientIP string) (acquired bool, holder string, vlanKey string, ticket string) {
 	vlan := resolveVLAN(clientIP)
 	if vlan == "" {
 		// Cannot resolve to a VLAN — let the request through.
-		return true, "", ""
+		return true, "", "", ""
 	}
 
 	entry := getOrCreateEntry(vlan)
 	select {
 	case entry.sem <- struct{}{}:
-		// Acquired. Record holder, bump generation, and start a watchdog
-		// goroutine that force-releases after payLockTimeout so a stuck
-		// client cannot wedge the VLAN indefinitely.
-		// F1: The watchdog captures the current generation and only drains
+		// Acquired. Record holder, generate ticket, bump generation, and
+		// start a watchdog goroutine that force-releases after
+		// payLockTimeout so a stuck client cannot wedge the VLAN.
+		// The watchdog captures the current generation and only drains
 		// if gen still matches at fire time — a stale watchdog from a
 		// previous holder cannot steal the semaphore from a newer holder.
+		t := generateTicket()
 		entry.mu.Lock()
 		entry.holder = clientIP
+		entry.ticket = t
 		entry.gen++
 		myGen := entry.gen
 		entry.mu.Unlock()
@@ -97,6 +113,7 @@ func PayLockTryAcquire(clientIP string) (acquired bool, holder string, vlanKey s
 				e.mu.Lock()
 				old := e.holder
 				e.holder = ""
+				e.ticket = ""
 				e.mu.Unlock()
 				log.Printf("paylock: watchdog force-released VLAN %s (holder %s exceeded %v)", key, old, payLockTimeout)
 			default:
@@ -104,21 +121,71 @@ func PayLockTryAcquire(clientIP string) (acquired bool, holder string, vlanKey s
 			}
 		}(entry, vlan, myGen)
 
-		return true, "", vlan
+		return true, "", vlan, t
 	default:
 		// Semaphore is full — another client holds the lock.
 		entry.mu.Lock()
 		h := entry.holder
 		entry.mu.Unlock()
-		return false, h, vlan
+		return false, h, vlan, ""
 	}
 }
 
-// PayLockRelease releases the per-VLAN lock previously acquired by
-// PayLockTryAcquire. If the watchdog already drained the semaphore this
-// is a harmless no-op (logged for post-mortem, F9).
+// PayLockValidateAndRelease validates that the given ticket matches the
+// stored ticket for the caller's VLAN, then releases the lock. This is
+// the "start" side of the arm→start handoff.
 //
-// F8: accepts the pre-resolved vlanKey from TryAcquire to avoid a second
+// Returns:
+//   - ("", true) on success (ticket matched, lock released)
+//   - ("invalid_ticket", false) if ticket is missing or doesn't match
+//   - ("lock_gone", false) if no lock is held for this VLAN (watchdog
+//     released it, or lock was never acquired)
+//   - ("no_vlan", true) if client IP doesn't resolve to a VLAN (pass-through)
+func PayLockValidateAndRelease(clientIP, ticket string) (reason string, released bool) {
+	vlan := resolveVLAN(clientIP)
+	if vlan == "" {
+		// No VLAN — pass through (same as TryAcquire's unresolvable path).
+		return "no_vlan", true
+	}
+
+	payLockRegistry.Lock()
+	entry, ok := payLockRegistry.entries[vlan]
+	payLockRegistry.Unlock()
+	if !ok {
+		return "lock_gone", false
+	}
+
+	entry.mu.Lock()
+	storedTicket := entry.ticket
+	entry.mu.Unlock()
+
+	if ticket == "" || storedTicket == "" || ticket != storedTicket {
+		return "invalid_ticket", false
+	}
+
+	// Ticket matches — drain the semaphore and clear state.
+	select {
+	case <-entry.sem:
+		entry.mu.Lock()
+		entry.holder = ""
+		entry.ticket = ""
+		entry.mu.Unlock()
+		return "", true
+	default:
+		// Watchdog already drained it — ticket was valid but lock is gone.
+		entry.mu.Lock()
+		entry.ticket = ""
+		entry.mu.Unlock()
+		log.Printf("paylock: ValidateAndRelease default case — watchdog likely already drained VLAN %s (client %s)", vlan, clientIP)
+		return "lock_gone", false
+	}
+}
+
+// PayLockRelease releases the per-VLAN lock unconditionally (used by the
+// can-start peek and by watchdog-free paths). If the watchdog already
+// drained the semaphore this is a harmless no-op (logged for post-mortem).
+//
+// Accepts the pre-resolved vlanKey from TryAcquire to avoid a second
 // `ip route get` syscall. If vlanKey is empty the caller was unresolvable
 // and no lock was taken.
 func PayLockRelease(clientIP, vlanKey string) {
@@ -138,10 +205,10 @@ func PayLockRelease(clientIP, vlanKey string) {
 		// Successfully drained — we were still the holder.
 		entry.mu.Lock()
 		entry.holder = ""
+		entry.ticket = ""
 		entry.mu.Unlock()
 	default:
-		// F9: Watchdog already drained it — log for post-mortem of the
-		// race in F1 if it ever re-appears.
+		// Watchdog already drained it — log for post-mortem.
 		log.Printf("paylock: Release default case — watchdog likely already drained VLAN %s (client %s)", vlanKey, clientIP)
 	}
 }
@@ -149,7 +216,7 @@ func PayLockRelease(clientIP, vlanKey string) {
 // resolveVLAN returns the gateway interface name (e.g. "end0.22") for
 // the given client IP by parsing `ip -o route get <ip>`. Returns ""
 // when the IP cannot be resolved (loopback, WAN admin, unreachable).
-// F7: if the route goes through a gateway hop ("via" token before "dev"),
+// If the route goes through a gateway hop ("via" token before "dev"),
 // the output interface is the gateway's outgoing interface, not the
 // client's VLAN — return "" in that case.
 func resolveVLAN(ip string) string {

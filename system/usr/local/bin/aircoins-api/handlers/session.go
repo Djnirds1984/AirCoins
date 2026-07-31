@@ -128,6 +128,14 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse pay_ticket from request body (ticket-based arm→start handoff).
+	var req struct {
+		PayTicket string `json:"pay_ticket"`
+	}
+	if r.Body != nil {
+		json.NewDecoder(r.Body).Decode(&req)
+	}
+
 	clientIP := clientIPFromRequest(r)
 	clientMAC := resolveClientMAC(clientIP)
 	if clientMAC == "" {
@@ -135,7 +143,7 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// F6: Pre-lock ban check — mirrors Arm's pattern so a banned client
-	// never acquires the per-VLAN lock (the in-tx check stays as TOCTOU net).
+	// cannot proceed (the in-tx check stays as TOCTOU net).
 	if clientMAC != "" {
 		if until, _, _, banned := activeBan(h.DB, clientMAC); banned {
 			sendJSON(w, http.StatusForbidden, map[string]interface{}{
@@ -149,23 +157,32 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// --- Per-VLAN pay lock: serialize session creation ----------------
-	// The lock is held around unprocessedWindowCoins + creditSession so
-	// two clients on the same VLAN cannot race to create/extend sessions
-	// from the same unprocessed coin_events rows. A watchdog in paylock.go
-	// force-releases after payLockTimeout (60s) as a deadlock guard.
-	// F8: vlanKey is captured from TryAcquire and passed to Release.
-	if acquired, _, vlanKey := PayLockTryAcquire(clientIP); !acquired {
-		// F3: ALL CAPS message, F4: no holder IP leak
+	// --- Ticket validation + lock release (arm→start handoff) --------
+	// The per-VLAN lock was acquired by Arm. Start validates the ticket
+	// and releases the lock. If the ticket is missing/mismatched the
+	// client didn't go through Arm (or the watchdog released the lock).
+	lockReason, released := PayLockValidateAndRelease(clientIP, req.PayTicket)
+	if !released {
+		if lockReason == "invalid_ticket" {
+			sendJSON(w, http.StatusForbidden, map[string]interface{}{
+				"success": false,
+				"message": "Invalid or missing pay_ticket",
+			})
+			return
+		}
+		// lock_gone: the watchdog already released, or another device
+		// has since acquired the lock.
 		sendJSON(w, http.StatusLocked, map[string]interface{}{
 			"success": false,
 			"code":    "paying",
 			"message": "SOMEBODY IS PAYING, PLEASE WAIT FOR YOUR TURN",
 		})
 		return
-	} else {
-		defer PayLockRelease(clientIP, vlanKey)
 	}
+	// Lock is now released — the critical section (creditSession) runs
+	// without the per-VLAN lock since the ticket already proved this
+	// client is the legitimate holder. The unprocessed coin_events
+	// are consumed by the transaction below.
 
 	coins := h.unprocessedWindowCoins()
 	if coins.totalMinutes == 0 {
@@ -469,7 +486,7 @@ func (h *SessionHandler) CanStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientIP := clientIPFromRequest(r)
-	acquired, _, vlanKey := PayLockTryAcquire(clientIP)
+	acquired, _, vlanKey, _ := PayLockTryAcquire(clientIP)
 	if acquired {
 		PayLockRelease(clientIP, vlanKey)
 		sendJSON(w, http.StatusOK, map[string]interface{}{"can_start": true})

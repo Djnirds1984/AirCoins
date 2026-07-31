@@ -1074,6 +1074,7 @@
             gpio.lastCoinId = 0;
             gpio.totalAmount = 0;
             gpio.totalSeconds = 0;
+            gpio.payTicket = '';
             gpio.active = true;
 
             // Reset UI
@@ -1104,6 +1105,10 @@
                 }
                 if (data.body && data.body.armed && data.body.expires_at) {
                     gpio.expiresAt = data.body.expires_at;
+                }
+                // Stash the pay_ticket for the session Start call.
+                if (data.body && data.body.pay_ticket) {
+                    gpio.payTicket = data.body.pay_ticket;
                 }
             });
 
@@ -1257,9 +1262,20 @@
             document.getElementById('gpioStatus').textContent = 'Starting session...';
             document.getElementById('gpioStatus').className = 'gpio-status detecting';
 
-            fetch(SESSION_START_URL, { method: 'POST', headers: { 'Accept': 'application/json' } })
+            fetch(SESSION_START_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ pay_ticket: gpio.payTicket || '' })
+            })
                 .then(r => r.json().catch(() => ({})).then(body => ({ ok: r.ok, status: r.status, body: body })))
                 .then(res => {
+                    // 403 with "Invalid or missing pay_ticket" → session expired/already paid.
+                    if (res.status === 403 && res.body && res.body.message &&
+                        res.body.message.indexOf('pay_ticket') !== -1) {
+                        closeGpioModal();
+                        showNotification('Session expired or already paid, please try again', 'error');
+                        return;
+                    }
                     // 423 or code:"paying" → another device is mid-payment.
                     if (res.status === 423 || (res.body && res.body.code === 'paying')) {
                         closeGpioModal();

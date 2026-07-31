@@ -125,45 +125,6 @@
             border-radius: 15px;
         }
 
-        /* TIMER PAGE */
-        .timer-container {
-            text-align: center;
-            padding: 40px 20px;
-        }
-        .timer-display {
-            font-size: 80px;
-            font-weight: bold;
-            color: #00d4ff;
-            text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
-            margin: 30px 0;
-            font-family: 'Courier New', monospace;
-        }
-        .timer-info {
-            background: rgba(255,255,255,0.05);
-            border-radius: 15px;
-            padding: 20px;
-            max-width: 400px;
-            margin: 20px auto;
-        }
-        .timer-info p { margin: 8px 0; color: #aaa; }
-        .timer-info span { color: #fff; font-weight: bold; }
-
-        .progress-bar {
-            width: 100%;
-            max-width: 400px;
-            height: 10px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 5px;
-            margin: 20px auto;
-            overflow: hidden;
-        }
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #00d4ff, #00ff88);
-            border-radius: 5px;
-            transition: width 1s linear;
-        }
-
         .btn {
             padding: 12px 30px;
             border: none;
@@ -211,33 +172,25 @@
         .modal h2 { margin-bottom: 15px; color: #ffd700; }
         .modal p { color: #aaa; margin-bottom: 20px; }
 
-        /* COIN ANIMATION */
-        .coin-drop {
-            animation: coinDrop 0.6s ease-in;
+        /* RATES MODAL (pricing tiers from /api/pricing) */
+        .rates-modal .modal {
+            max-height: 85vh;
+            overflow-y: auto;
         }
-        @keyframes coinDrop {
-            0% { transform: translateY(-100px) rotate(0deg); opacity: 0; }
-            50% { transform: translateY(10px) rotate(180deg); opacity: 1; }
-            100% { transform: translateY(0) rotate(360deg); opacity: 1; }
+        .rates-modal .coin-section {
+            grid-template-columns: 1fr;
+            gap: 12px;
+            max-width: none;
+            margin: 20px 0;
         }
+        .rates-modal .coin-btn { padding: 18px 15px; }
+        .rates-modal .pricing-empty { margin: 20px 0; }
 
         /* RESPONSIVE */
         @media (max-width: 768px) {
             .hero h1 { font-size: 32px; }
-            .timer-display { font-size: 50px; }
             .navbar { flex-direction: column; gap: 10px; }
             .nav-links { flex-wrap: wrap; justify-content: center; }
-        }
-
-        .section-title {
-            text-align: center;
-            font-size: 28px;
-            margin-bottom: 10px;
-        }
-        .section-subtitle {
-            text-align: center;
-            color: #aaa;
-            margin-bottom: 30px;
         }
 
         /* NOTIFICATION */
@@ -417,9 +370,7 @@
     <nav class="navbar">
         <div class="logo">Air<span>Coins</span></div>
         <div class="nav-links">
-            <a class="active" data-page="home" onclick="showPage('home')">Home</a>
-            <a data-page="connect" onclick="showPage('connect')">Connect</a>
-            <a data-page="status" onclick="showPage('status')">My Session</a>
+            <a class="active">Home</a>
             <a href="admin.html">Admin</a>
         </div>
     </nav>
@@ -440,84 +391,37 @@
             <p style="color:#aaa;">Speed: <strong style="color:#00ff88;">Up to 50 Mbps</strong></p>
         </div>
 
-        <!-- RUNNING TIMER ON MAIN SCREEN -->
+        <!-- SESSION STATUS CARD (shown while /api/session/status reports an active session) -->
         <div class="running-timer-bar" id="runningTimerBar">
             <div class="running-timer-label">Time Remaining</div>
-            <div class="running-timer-value" id="runningTimerValue">00:00:00:00</div>
+            <div class="running-timer-value" id="runningTimerValue">00:00:00</div>
             <div style="font-size:12px; color:#aaa; margin-top:5px;">
-                <span style="color:#ffd700;">DD</span>:HH:MM:SS &nbsp;|&nbsp; Total Paid: <span id="runningTotalCoins" style="color:#00ff88;">₱0</span>
+                HH:MM:SS &nbsp;|&nbsp; Total Paid: <span id="runningTotalCoins" style="color:#00ff88;">₱0</span>
+                &nbsp;|&nbsp; Status: <span id="sessionStatus" style="color:#00ff88;">Connected</span>
             </div>
         </div>
 
-        <!-- INSERT COIN BUTTON -->
+        <!-- INSERT COIN + RATES BUTTONS -->
         <div style="text-align:center;">
             <button class="insert-coin-main-btn" id="insertCoinBtn" onclick="openGpioModal()">
                 <span class="coin-slot-icon"></span>
                 INSERT COIN
             </button>
-        </div>
-
-        <h2 class="section-title">Pricing</h2>
-        <p class="section-subtitle">Choose your preferred coin denomination</p>
-
-        <!-- Rendered from /api/pricing by renderPricingCards() -->
-        <div class="coin-section" id="pricingCardsHome" style="display:none;"></div>
-        <div class="pricing-empty" id="pricingEmptyHome">Loading rates&hellip;</div>
-    </div>
-
-    <!-- CONNECT PAGE -->
-    <div class="page" id="page-connect">
-        <h2 class="section-title">Connect to Network</h2>
-        <p class="section-subtitle">Insert coins to start your session</p>
-
-        <div class="status-card">
-            <div id="coinSlotArea">
-                <p style="color:#aaa; margin-bottom:20px;">Select a coin to insert:</p>
-                <!-- Rendered from /api/pricing by renderPricingCards() -->
-                <div class="coin-section" id="pricingCardsConnect" style="display:none;"></div>
-                <div class="pricing-empty" id="pricingEmptyConnect">Loading rates&hellip;</div>
+            <div>
+                <button class="btn btn-primary" onclick="openRatesModal()">View Rates</button>
             </div>
         </div>
     </div>
 
-    <!-- STATUS / SESSION PAGE -->
-    <div class="page" id="page-status">
-        <div class="timer-container">
-            <h2 class="section-title" id="sessionTitle">No Active Session</h2>
-
-            <div id="noSession">
-                <p style="color:#aaa; margin:30px 0;">Insert coins to start browsing the internet.</p>
-                <button class="btn btn-primary" onclick="showPage('connect')">Insert Coins Now</button>
-            </div>
-
-            <div id="activeSession" style="display:none;">
-                <div class="timer-display" id="timerDisplay">00:00:00:00</div>
-
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progressFill" style="width:100%"></div>
-                </div>
-
-                <div class="timer-info">
-                    <p>Coin Inserted: <span id="coinInserted">₱0</span></p>
-                    <p>Total Time: <span id="totalTime">0 min</span></p>
-                    <p>Time Remaining: <span id="timeRemaining">0 min</span></p>
-                    <p>Status: <span id="sessionStatus" style="color:#00ff88;">Connected</span></p>
-                </div>
-
-                <div style="margin-top:20px;">
-                    <button class="btn btn-success" onclick="addMoreTime()">Add More Coins</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- COIN INSERT MODAL -->
-    <div class="modal-overlay" id="coinModal">
+    <!-- RATES MODAL (pricing tiers from the admin Pricing page) -->
+    <div class="modal-overlay rates-modal" id="ratesModal">
         <div class="modal">
-            <div class="coin-icon coin-drop" id="modalCoinIcon" style="width:80px;height:80px;font-size:32px;margin:0 auto 20px;">₱1</div>
-            <h2 id="modalTitle">Coin Accepted!</h2>
-            <p id="modalDesc">Your session has started. Enjoy browsing!</p>
-            <button class="btn btn-primary" onclick="closeModal()">Start Browsing</button>
+            <h2>Rates</h2>
+            <p>Coin denominations and the time they credit.</p>
+            <!-- Rendered from /api/pricing by renderPricingCards() -->
+            <div class="coin-section" id="pricingCardsRates" style="display:none;"></div>
+            <div class="pricing-empty" id="pricingEmptyRates">Loading rates&hellip;</div>
+            <button class="btn btn-primary" onclick="closeRatesModal()" style="width:100%; margin-top:10px;">Close</button>
         </div>
     </div>
 
@@ -616,25 +520,16 @@
             }));
         }
 
-        // ==================== NAVIGATION ====================
-        function showPage(pageId) {
-            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-            document.querySelectorAll('.nav-links a').forEach(a => a.classList.remove('active'));
-            document.getElementById('page-' + pageId).classList.add('active');
-            const navLink = document.querySelector('.nav-links a[data-page="' + pageId + '"]');
-            if (navLink) navLink.classList.add('active');
-
-            if (pageId === 'status') updateSessionView();
-        }
-
         // ==================== COIN INSERT ====================
-        // Payment happens at the PHYSICAL coin slot — the pricing cards are
-        // informational, so tapping one just opens the coin listener modal.
+        // Payment happens at the PHYSICAL coin slot — the pricing cards in
+        // the Rates modal are informational, so tapping one just opens the
+        // coin listener modal.
         function insertCoin(amount) {
             if (!state.systemOnline) {
                 showNotification('System is currently offline!', 'error');
                 return;
             }
+            closeRatesModal();
             openGpioModal();
         }
 
@@ -662,56 +557,18 @@
         }
 
         function updateTimerDisplay() {
-            const days = Math.floor(state.remainingSeconds / 86400);
-            const hrs = Math.floor((state.remainingSeconds % 86400) / 3600);
-            const mins = Math.floor((state.remainingSeconds % 3600) / 60);
-            const secs = state.remainingSeconds % 60;
-
-            const display = String(days).padStart(2, '0') + ':' +
-                           String(hrs).padStart(2, '0') + ':' +
-                           String(mins).padStart(2, '0') + ':' +
-                           String(secs).padStart(2, '0');
-
-            document.getElementById('timerDisplay').textContent = display;
-
-            // Progress bar
-            const progress = (state.remainingSeconds / state.totalSeconds) * 100;
-            document.getElementById('progressFill').style.width = progress + '%';
-
-            // Change color when low time
-            if (state.remainingSeconds <= 60) {
-                document.getElementById('timerDisplay').style.color = '#ff4444';
-                document.getElementById('progressFill').style.background = '#ff4444';
-            } else if (state.remainingSeconds <= 300) {
-                document.getElementById('timerDisplay').style.color = '#ffd700';
-                document.getElementById('progressFill').style.background = 'linear-gradient(90deg, #ffd700, #ffaa00)';
-            } else {
-                document.getElementById('timerDisplay').style.color = '#00d4ff';
-                document.getElementById('progressFill').style.background = 'linear-gradient(90deg, #00d4ff, #00ff88)';
-            }
-
-            // Update session info
-            const remainMin = Math.ceil(state.remainingSeconds / 60);
-            const totalMin = Math.ceil(state.totalSeconds / 60);
-            document.getElementById('coinInserted').textContent = '₱' + state.coinsInserted;
-            document.getElementById('totalTime').textContent = totalMin + ' min';
-            document.getElementById('timeRemaining').textContent = remainMin + ' min';
-
-            // Sync running timer on home screen
-            if (state.sessionActive) {
-                updateRunningTimerDisplay();
-            }
+            // The home session card is the only remaining-time display.
+            updateRunningTimerDisplay();
         }
 
+        // Shows the compact session card on Home while a session is active,
+        // and hides it in the idle state.
         function updateSessionView() {
+            const bar = document.getElementById('runningTimerBar');
             if (state.sessionActive && state.remainingSeconds > 0) {
-                document.getElementById('noSession').style.display = 'none';
-                document.getElementById('activeSession').style.display = 'block';
-                document.getElementById('sessionTitle').textContent = 'Session Active';
+                bar.classList.add('active');
             } else {
-                document.getElementById('noSession').style.display = 'block';
-                document.getElementById('activeSession').style.display = 'none';
-                document.getElementById('sessionTitle').textContent = 'No Active Session';
+                bar.classList.remove('active');
             }
         }
 
@@ -747,9 +604,13 @@
         }
 
         // ==================== MODALS ====================
-        function closeModal() {
-            document.getElementById('coinModal').classList.remove('active');
-            updateSessionView();
+        function openRatesModal() {
+            renderPricingCards();
+            document.getElementById('ratesModal').classList.add('active');
+        }
+
+        function closeRatesModal() {
+            document.getElementById('ratesModal').classList.remove('active');
         }
 
         function closeWarningModal() {
@@ -846,15 +707,15 @@
             return text;
         }
 
-        // Rebuilds the coin cards on both the home and connect pages from the
-        // tiers currently in state.pricing. An empty table is a valid state.
+        // Rebuilds the coin cards inside the Rates modal from the tiers
+        // currently in state.pricing. An empty table is a valid state.
         function renderPricingCards() {
             const tiers = Object.keys(state.pricing)
                 .map(key => parseInt(key, 10))
                 .filter(coin => coin > 0)
                 .sort((a, b) => a - b);
 
-            ['Home', 'Connect'].forEach(page => {
+            ['Rates'].forEach(page => {
                 const grid = document.getElementById('pricingCards' + page);
                 const empty = document.getElementById('pricingEmpty' + page);
                 if (!grid || !empty) return;
@@ -1210,7 +1071,7 @@
 
         // Mirrors a session object returned by the server (POST
         // /api/session/start) into the local display state and shows the
-        // session tab with the REAL remaining time.
+        // home session card with the REAL remaining time.
         function applyServerSession(session, extended) {
             const remaining = parseInt(session.remaining, 10) || 0;
             const coins = parseInt(session.coins, 10) || 0;
@@ -1234,14 +1095,13 @@
             updateSessionView();
             startTimer();
             startRunningTimer();
-            showPage('status');
 
             showNotification(extended
                 ? 'Time added! Enjoy browsing.'
                 : 'Session started! Enjoy browsing.', 'success');
         }
 
-        // Running timer on main screen (dd:hh:mm:ss) - COUNTDOWN
+        // Running timer on the home session card (hh:mm:ss) - COUNTDOWN
         function startRunningTimer() {
             if (gpio.sessionInterval) clearInterval(gpio.sessionInterval);
 
@@ -1262,13 +1122,11 @@
         function updateRunningTimerDisplay() {
             // Use remainingSeconds from the session countdown
             const remaining = state.remainingSeconds;
-            const days = Math.floor(remaining / 86400);
-            const hours = Math.floor((remaining % 86400) / 3600);
+            const hours = Math.floor(remaining / 3600);
             const mins = Math.floor((remaining % 3600) / 60);
             const secs = remaining % 60;
 
-            const display = String(days).padStart(2, '0') + ':' +
-                           String(hours).padStart(2, '0') + ':' +
+            const display = String(hours).padStart(2, '0') + ':' +
                            String(mins).padStart(2, '0') + ':' +
                            String(secs).padStart(2, '0');
 

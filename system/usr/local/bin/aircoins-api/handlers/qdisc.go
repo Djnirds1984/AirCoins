@@ -26,9 +26,9 @@ import (
 
 // QdiscRule is the per-interface shaping config stored in the DB.
 type QdiscRule struct {
-	Qdisc            string `json:"qdisc"`              // "cake" | "fq_codel"
-	GlobalBwMbps     int    `json:"global_bw_mbps"`     // total cap, > 0
-	PerDeviceBwMbps  int    `json:"per_device_bw_mbps"` // 0 = global only
+	Qdisc           string `json:"qdisc"`              // "cake" | "fq_codel"
+	GlobalBwMbps    int    `json:"global_bw_mbps"`     // total cap, > 0
+	PerDeviceBwMbps int    `json:"per_device_bw_mbps"` // 0 = global only
 }
 
 // QdiscHandler serves the admin qdisc endpoints.
@@ -39,7 +39,7 @@ type QdiscHandler struct {
 	mu sync.Mutex
 }
 
-const qdiscSettingKey  = "portal_qdisc_rules"
+const qdiscSettingKey = "portal_qdisc_rules"
 const qdiscSettingDesc = "Per-interface traffic shaping rules (CAKE / FQ_CODEL) as a JSON map keyed by interface"
 
 // allowed qdisc types
@@ -56,6 +56,7 @@ func isValidMAC(mac string) bool { return macRegex.MatchString(mac) }
 // Uses FNV-1a hash mod 65534 + 2 so that:
 //   - class IDs 0 and 1 are reserved (HTB root and default class)
 //   - the result stays within HTB's 16-bit minor limit (65535)
+//
 // The same MAC always maps to the same classID so add and remove are symmetric.
 func macToClassID(mac string) int {
 	h := fnv.New32a()

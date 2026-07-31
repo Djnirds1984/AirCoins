@@ -4,10 +4,12 @@ import (
 	"aircoins-api/models"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -698,6 +700,113 @@ func (h *SessionHandler) End(w http.ResponseWriter, r *http.Request) {
 
 	logAction(h.DB, "INFO", "session", "Session "+strconv.Itoa(req.SessionID)+" ended by admin: "+status)
 	sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "Session ended"})
+}
+
+// ============================================
+// PER-SESSION SPEED OVERRIDE (admin only)
+// ============================================
+
+// Shape sets or clears the per-session speed override (shaped_mbps) and
+// live-applies the tc class rate when FQ_CODEL per-device shaping is active.
+// POST /api/admin/sessions/<id>/shape  body: {"mbps": N}  (N>0 set, N=0 clear)
+func (h *SessionHandler) Shape(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract session ID from path: /api/admin/sessions/<id>/shape
+	path := strings.TrimPrefix(r.URL.Path, "/api/admin/sessions/")
+	path = strings.TrimSuffix(path, "/shape")
+	sessionID, err := strconv.Atoi(path)
+	if err != nil || sessionID <= 0 {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid session ID"})
+		return
+	}
+
+	var req struct {
+		Mbps int `json:"mbps"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid request body"})
+		return
+	}
+	if req.Mbps < 0 {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "mbps must be >= 0"})
+		return
+	}
+
+	// Persist the override in the DB. NULL when cleared (mbps == 0).
+	var shapedMbps *int
+	if req.Mbps > 0 {
+		shapedMbps = &req.Mbps
+	}
+	_, err = h.DB.Exec("UPDATE sessions SET shaped_mbps = $1 WHERE id = $2", shapedMbps, sessionID)
+	if err != nil {
+		log.Printf("Shape: DB update failed for session %d: %v", sessionID, err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to update session"})
+		return
+	}
+
+	// Fetch session details for live-apply.
+	var mac, clientIP, status string
+	err = h.DB.QueryRow(`
+		SELECT COALESCE(client_mac, ''), COALESCE(client_ip, ''), status
+		FROM sessions WHERE id = $1
+	`, sessionID).Scan(&mac, &clientIP, &status)
+	if err != nil {
+		log.Printf("Shape: failed to fetch session %d: %v", sessionID, err)
+		sendJSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"data": map[string]interface{}{
+				"session_id":   sessionID,
+				"mac":          mac,
+				"shaped_mbps":  shapedMbps,
+				"applied":      false,
+				"apply_error":  "session not found after update",
+			},
+		})
+		return
+	}
+
+	// Live-apply: only when session is active, MAC is known, and the portal
+	// interface has FQ_CODEL per-device shaping active.
+	applied := false
+	applyError := ""
+	if status == "active" && mac != "" && clientIP != "" && req.Mbps > 0 {
+		iface := ifaceForClientIP(h.DB, clientIP)
+		if iface != "" {
+			rules := loadQdiscRules(h.DB)
+			if rule, ok := rules[iface]; ok && rule.Qdisc == "fq_codel" && rule.PerDeviceBwMbps > 0 {
+				if err := ChangeClientClassRate(iface, mac, req.Mbps); err != nil {
+					applyError = err.Error()
+					log.Printf("Shape: live-apply failed for session %d (%s): %v", sessionID, mac, err)
+				} else {
+					applied = true
+				}
+			} else {
+				applyError = "portal qdisc is not FQ_CODEL with per-device shaping"
+			}
+		} else {
+			applyError = "no portal interface found for client IP"
+		}
+	} else if req.Mbps == 0 {
+		// Clearing the override — nothing to apply live (the class reverts
+		// to the global per_device rate on next EnsurePerDeviceClass cycle).
+		applied = true
+	}
+
+	logAction(h.DB, "INFO", "session", fmt.Sprintf("Session %d speed override: %d Mbps (applied=%v)", sessionID, req.Mbps, applied))
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"session_id":  sessionID,
+			"mac":         mac,
+			"shaped_mbps": shapedMbps,
+			"applied":     applied,
+			"apply_error": applyError,
+		},
+	})
 }
 
 // ============================================

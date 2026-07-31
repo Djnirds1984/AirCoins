@@ -1431,12 +1431,13 @@
                             <th>Coins Inserted</th>
                             <th>Time Remaining</th>
                             <th>Status</th>
+                            <th>Speed (Mbps)</th>
                             <th>Started At</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="sessions-table-body">
-                        <tr class="empty-row"><td colspan="8">Loading...</td></tr>
+                        <tr class="empty-row"><td colspan="9">Loading...</td></tr>
                     </tbody>
                 </table>
 
@@ -2602,7 +2603,7 @@ async function loadSessions(isAutoRefresh) {
 function renderSessionsAdminTable(sessions) {
     var tbody = document.getElementById('sessions-table-body');
     if (!sessions || sessions.length === 0) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="8">No sessions found</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="9">No sessions found</td></tr>';
         return;
     }
 
@@ -2615,6 +2616,27 @@ function renderSessionsAdminTable(sessions) {
         var isPaused = s.status === 'active' && s.paused_at;
         var badgeClass = isPaused ? 'paused' : (s.status || 'pending');
         var badgeLabel = isPaused ? 'paused' : (s.status || 'unknown');
+
+        // Speed column: editable input for active sessions when FQ_CODEL
+        // per-device shaping is active; disabled otherwise.
+        var qdiscOK = s.qdisc_info && s.qdisc_info.type === 'fq_codel' && s.qdisc_info.per_device_mbps > 0;
+        var globalMbps = qdiscOK ? s.qdisc_info.per_device_mbps : 0;
+        var effectiveMbps = (s.shaped_mbps != null && s.shaped_mbps > 0) ? s.shaped_mbps : globalMbps;
+        var speedCell = '';
+        if (s.status === 'active' && qdiscOK) {
+            speedCell =
+                '<div style="display:flex;align-items:center;gap:4px;">' +
+                    '<input type="number" min="0" step="1" style="width:60px;padding:3px 4px;border:1px solid rgba(255,255,255,0.15);border-radius:6px;background:rgba(255,255,255,0.05);color:#fff;font-size:12px;" ' +
+                        'id="speed-input-' + s.id + '" value="' + (effectiveMbps || '') + '" ' +
+                        (effectiveMbps === 0 ? 'placeholder="—"' : '') + '>' +
+                    '<button class="btn btn-ghost btn-sm" style="padding:2px 6px;font-size:11px;" onclick="setSessionSpeed(' + s.id + ')">Set</button>' +
+                '</div>';
+        } else if (s.status === 'active' && !qdiscOK) {
+            speedCell = '<span title="Requires FQ_CODEL with per-device shaping active" style="color:#555;cursor:help;">N/A</span>';
+        } else {
+            speedCell = effectiveMbps > 0 ? '<span style="color:#888;">' + effectiveMbps + '</span>' : '<span style="color:#555;">—</span>';
+        }
+
         var actions = '';
         if (s.status === 'active') {
             actions =
@@ -2633,10 +2655,37 @@ function renderSessionsAdminTable(sessions) {
                 '<td>' + (s.coins_inserted || 0) + '</td>' +
                 '<td>' + mins + ' min</td>' +
                 '<td><span class="status-badge ' + badgeClass + '">' + badgeLabel + '</span></td>' +
+                '<td>' + speedCell + '</td>' +
                 '<td>' + started + '</td>' +
                 '<td>' + actions + '</td>' +
             '</tr>';
     });
+}
+
+async function setSessionSpeed(sessionId) {
+    var input = document.getElementById('speed-input-' + sessionId);
+    if (!input) return;
+    var mbps = parseInt(input.value, 10);
+    if (isNaN(mbps) || mbps < 0) {
+        showNotification('Enter a valid Mbps value (0 to clear)', 'error');
+        return;
+    }
+    try {
+        var res = await apiCall('POST', '/admin/sessions/' + sessionId + '/shape', { mbps: mbps });
+        if (res && res.success) {
+            var d = res.data || {};
+            if (d.applied) {
+                showNotification('Speed set to ' + mbps + ' Mbps (applied live)', 'success');
+            } else {
+                showNotification('Speed saved (' + mbps + ' Mbps) but not applied: ' + (d.apply_error || 'unknown'), 'warning');
+            }
+            loadSessions();
+        } else {
+            showNotification((res && res.message) || 'Failed to set speed', 'error');
+        }
+    } catch (e) {
+        showNotification('Failed to set speed: ' + e.message, 'error');
+    }
 }
 
 function updateSessionsPagination() {

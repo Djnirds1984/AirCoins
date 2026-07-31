@@ -102,7 +102,16 @@ type Session struct {
 	ExpiresAt               *time.Time `json:"expires_at,omitempty"`
 	PausedAt                *time.Time `json:"paused_at,omitempty"`
 	RemainingSecondsAtPause *int       `json:"remaining_seconds_at_pause,omitempty"`
+	ShapedMbps              *int       `json:"shaped_mbps,omitempty"`
+	QdiscInfo               *QdiscInfo `json:"qdisc_info,omitempty"`
 	CreatedAt               time.Time  `json:"created_at"`
+}
+
+// QdiscInfo is returned alongside each admin session row so the UI knows
+// whether per-device FQ_CODEL shaping is active and what the global default is.
+type QdiscInfo struct {
+	Type           string `json:"type"`            // "fq_codel" | "cake" | ""
+	PerDeviceMbps  int    `json:"per_device_mbps"` // global per-device rate (0 = not active)
 }
 
 type SystemLog struct {

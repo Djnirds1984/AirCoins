@@ -510,7 +510,7 @@ func addClientClass(iface, mac string, classID int, rateArg string) error {
 	if !isValidMAC(mac) {
 		return fmt.Errorf("invalid MAC format: %q — skipping tc filter", mac)
 	}
-	cid := fmt.Sprintf("1:%d", classID)
+	cid := fmt.Sprintf("1:%x", classID)
 	if err := runTC("class", "add", "dev", iface, "parent", "1:", "classid", cid,
 		"htb", "rate", rateArg, "ceil", rateArg); err != nil {
 		return err
@@ -533,7 +533,7 @@ func delClientClass(iface, mac string, classID int) {
 		log.Printf("delClientClass: invalid MAC format %q on %s — skipping", mac, iface)
 		return
 	}
-	cid := fmt.Sprintf("1:%d", classID)
+	cid := fmt.Sprintf("1:%x", classID)
 	// Delete filter first, then qdisc, then class
 	exec.Command("tc", "filter", "del", "dev", iface, "parent", "1:", "protocol", "ip",
 		"u32", "match", "ether", "dst", mac, "flowid", cid).Run()
@@ -543,6 +543,31 @@ func delClientClass(iface, mac string, classID int) {
 
 // activeSessionMACs returns distinct MACs of active sessions whose client
 // IP is on the given interface's subnet (matching portal_interfaces).
+
+// ChangeClientClassRate updates the per-MAC HTB class rate on a live
+// interface. If the class does not exist (e.g. the session just started
+// before the class was added), it falls back to `tc class add`.
+func ChangeClientClassRate(iface, mac string, mbps int) error {
+	if !isValidMAC(mac) {
+		return fmt.Errorf("invalid MAC format: %q", mac)
+	}
+	classID := macToClassID(mac)
+	cid := fmt.Sprintf("1:%x", classID)
+	rateArg := fmt.Sprintf("%dMbit", mbps)
+
+	// Try `tc class change` first (the class should already exist from
+	// addClientClass / EnsurePerDeviceClass).
+	err := runTC("class", "change", "dev", iface, "parent", "1:", "classid", cid,
+		"htb", "rate", rateArg, "ceil", rateArg)
+	if err == nil {
+		return nil
+	}
+	// Fall back to `tc class add` if the class was missing.
+	log.Printf("ChangeClientClassRate: change failed for %s on %s (%v), trying add", mac, iface, err)
+	return runTC("class", "add", "dev", iface, "parent", "1:", "classid", cid,
+		"htb", "rate", rateArg, "ceil", rateArg)
+}
+
 func activeSessionMACs(db *sql.DB, iface string) []string {
 	// Get the portal's subnet from portal_servers
 	var cidr string

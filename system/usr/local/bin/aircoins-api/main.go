@@ -60,7 +60,15 @@ func main() {
 	mux.HandleFunc("/api/admin/login", adminHandler.Login)
 	mux.HandleFunc("/api/admin/stats", handlers.AuthMiddleware(adminHandler.GetStats))
 	mux.HandleFunc("/api/admin/sessions", handlers.AuthMiddleware(adminHandler.GetSessions))
-	mux.HandleFunc("/api/admin/sessions/", handlers.AuthMiddleware(adminHandler.GetSession))
+	mux.HandleFunc("/api/admin/sessions/", handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		// Dispatch /api/admin/sessions/<id>/shape to the Shape handler;
+		// everything else falls through to GetSession.
+		if len(r.URL.Path) > len("/api/admin/sessions/") && r.URL.Path[len(r.URL.Path)-len("/shape"):] == "/shape" {
+			sessionHandler.Shape(w, r)
+			return
+		}
+		adminHandler.GetSession(w, r)
+	}))
 	mux.HandleFunc("/api/admin/settings", handlers.AuthMiddleware(adminHandler.Settings))
 	mux.HandleFunc("/api/admin/logs", handlers.AuthMiddleware(adminHandler.GetLogs))
 	mux.HandleFunc("/api/admin/coin-events", handlers.AuthMiddleware(adminHandler.GetCoinEvents))

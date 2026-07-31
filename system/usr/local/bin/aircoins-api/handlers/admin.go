@@ -241,12 +241,14 @@ func (h *AdminHandler) GetSessions(w http.ResponseWriter, r *http.Request) {
 	// Data query. remaining_seconds is computed live from expires_at for
 	// active sessions so the admin table shows a real countdown.
 	// paused_at is included so the UI can render a "paused" badge.
+	// shaped_mbps is included so the UI can render a speed override input.
 	dataQuery := fmt.Sprintf(`
 		SELECT id, client_ip, client_mac, coins_inserted, total_seconds,
 		       CASE WHEN status = 'active' AND expires_at IS NOT NULL
 		            THEN GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW())))::int
 		            ELSE COALESCE(remaining_seconds, 0) END AS remaining_seconds,
-		       status, started_at, activated_at, expired_at, expires_at, paused_at
+		       status, started_at, activated_at, expired_at, expires_at, paused_at,
+		       shaped_mbps
 		FROM sessions
 		%s
 		ORDER BY started_at DESC
@@ -262,17 +264,30 @@ func (h *AdminHandler) GetSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
+	// Load qdisc rules once for all sessions so we can attach qdisc_info.
+	qdiscRules := loadQdiscRules(h.DB)
+
 	sessions := make([]models.Session, 0)
 	for rows.Next() {
 		var s models.Session
 		err := rows.Scan(
 			&s.ID, &s.ClientIP, &s.ClientMAC, &s.CoinsInserted, &s.TotalSeconds,
 			&s.RemainingSeconds, &s.Status, &s.StartedAt, &s.ActivatedAt, &s.ExpiredAt, &s.ExpiresAt,
-			&s.PausedAt,
+			&s.PausedAt, &s.ShapedMbps,
 		)
 		if err != nil {
 			log.Printf("Error scanning session: %v", err)
 			continue
+		}
+		// Attach qdisc_info for this session's portal interface.
+		iface := ifaceForClientIP(h.DB, s.ClientIP)
+		if iface != "" {
+			if rule, ok := qdiscRules[iface]; ok {
+				s.QdiscInfo = &models.QdiscInfo{
+					Type:          rule.Qdisc,
+					PerDeviceMbps: rule.PerDeviceBwMbps,
+				}
+			}
 		}
 		sessions = append(sessions, s)
 	}

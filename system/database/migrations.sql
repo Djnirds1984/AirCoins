@@ -494,6 +494,34 @@ END
 $$;
 
 -- ============================================
+-- 011 - SESSIONS: per-session speed override
+-- ============================================
+-- Adds shaped_mbps (INT) to sessions so an admin can override the
+-- per-device HTB class rate for one session. NULL = use the portal's
+-- global per_device_bw_mbps from portal_qdisc_rules; >0 = override.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'sessions'
+    ) THEN
+        RETURN;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'sessions' AND column_name = 'shaped_mbps'
+    ) THEN
+        RETURN;
+    END IF;
+
+    ALTER TABLE sessions ADD COLUMN shaped_mbps INT;
+    RAISE NOTICE 'Migration 011: shaped_mbps column added to sessions';
+END
+$$;
+
+-- ============================================
 -- COMPLETION
 -- ============================================
 \echo 'Migrations applied.'

@@ -116,6 +116,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     paused_at TIMESTAMPTZ,
     remaining_seconds_at_pause INT,
     pause_count INT DEFAULT 0,
+    -- Per-session speed override (Mbps). NULL = use the portal's global
+    -- per_device_bw_mbps from portal_qdisc_rules. >0 = override for this session.
+    shaped_mbps INT,
     created_at TIMESTAMP DEFAULT NOW()
 );
 

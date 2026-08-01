@@ -38,7 +38,6 @@ func (h *SessionAdminHandler) GetSessionDetail(w http.ResponseWriter, r *http.Re
 	var s models.Session
 	err = h.DB.QueryRow(`
 		SELECT id, COALESCE(client_ip, ''), COALESCE(client_mac, ''),
-		       COALESCE(hostname, ''),
 		       coins_inserted, total_seconds,
 		       CASE WHEN status = 'active' AND expires_at IS NOT NULL
 		            THEN GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW())))::int
@@ -50,7 +49,7 @@ func (h *SessionAdminHandler) GetSessionDetail(w http.ResponseWriter, r *http.Re
 		FROM sessions
 		WHERE id = $1
 	`, id).Scan(
-		&s.ID, &s.ClientIP, &s.ClientMAC, &s.Hostname,
+		&s.ID, &s.ClientIP, &s.ClientMAC,
 		&s.CoinsInserted, &s.TotalSeconds, &s.RemainingSeconds,
 		&s.Status, &s.StartedAt, &s.ActivatedAt, &s.ExpiredAt, &s.ExpiresAt,
 		&s.PausedAt, &s.RemainingSecondsAtPause, &s.PauseCount,
@@ -275,7 +274,6 @@ func (h *SessionAdminHandler) UpdateSession(w http.ResponseWriter, r *http.Reque
 	var updated models.Session
 	err = h.DB.QueryRow(`
 		SELECT id, COALESCE(client_ip, ''), COALESCE(client_mac, ''),
-		       COALESCE(hostname, ''),
 		       coins_inserted, total_seconds,
 		       CASE WHEN status = 'active' AND expires_at IS NOT NULL
 		            THEN GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW())))::int
@@ -286,7 +284,7 @@ func (h *SessionAdminHandler) UpdateSession(w http.ResponseWriter, r *http.Reque
 		       shaped_mbps, created_at
 		FROM sessions WHERE id = $1
 	`, id).Scan(
-		&updated.ID, &updated.ClientIP, &updated.ClientMAC, &updated.Hostname,
+		&updated.ID, &updated.ClientIP, &updated.ClientMAC,
 		&updated.CoinsInserted, &updated.TotalSeconds, &updated.RemainingSeconds,
 		&updated.Status, &updated.StartedAt, &updated.ActivatedAt, &updated.ExpiredAt, &updated.ExpiresAt,
 		&updated.PausedAt, &updated.RemainingSecondsAtPause, &updated.PauseCount,
@@ -297,6 +295,9 @@ func (h *SessionAdminHandler) UpdateSession(w http.ResponseWriter, r *http.Reque
 		sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "Session updated"})
 		return
 	}
+
+	// Resolve hostname for the returned session
+	updated.Hostname = ResolveHostname(updated.ClientIP, updated.ClientMAC)
 
 	logAction(h.DB, "INFO", "session", fmt.Sprintf("Session %d updated by admin", id))
 	sendJSON(w, http.StatusOK, map[string]interface{}{

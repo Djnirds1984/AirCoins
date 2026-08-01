@@ -122,6 +122,19 @@ func main() {
 	mux.HandleFunc("/api/vlan/create", handlers.AuthMiddleware(handlers.VLANCreate))
 	mux.HandleFunc("/api/vlan/delete", handlers.AuthMiddleware(handlers.VLANDelete))
 	mux.HandleFunc("/api/vlan/interfaces", handlers.AuthMiddleware(handlers.VLANInterfaces))
+	
+	// WAN settings routes (auto-detect WAN port, DHCP/Static/VLAN DHCP modes)
+	mux.HandleFunc("/api/admin/wan", handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	    switch r.Method {
+	    case http.MethodGet:
+	        handlers.WANGet(w, r)
+	    case http.MethodPost:
+	        handlers.WANPost(w, r)
+	    default:
+	        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	    }
+	}))
+	mux.HandleFunc("/api/admin/wan/available-vlans", handlers.AuthMiddleware(handlers.WANAvailableVLANs))
 
 	// Portal server routes (hotspot stack: portal IP + DHCP + DNS hijack
 	// + captive rules on a chosen interface)

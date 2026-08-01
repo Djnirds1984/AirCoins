@@ -1654,39 +1654,86 @@
 
         <!-- Settings Section -->
         <div id="section-settings" class="section" style="display:none;">
-            <!-- Network Settings Card -->
+            <!-- WAN Settings Card -->
             <div class="settings-card">
-                <div class="card-title">Network Settings</div>
+                <div class="card-title" style="display:flex;align-items:center;gap:8px;">WAN Settings</div>
                 <div class="settings-form">
-                    <div class="settings-row">
-                        <div class="settings-field">
-                            <label for="settings-portal-ip">Portal IP</label>
-                            <input type="text" id="settings-portal-ip" placeholder="e.g. 192.168.1.1">
+                    <!-- Auto-detected WAN port -->
+                    <div class="settings-row" style="align-items:center;">
+                        <div class="settings-field" style="flex:1;">
+                            <label>WAN Port</label>
+                            <div id="wan-port-label" style="padding:10px 0;font-size:14px;color:#00d4ff;font-weight:600;">Detecting…</div>
                         </div>
-                        <div class="settings-field">
-                            <label for="settings-eth-interface">Ethernet Interface</label>
-                            <input type="text" id="settings-eth-interface" placeholder="e.g. eth0">
+                        <div class="settings-field" style="min-width:auto;">
+                            <label>&nbsp;</label>
+                            <button class="btn btn-ghost" onclick="refreshWANPort()" title="Refresh" style="padding:8px 12px;">&#x21bb;</button>
                         </div>
                     </div>
-                    <button class="btn btn-primary" onclick="saveNetworkSettings()">Save Network</button>
-                </div>
-            </div>
 
-            <!-- Session Settings Card -->
-            <div class="settings-card">
-                <div class="card-title">Session Settings</div>
-                <div class="settings-form">
+                    <!-- Mode selector -->
                     <div class="settings-row">
                         <div class="settings-field">
-                            <label for="settings-max-session">Max Session Duration (min)</label>
-                            <input type="number" id="settings-max-session" min="1" placeholder="e.g. 120">
-                        </div>
-                        <div class="settings-field">
-                            <label for="settings-bandwidth">Bandwidth Limit (kbps, 0=unlimited)</label>
-                            <input type="number" id="settings-bandwidth" min="0" placeholder="e.g. 50">
+                            <label for="wan-mode">Mode</label>
+                            <select id="wan-mode" onchange="onWANModeChange()">
+                                <option value="dhcp">DHCP</option>
+                                <option value="static">Static</option>
+                                <option value="vlan_dhcp">VLAN DHCP</option>
+                            </select>
                         </div>
                     </div>
-                    <button class="btn btn-primary" onclick="saveSessionSettings()">Save Session</button>
+
+                    <!-- DHCP hint -->
+                    <div id="wan-dhcp-hint" style="font-size:13px;color:#888;padding:4px 0;">WAN will obtain IP automatically from upstream router.</div>
+
+                    <!-- Static fields -->
+                    <div id="wan-static-fields" style="display:none;">
+                        <div class="settings-row">
+                            <div class="settings-field">
+                                <label for="wan-static-ip">IP Address</label>
+                                <input type="text" id="wan-static-ip" placeholder="e.g. 192.168.1.10">
+                            </div>
+                            <div class="settings-field">
+                                <label for="wan-static-subnet">Subnet Mask</label>
+                                <input type="text" id="wan-static-subnet" placeholder="e.g. /24 or 255.255.255.0">
+                            </div>
+                        </div>
+                        <div class="settings-row">
+                            <div class="settings-field">
+                                <label for="wan-static-gateway">Gateway</label>
+                                <input type="text" id="wan-static-gateway" placeholder="e.g. 192.168.1.1">
+                            </div>
+                        </div>
+                        <div class="settings-row">
+                            <div class="settings-field">
+                                <label for="wan-static-dns1">DNS 1</label>
+                                <input type="text" id="wan-static-dns1" placeholder="e.g. 1.1.1.1">
+                            </div>
+                            <div class="settings-field">
+                                <label for="wan-static-dns2">DNS 2</label>
+                                <input type="text" id="wan-static-dns2" placeholder="e.g. 8.8.8.8">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- VLAN DHCP fields -->
+                    <div id="wan-vlan-fields" style="display:none;">
+                        <div class="settings-row">
+                            <div class="settings-field">
+                                <label for="wan-vlan-select">ISP VLAN</label>
+                                <select id="wan-vlan-select"></select>
+                            </div>
+                        </div>
+                        <div id="wan-vlan-empty-hint" style="display:none;font-size:13px;color:#888;padding:4px 0;">No unused VLANs available. Create a VLAN first on the Portal page.</div>
+                    </div>
+
+                    <!-- Apply toggle + Save -->
+                    <div class="settings-row" style="align-items:center;gap:12px;margin-top:8px;">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#aaa;cursor:pointer;user-select:none;">
+                            <input type="checkbox" id="wan-apply-os"> Apply to OS now
+                        </label>
+                        <button class="btn btn-primary" onclick="saveWANSettings()">Save</button>
+                    </div>
+                    <div id="wan-save-status" style="font-size:13px;min-height:18px;margin-top:4px;"></div>
                 </div>
             </div>
 
@@ -3222,15 +3269,45 @@ function onBoardModelChange() {
 
 async function loadSettings() {
     try {
-        // Load system settings
-        var settingsRes = await apiCall('GET', '/admin/settings');
-        var settings = (settingsRes && settingsRes.data) ? settingsRes.data : {};
-        document.getElementById('settings-portal-ip').value = settings.portal_ip || '';
-        document.getElementById('settings-eth-interface').value = settings.eth_interface || '';
-        document.getElementById('settings-max-session').value = settings.max_session || '';
-        document.getElementById('settings-bandwidth').value = settings.bandwidth || '';
+        // Load WAN config
+        var wanRes = await apiCall('GET', '/admin/wan');
+        var wanData = wanRes || {};
+
+        // Update WAN port label
+        var portLabel = document.getElementById('wan-port-label');
+        if (wanData.iface) {
+            portLabel.textContent = 'WAN Port: ' + wanData.iface + ' (auto-detected)';
+            portLabel.style.color = '#00d4ff';
+        } else {
+            portLabel.textContent = 'WAN Port: (none detected)';
+            portLabel.style.color = '#ffa500';
+        }
+
+        // Set mode
+        var modeSel = document.getElementById('wan-mode');
+        modeSel.value = wanData.mode || 'dhcp';
+        onWANModeChange();
+
+        // Populate static fields
+        if (wanData.static_config) {
+            var sc = wanData.static_config;
+            document.getElementById('wan-static-ip').value = sc.ip || '';
+            document.getElementById('wan-static-subnet').value = sc.subnet || '';
+            document.getElementById('wan-static-gateway').value = sc.gateway || '';
+            document.getElementById('wan-static-dns1').value = sc.dns1 || '';
+            document.getElementById('wan-static-dns2').value = sc.dns2 || '';
+        }
+
+        // Populate VLAN dropdown
+        populateWANVlanDropdown(wanData.available_vlans || []);
+
+        // Set selected VLAN
+        if (wanData.vlan_id) {
+            var sel = document.getElementById('wan-vlan-select');
+            sel.value = String(wanData.vlan_id);
+        }
     } catch (e) {
-        if (e.message !== 'Unauthorized') showNotification('Failed to load settings', 'error');
+        if (e.message !== 'Unauthorized') showNotification('Failed to load WAN settings', 'error');
     }
 
     try {
@@ -3241,7 +3318,6 @@ async function loadSettings() {
 
         // Set board model dropdown
         var boardSel = document.getElementById('gpio-board-model');
-        // Try to set the exact value, fallback to auto
         var found = false;
         for (var i = 0; i < boardSel.options.length; i++) {
             if (boardSel.options[i].value === boardModel) { boardSel.value = boardModel; found = true; break; }
@@ -3334,31 +3410,85 @@ async function testGpioPin() {
     }
 }
 
-async function saveNetworkSettings() {
-    try {
-        await apiCall('POST', '/admin/settings', {
-            settings: {
-                portal_ip: document.getElementById('settings-portal-ip').value,
-                eth_interface: document.getElementById('settings-eth-interface').value
-            }
-        });
-        showNotification('Network settings saved', 'success');
-    } catch (e) {
-        showNotification('Failed to save network settings', 'error');
+function onWANModeChange() {
+    var mode = document.getElementById('wan-mode').value;
+    document.getElementById('wan-dhcp-hint').style.display = (mode === 'dhcp') ? 'block' : 'none';
+    document.getElementById('wan-static-fields').style.display = (mode === 'static') ? 'block' : 'none';
+    document.getElementById('wan-vlan-fields').style.display = (mode === 'vlan_dhcp') ? 'block' : 'none';
+}
+
+function populateWANVlanDropdown(vlans) {
+    var sel = document.getElementById('wan-vlan-select');
+    sel.innerHTML = '';
+    var hint = document.getElementById('wan-vlan-empty-hint');
+    if (!vlans || vlans.length === 0) {
+        hint.style.display = 'block';
+        var opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '— none available —';
+        sel.appendChild(opt);
+        return;
+    }
+    hint.style.display = 'none';
+    for (var i = 0; i < vlans.length; i++) {
+        var opt = document.createElement('option');
+        opt.value = vlans[i].vlan_id;
+        opt.textContent = 'VLAN ' + vlans[i].vlan_id + ' — ' + vlans[i].iface;
+        sel.appendChild(opt);
     }
 }
 
-async function saveSessionSettings() {
+async function refreshWANPort() {
     try {
-        await apiCall('POST', '/admin/settings', {
-            settings: {
-                max_session: document.getElementById('settings-max-session').value,
-                bandwidth: document.getElementById('settings-bandwidth').value
-            }
-        });
-        showNotification('Session settings saved', 'success');
+        var res = await apiCall('GET', '/admin/wan');
+        var portLabel = document.getElementById('wan-port-label');
+        if (res && res.iface) {
+            portLabel.textContent = 'WAN Port: ' + res.iface + ' (auto-detected)';
+            portLabel.style.color = '#00d4ff';
+        } else {
+            portLabel.textContent = 'WAN Port: (none detected)';
+            portLabel.style.color = '#ffa500';
+        }
+        populateWANVlanDropdown((res && res.available_vlans) || []);
     } catch (e) {
-        showNotification('Failed to save session settings', 'error');
+        showNotification('Failed to refresh WAN port', 'error');
+    }
+}
+
+async function saveWANSettings() {
+    var mode = document.getElementById('wan-mode').value;
+    var body = { mode: mode, apply_to_os: document.getElementById('wan-apply-os').checked };
+
+    if (mode === 'static') {
+        body.static_config = {
+            ip: document.getElementById('wan-static-ip').value,
+            subnet: document.getElementById('wan-static-subnet').value,
+            gateway: document.getElementById('wan-static-gateway').value,
+            dns1: document.getElementById('wan-static-dns1').value,
+            dns2: document.getElementById('wan-static-dns2').value
+        };
+    } else if (mode === 'vlan_dhcp') {
+        var vid = document.getElementById('wan-vlan-select').value;
+        body.vlan_id = vid ? parseInt(vid) : null;
+    }
+
+    var statusEl = document.getElementById('wan-save-status');
+    statusEl.textContent = 'Saving…';
+    statusEl.style.color = '#aaa';
+
+    try {
+        var res = await apiCall('POST', '/admin/wan', body);
+        var msg = (res && res.message) ? res.message : 'Saved';
+        if (res && res.apply) {
+            msg += ' | Apply: ' + (res.apply.success ? 'OK' : 'FAILED — ' + (res.apply.error || ''));
+        }
+        statusEl.textContent = msg;
+        statusEl.style.color = (res && res.apply && !res.apply.success) ? '#ffa500' : '#4caf50';
+        showNotification('WAN settings saved', 'success');
+    } catch (e) {
+        statusEl.textContent = 'Error: ' + e.message;
+        statusEl.style.color = '#f44336';
+        showNotification('Failed to save WAN settings', 'error');
     }
 }
 
@@ -3381,8 +3511,7 @@ async function saveGpioConfig() {
 }
 
 async function saveAllSettings() {
-    await saveNetworkSettings();
-    await saveSessionSettings();
+    await saveWANSettings();
     await saveGpioConfig();
 }
 

@@ -278,6 +278,36 @@ type SettingsRequest struct {
 	Settings map[string]string `json:"settings"`
 }
 
+// ============================================
+// WAN CONFIG MODELS
+// ============================================
+
+type WANStaticConfig struct {
+	IP      string `json:"ip"`
+	Subnet  string `json:"subnet"`
+	Gateway string `json:"gateway"`
+	DNS1    string `json:"dns1"`
+	DNS2    string `json:"dns2"`
+}
+
+type WANConfig struct {
+	Mode         string          `json:"mode"`          // "dhcp", "static", "vlan_dhcp"
+	StaticConfig *WANStaticConfig `json:"static_config,omitempty"`
+	VLANID       *int            `json:"vlan_id,omitempty"`
+}
+
+type WANRequest struct {
+	Mode         string          `json:"mode"`
+	StaticConfig *WANStaticConfig `json:"static_config,omitempty"`
+	VLANID       *int            `json:"vlan_id,omitempty"`
+	ApplyToOS    bool            `json:"apply_to_os"`
+}
+
+type WANAvailableVLAN struct {
+	VLANID int    `json:"vlan_id"`
+	Iface  string `json:"iface"`
+}
+
 type APIResponse struct {
 	Success bool        `json:"success"`
 	Message string      `json:"message,omitempty"`

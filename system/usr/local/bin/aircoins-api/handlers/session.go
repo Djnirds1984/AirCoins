@@ -40,17 +40,17 @@ const remainingSQL = `GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW())))::int
 
 // sessionRow holds the common columns returned by session lookups.
 type sessionRow struct {
-	id          int
-	mac         string
-	ip          string
-	coins       int
-	total       int
-	remaining   int
-	startedAt   time.Time
-	expiresAt   time.Time
-	pausedAt    sql.NullTime
+	id         int
+	mac        string
+	ip         string
+	coins      int
+	total      int
+	remaining  int
+	startedAt  time.Time
+	expiresAt  time.Time
+	pausedAt   sql.NullTime
 	shapedMbps *int
-	token       string
+	token      string
 }
 
 // sessionMutexes serializes concurrent MAC migrations for the same session.

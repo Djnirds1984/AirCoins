@@ -46,16 +46,16 @@ var validAudioSlots = map[string]bool{
 
 // audioExtByMIME maps accepted audio content types to file extensions.
 var audioExtByMIME = map[string]string{
-	"audio/mpeg":       "mp3",
-	"audio/wav":        "wav",
-	"audio/x-wav":      "wav",
-	"audio/ogg":        "ogg",
-	"audio/mp4":        "m4a",
-	"audio/x-m4a":      "m4a",
-	"audio/aac":        "m4a",
-	"audio/webm":       "webm",
-	"audio/flac":       "flac",
-	"audio/x-flac":     "flac",
+	"audio/mpeg":   "mp3",
+	"audio/wav":    "wav",
+	"audio/x-wav":  "wav",
+	"audio/ogg":    "ogg",
+	"audio/mp4":    "m4a",
+	"audio/x-m4a":  "m4a",
+	"audio/aac":    "m4a",
+	"audio/webm":   "webm",
+	"audio/flac":   "flac",
+	"audio/x-flac": "flac",
 }
 
 // audioExts lists every extension a stored audio file can have (used

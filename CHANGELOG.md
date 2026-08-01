@@ -4,6 +4,19 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.4.0 — Changelog Display & Updater Improvements
+
+**Release date:** August 2026
+
+### Added
+- **Changelog display** — Updater page now shows release notes even when the system is up to date
+- **GitHub release link** — Direct link to view release on GitHub from the updater page
+
+### Changed
+- Improved updater UI consistency across update-available and up-to-date states
+
+---
+
 ## v1.3.0 — One-Click Update & Version Display Fix
 
 **Release date:** August 2026

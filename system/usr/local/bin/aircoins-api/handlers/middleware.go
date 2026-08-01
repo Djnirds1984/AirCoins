@@ -3,6 +3,7 @@ package handlers
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"sync"
@@ -59,6 +60,35 @@ func ValidateToken(token string) (adminID int, username string, valid bool) {
 	}
 
 	return entry.AdminID, entry.Username, true
+}
+
+// LicenseGateMiddleware gates all admin routes behind a valid license.
+// Routes that must remain reachable even when the license is invalid
+// (license endpoints themselves, login, health) are passed through.
+func LicenseGateMiddleware(lh *LicenseHandler, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.HasPrefix(path, "/api/admin/license/") ||
+			strings.HasPrefix(path, "/api/admin/login") ||
+			strings.HasPrefix(path, "/api/health") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !lh.IsLicenseValid() {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPaymentRequired)
+			lh.mu.RLock()
+			st := lh.state.Status
+			lh.mu.RUnlock()
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":   "license_required",
+				"status":  st,
+				"message": "A valid license is required to access this resource.",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // AuthMiddleware wraps a handler, requiring a valid Bearer token.

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"time"
 )
 
 func main() {
@@ -27,6 +28,27 @@ func main() {
 	defer models.DB.Close()
 
 	log.Println("Connected to PostgreSQL database")
+
+	// ── License system ──────────────────────────────────────────────────
+	licenseHandler := handlers.NewLicenseHandler(models.DB)
+	if err := licenseHandler.InitOrLoadLicense(); err != nil {
+		log.Printf("WARNING: license init failed: %v", err)
+	}
+	go func() {
+		if err := licenseHandler.HeartbeatSupabase(); err != nil {
+			log.Printf("WARNING: initial heartbeat failed: %v", err)
+		}
+	}()
+	var scheduleHeartbeat func()
+	scheduleHeartbeat = func() {
+		time.AfterFunc(24*time.Hour, func() {
+			if err := licenseHandler.HeartbeatSupabase(); err != nil {
+				log.Printf("WARNING: heartbeat failed: %v", err)
+			}
+			scheduleHeartbeat()
+		})
+	}
+	scheduleHeartbeat()
 
 	// Startup check: warn if tc (iproute2) is not installed.
 	// Traffic shaping will silently not work without it.
@@ -59,14 +81,24 @@ func main() {
 	qdiscHandler := &handlers.QdiscHandler{DB: models.DB}
 	sessionAdminHandler := &handlers.SessionAdminHandler{DB: models.DB}
 
+	// Inject LicenseHandler into SessionHandler so /api/status can report
+	// whether the license is valid to portal clients.
+	sessionHandler.LicenseHandler = licenseHandler
+
 	// Setup routes
 	mux := http.NewServeMux()
 
-	// Admin routes
-	mux.HandleFunc("/api/admin/login", adminHandler.Login)
-	mux.HandleFunc("/api/admin/stats", handlers.AuthMiddleware(adminHandler.GetStats))
-	mux.HandleFunc("/api/admin/sessions", handlers.AuthMiddleware(adminHandler.GetSessions))
-	mux.HandleFunc("/api/admin/sessions/", handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	// adminProtected wraps an admin handler with both the license gate and
+	// auth middleware: LicenseGate → Auth → handler.
+	adminProtected := func(hf http.HandlerFunc) http.Handler {
+		return handlers.LicenseGateMiddleware(licenseHandler, handlers.AuthMiddleware(http.HandlerFunc(hf)))
+	}
+
+	// ── Admin routes (license-gated + auth) ──────────────────────────────
+	mux.HandleFunc("/api/admin/login", adminHandler.Login) // no gate, no auth
+	mux.Handle("/api/admin/stats", adminProtected(adminHandler.GetStats))
+	mux.Handle("/api/admin/sessions", adminProtected(adminHandler.GetSessions))
+	mux.Handle("/api/admin/sessions/", adminProtected(func(w http.ResponseWriter, r *http.Request) {
 		// Dispatch /api/admin/sessions/<id>/shape to the Shape handler;
 		// PATCH and DELETE go to the session admin CRUD handler;
 		// GET for individual session goes to session admin (detail + coin_events).
@@ -80,15 +112,20 @@ func main() {
 		}
 		sessionAdminHandler.Dispatch(w, r)
 	}))
-	mux.HandleFunc("/api/admin/settings", handlers.AuthMiddleware(adminHandler.Settings))
-	mux.HandleFunc("/api/admin/logs", handlers.AuthMiddleware(adminHandler.GetLogs))
-	mux.HandleFunc("/api/admin/coin-events", handlers.AuthMiddleware(adminHandler.GetCoinEvents))
-	mux.HandleFunc("/api/admin/system/stats", handlers.AuthMiddleware(systemHandler.GetSystemStats))
+	mux.Handle("/api/admin/settings", adminProtected(adminHandler.Settings))
+	mux.Handle("/api/admin/logs", adminProtected(adminHandler.GetLogs))
+	mux.Handle("/api/admin/coin-events", adminProtected(adminHandler.GetCoinEvents))
+	mux.Handle("/api/admin/system/stats", adminProtected(systemHandler.GetSystemStats))
 
 	// Reports routes
-	mux.HandleFunc("/api/admin/reports/earnings", handlers.AuthMiddleware(reportsHandler.GetEarningsSummary))
-	mux.HandleFunc("/api/admin/reports/daily", handlers.AuthMiddleware(reportsHandler.GetDailyBreakdown))
-	mux.HandleFunc("/api/admin/reports/coin-events", handlers.AuthMiddleware(reportsHandler.GetCoinEvents))
+	mux.Handle("/api/admin/reports/earnings", adminProtected(reportsHandler.GetEarningsSummary))
+	mux.Handle("/api/admin/reports/daily", adminProtected(reportsHandler.GetDailyBreakdown))
+	mux.Handle("/api/admin/reports/coin-events", adminProtected(reportsHandler.GetCoinEvents))
+
+	// ── License endpoints (auth only, NO license gate) ──────────────────
+	mux.Handle("/api/admin/license/status", handlers.AuthMiddleware(http.HandlerFunc(licenseHandler.Status)))
+	mux.Handle("/api/admin/license/activate", handlers.AuthMiddleware(http.HandlerFunc(licenseHandler.Activate)))
+	mux.Handle("/api/admin/license/deactivate", handlers.AuthMiddleware(http.HandlerFunc(licenseHandler.Deactivate)))
 
 	// Session routes
 	// start/status/current are PUBLIC (portal-facing): the caller is
@@ -98,13 +135,13 @@ func main() {
 	mux.HandleFunc("/api/session/current", sessionHandler.GetCurrent)
 	mux.HandleFunc("/api/session/start", sessionHandler.Start)
 	mux.HandleFunc("/api/session/can-start", sessionHandler.CanStart)
-	mux.HandleFunc("/api/session/extend", handlers.AuthMiddleware(sessionHandler.Extend))
-	mux.HandleFunc("/api/session/end", handlers.AuthMiddleware(sessionHandler.End))
+	mux.Handle("/api/session/extend", adminProtected(sessionHandler.Extend))
+	mux.Handle("/api/session/end", adminProtected(sessionHandler.End))
 	mux.HandleFunc("/api/session/status", sessionHandler.Status)
 	mux.HandleFunc("/api/session/pause", sessionHandler.Pause)
 	mux.HandleFunc("/api/session/resume", sessionHandler.Resume)
 	mux.HandleFunc("/api/session/ban-status", sessionHandler.BanStatus)
-	mux.HandleFunc("/api/admin/session/create", handlers.AuthMiddleware(sessionHandler.AdminCreate))
+	mux.Handle("/api/admin/session/create", adminProtected(sessionHandler.AdminCreate))
 
 	// GPIO routes
 	mux.HandleFunc("/api/gpio/config", gpioHandler.Config)
@@ -122,20 +159,20 @@ func main() {
 
 	// System routes
 	mux.HandleFunc("/api/system/status", systemHandler.Status)
-	mux.HandleFunc("/api/system/board", handlers.AuthMiddleware(systemHandler.GetBoardInfo))
-	mux.HandleFunc("/api/system/logs", handlers.AuthMiddleware(systemHandler.Logs))
-	mux.HandleFunc("/api/system/info", handlers.AuthMiddleware(systemHandler.GetSystemInfo))
-	mux.HandleFunc("/api/system/services", handlers.AuthMiddleware(systemHandler.GetServices))
-	mux.HandleFunc("/api/system/services/", handlers.AuthMiddleware(systemHandler.ControlService))
+	mux.Handle("/api/system/board", adminProtected(systemHandler.GetBoardInfo))
+	mux.Handle("/api/system/logs", adminProtected(systemHandler.Logs))
+	mux.Handle("/api/system/info", adminProtected(systemHandler.GetSystemInfo))
+	mux.Handle("/api/system/services", adminProtected(systemHandler.GetServices))
+	mux.Handle("/api/system/services/", adminProtected(systemHandler.ControlService))
 
 	// VLAN routes (network identity only — create/delete the 802.1Q iface)
-	mux.HandleFunc("/api/vlan/list", handlers.AuthMiddleware(handlers.VLANList))
-	mux.HandleFunc("/api/vlan/create", handlers.AuthMiddleware(handlers.VLANCreate))
-	mux.HandleFunc("/api/vlan/delete", handlers.AuthMiddleware(handlers.VLANDelete))
-	mux.HandleFunc("/api/vlan/interfaces", handlers.AuthMiddleware(handlers.VLANInterfaces))
+	mux.Handle("/api/vlan/list", adminProtected(handlers.VLANList))
+	mux.Handle("/api/vlan/create", adminProtected(handlers.VLANCreate))
+	mux.Handle("/api/vlan/delete", adminProtected(handlers.VLANDelete))
+	mux.Handle("/api/vlan/interfaces", adminProtected(handlers.VLANInterfaces))
 
 	// WAN settings routes (auto-detect WAN port, DHCP/Static/VLAN DHCP modes)
-	mux.HandleFunc("/api/admin/wan", handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/admin/wan", adminProtected(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			handlers.WANGet(w, r)
@@ -145,35 +182,35 @@ func main() {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	}))
-	mux.HandleFunc("/api/admin/wan/available-vlans", handlers.AuthMiddleware(handlers.WANAvailableVLANs))
+	mux.Handle("/api/admin/wan/available-vlans", adminProtected(handlers.WANAvailableVLANs))
 
 	// Portal server routes (hotspot stack: portal IP + DHCP + DNS hijack
 	// + captive rules on a chosen interface)
-	mux.HandleFunc("/api/portal/list", handlers.AuthMiddleware(handlers.PortalList))
-	mux.HandleFunc("/api/portal/create", handlers.AuthMiddleware(handlers.PortalCreate))
-	mux.HandleFunc("/api/portal/enable", handlers.AuthMiddleware(handlers.PortalEnable))
-	mux.HandleFunc("/api/portal/disable", handlers.AuthMiddleware(handlers.PortalDisable))
-	mux.HandleFunc("/api/portal/delete", handlers.AuthMiddleware(handlers.PortalDelete))
+	mux.Handle("/api/portal/list", adminProtected(handlers.PortalList))
+	mux.Handle("/api/portal/create", adminProtected(handlers.PortalCreate))
+	mux.Handle("/api/portal/enable", adminProtected(handlers.PortalEnable))
+	mux.Handle("/api/portal/disable", adminProtected(handlers.PortalDisable))
+	mux.Handle("/api/portal/delete", adminProtected(handlers.PortalDelete))
 
 	// Portal appearance routes (theme/colors/background image)
 	// GET appearance is PUBLIC — the captive portal reads it on load.
 	// Everything that mutates the appearance requires admin auth.
 	mux.HandleFunc("/api/portal/appearance", appearanceHandler.GetAppearance)
-	mux.HandleFunc("/api/admin/portal/appearance", handlers.AuthMiddleware(appearanceHandler.SaveAppearance))
-	mux.HandleFunc("/api/admin/portal/background", handlers.AuthMiddleware(appearanceHandler.Background))
+	mux.Handle("/api/admin/portal/appearance", adminProtected(appearanceHandler.SaveAppearance))
+	mux.Handle("/api/admin/portal/background", adminProtected(appearanceHandler.Background))
 
 	// Portal tap/pause rules + bans
 	mux.HandleFunc("/api/portal/tap-rules", appearanceHandler.GetTapRules)
-	mux.HandleFunc("/api/admin/portal/tap-rules", handlers.AuthMiddleware(appearanceHandler.HandleTapRules))
-	mux.HandleFunc("/api/admin/portal/pause-rules", handlers.AuthMiddleware(appearanceHandler.HandlePauseRules))
-	mux.HandleFunc("/api/admin/portal/bans", handlers.AuthMiddleware(appearanceHandler.ListBans))
-	mux.HandleFunc("/api/admin/portal/ban/", handlers.AuthMiddleware(appearanceHandler.UnbanByPath))
+	mux.Handle("/api/admin/portal/tap-rules", adminProtected(appearanceHandler.HandleTapRules))
+	mux.Handle("/api/admin/portal/pause-rules", adminProtected(appearanceHandler.HandlePauseRules))
+	mux.Handle("/api/admin/portal/bans", adminProtected(appearanceHandler.ListBans))
+	mux.Handle("/api/admin/portal/ban/", adminProtected(appearanceHandler.UnbanByPath))
 
 	// Portal qdisc (traffic shaping: CAKE / FQ_CODEL)
-	mux.HandleFunc("/api/admin/portal/qdisc/apply", handlers.AuthMiddleware(qdiscHandler.ApplyQdisc))
-	mux.HandleFunc("/api/admin/portal/qdiag/installed", handlers.AuthMiddleware(qdiscHandler.QDiagInstalled))
-	mux.HandleFunc("/api/admin/portal/qdiag", handlers.AuthMiddleware(qdiscHandler.QDiag))
-	mux.HandleFunc("/api/admin/portal/qdisc", handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/admin/portal/qdisc/apply", adminProtected(qdiscHandler.ApplyQdisc))
+	mux.Handle("/api/admin/portal/qdiag/installed", adminProtected(qdiscHandler.QDiagInstalled))
+	mux.Handle("/api/admin/portal/qdiag", adminProtected(qdiscHandler.QDiag))
+	mux.Handle("/api/admin/portal/qdisc", adminProtected(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			qdiscHandler.GetQdisc(w, r)
@@ -186,8 +223,8 @@ func main() {
 
 	// Admin audio routes (auth-wrapped): upload, delete, list
 	audioHandler := &handlers.AudioHandler{DB: models.DB}
-	mux.HandleFunc("/api/admin/audio/", handlers.AuthMiddleware(audioHandler.AdminDispatch))
-	mux.HandleFunc("/api/admin/audio", handlers.AuthMiddleware(audioHandler.AdminList))
+	mux.Handle("/api/admin/audio/", adminProtected(audioHandler.AdminDispatch))
+	mux.Handle("/api/admin/audio", adminProtected(audioHandler.AdminList))
 
 	// Public audio serve (no auth — the captive portal fetches these
 	// without a Bearer token).

@@ -1290,6 +1290,9 @@
             <a href="#" data-section="reports" class="nav-item">
                 <span class="icon">📈</span><span class="label">Reports</span>
             </a>
+            <a href="#" data-section="license" class="nav-item">
+                <span class="icon">🔑</span><span class="label">License</span>
+            </a>
         </nav>
     </aside>
 
@@ -2155,6 +2158,51 @@
                 </div>
             </div>
         </div>
+
+        <!-- License Section -->
+        <div id="section-license" class="section" style="display:none;">
+            <div class="card" style="max-width:700px;">
+                <h2 style="margin-bottom:20px;">License Management</h2>
+                <div id="license-status-card" style="padding:16px; border-radius:12px; background:rgba(255,255,255,0.03); margin-bottom:20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <span style="font-size:18px; font-weight:600;">Status</span>
+                        <span id="license-status-pill" style="padding:4px 14px; border-radius:20px; font-size:13px; font-weight:600; background:#555;">Loading…</span>
+                    </div>
+                    <div class="license-info-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:10px 20px; font-size:13px;">
+                        <div><span style="color:#888;">Hardware ID:</span> <span id="license-hw-id" style="font-family:monospace;">—</span></div>
+                        <div><span style="color:#888;">Owner Email:</span> <span id="license-email">—</span></div>
+                        <div><span style="color:#888;">Trial Started:</span> <span id="license-trial-start">—</span></div>
+                        <div><span style="color:#888;">Trial Expires:</span> <span id="license-trial-end">—</span></div>
+                        <div><span style="color:#888;">Activated:</span> <span id="license-activated">—</span></div>
+                        <div><span style="color:#888;">Expires:</span> <span id="license-expires">—</span></div>
+                        <div><span style="color:#888;">Last Heartbeat:</span> <span id="license-heartbeat">—</span></div>
+                        <div><span style="color:#888;">Last Supabase OK:</span> <span id="license-last-ok">—</span></div>
+                    </div>
+                    <div id="license-error-box" style="display:none; margin-top:10px; padding:8px 12px; background:rgba(244,67,54,0.15); border-radius:8px; font-size:12px; color:#f44336;"></div>
+                </div>
+
+                <!-- Activation form (shown when trial or locked) -->
+                <div id="license-activate-form" style="display:none; margin-bottom:20px;">
+                    <h3 style="margin-bottom:12px;">Activate License</h3>
+                    <div style="display:flex; flex-direction:column; gap:10px; max-width:400px;">
+                        <input type="text" id="license-key-input" placeholder="License Key" style="padding:10px 14px; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05); color:#fff; font-size:14px;">
+                        <input type="email" id="license-owner-email" placeholder="Owner Email" style="padding:10px 14px; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05); color:#fff; font-size:14px;">
+                        <button class="btn btn-primary" id="license-activate-btn" onclick="activateLicense()">Activate</button>
+                    </div>
+                </div>
+
+                <!-- Deactivate (shown when active) -->
+                <div id="license-deactivate-section" style="display:none; margin-bottom:20px;">
+                    <h3 style="margin-bottom:12px;">Contact Info</h3>
+                    <div style="display:flex; gap:10px; align-items:center; max-width:400px; margin-bottom:14px;">
+                        <input type="email" id="license-update-email" placeholder="Owner Email" style="flex:1; padding:10px 14px; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05); color:#fff; font-size:14px;">
+                    </div>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn btn-ghost" id="license-deactivate-btn" onclick="deactivateLicense()" style="border-color:#f44336; color:#f44336;">Deactivate License</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -2167,6 +2215,7 @@
 // ============================================================
 const API_BASE = '/api';
 let authToken = sessionStorage.getItem('authToken');
+var licenseLocked = false;
 
 async function apiCall(method, path, body) {
     const opts = {
@@ -2214,6 +2263,19 @@ async function login(username, password) {
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('admin-panel').style.display = 'block';
     document.getElementById('sidebar').style.display = 'flex';
+
+    // --- License gate: check license status after login ---
+    try {
+        var lic = await apiCall('GET', '/admin/license/status');
+        if (!lic || !lic.valid) {
+            lockDownForLicense(lic);
+            return;
+        }
+    } catch (e) {
+        // If license check fails (network etc.), allow access but log it
+        console.warn('License check failed:', e);
+    }
+
     showSection('dashboard');
     showNotification('Welcome back, admin!', 'success');
 }
@@ -2231,6 +2293,22 @@ function logout() {
     stopSystemRefresh();
 }
 
+function lockDownForLicense(lic) {
+    licenseLocked = true;
+    // Hide all nav items except License
+    document.querySelectorAll('.nav-item').forEach(function(el) {
+        if (el.getAttribute('data-section') !== 'license') {
+            el.style.display = 'none';
+        } else {
+            el.style.display = 'flex';
+        }
+    });
+    showSection('license');
+    // Load license status into the UI
+    if (lic) updateLicenseUI(lic);
+    else loadLicenseStatus();
+}
+
 async function checkAuth() {
     if (!authToken) return false;
     try {
@@ -2245,7 +2323,7 @@ async function checkAuth() {
 // ============================================================
 // ROUTER
 // ============================================================
-const SECTION_NAMES = ['dashboard', 'sessions', 'pricing', 'portal', 'settings', 'system', 'reports'];
+const SECTION_NAMES = ['dashboard', 'sessions', 'pricing', 'portal', 'settings', 'system', 'reports', 'license'];
 const SECTION_TITLES = {
     dashboard: 'Dashboard',
     sessions: 'Sessions',
@@ -2253,10 +2331,12 @@ const SECTION_TITLES = {
     portal: 'Portal',
     settings: 'Settings',
     system: 'System',
-    reports: 'Reports'
+    reports: 'Reports',
+    license: 'License'
 };
 
 function showSection(name) {
+    if (licenseLocked && name !== 'license') return;
     SECTION_NAMES.forEach(function(s) {
         var el = document.getElementById('section-' + s);
         if (el) el.style.display = (s === name) ? 'block' : 'none';
@@ -2292,6 +2372,8 @@ function showSection(name) {
         startSystemRefresh();
     } else if (name === 'reports') {
         loadReports();
+    } else if (name === 'license') {
+        loadLicenseStatus();
     }
 }
 
@@ -4936,6 +5018,110 @@ async function deletePortalAudio(slot) {
         showNotification('Audio deleted: ' + slot, 'success');
     } catch (e) {
         showNotification('Delete failed: ' + e.message, 'error');
+    }
+}
+
+// ============================================================
+// LICENSE MANAGEMENT
+// ============================================================
+async function loadLicenseStatus() {
+    try {
+        var lic = await apiCall('GET', '/admin/license/status');
+        updateLicenseUI(lic);
+    } catch (e) {
+        showNotification('Failed to load license status: ' + e.message, 'error');
+    }
+}
+
+function updateLicenseUI(lic) {
+    var pill = document.getElementById('license-status-pill');
+    var status = (lic && lic.status) || 'unknown';
+    var valid = lic && lic.valid;
+
+    if (valid && status === 'active') {
+        pill.textContent = 'Active';
+        pill.style.background = '#00c853';
+        pill.style.color = '#fff';
+    } else if (valid && status === 'trial') {
+        var daysLeft = '—';
+        if (lic.trial_expires_at) {
+            var exp = new Date(lic.trial_expires_at);
+            var now = new Date();
+            var diff = Math.max(0, Math.ceil((exp - now) / (1000*60*60*24)));
+            daysLeft = diff + ' day' + (diff !== 1 ? 's' : '') + ' left';
+        }
+        pill.textContent = 'Trial (' + daysLeft + ')';
+        pill.style.background = '#ff9800';
+        pill.style.color = '#000';
+    } else {
+        pill.textContent = status === 'locked' ? 'Locked' : status.charAt(0).toUpperCase() + status.slice(1);
+        pill.style.background = '#f44336';
+        pill.style.color = '#fff';
+    }
+
+    document.getElementById('license-hw-id').textContent = lic.hardware_id || '—';
+    document.getElementById('license-email').textContent = lic.owner_email || '—';
+    document.getElementById('license-trial-start').textContent = lic.trial_started_at ? new Date(lic.trial_started_at).toLocaleDateString() : '—';
+    document.getElementById('license-trial-end').textContent = lic.trial_expires_at ? new Date(lic.trial_expires_at).toLocaleDateString() : '—';
+    document.getElementById('license-activated').textContent = lic.activated_at ? new Date(lic.activated_at).toLocaleDateString() : '—';
+    document.getElementById('license-expires').textContent = lic.expires_at ? new Date(lic.expires_at).toLocaleDateString() : '—';
+    document.getElementById('license-heartbeat').textContent = lic.last_heartbeat_at ? new Date(lic.last_heartbeat_at).toLocaleString() : '—';
+    document.getElementById('license-last-ok').textContent = lic.last_supabase_response_at ? new Date(lic.last_supabase_response_at).toLocaleString() : 'Never';
+
+    var errBox = document.getElementById('license-error-box');
+    if (lic.last_supabase_error) {
+        errBox.textContent = 'Supabase Error: ' + lic.last_supabase_error;
+        errBox.style.display = 'block';
+    } else {
+        errBox.style.display = 'none';
+    }
+
+    // Show/hide activate form vs deactivate section
+    var showActivate = (status === 'trial' || status === 'locked' || status === 'expired');
+    document.getElementById('license-activate-form').style.display = showActivate ? 'block' : 'none';
+    document.getElementById('license-deactivate-section').style.display = (status === 'active') ? 'block' : 'none';
+
+    if (status === 'active' && lic.owner_email) {
+        document.getElementById('license-update-email').value = lic.owner_email;
+    }
+
+    // If license is now valid and we were locked down, restore nav
+    if (valid) {
+        licenseLocked = false;
+        document.querySelectorAll('.nav-item').forEach(function(el) {
+            el.style.display = 'flex';
+        });
+    }
+}
+
+async function activateLicense() {
+    var key = document.getElementById('license-key-input').value.trim();
+    var email = document.getElementById('license-owner-email').value.trim();
+    if (!key) { showNotification('Please enter a license key', 'error'); return; }
+    if (!email) { showNotification('Please enter an owner email', 'error'); return; }
+    var btn = document.getElementById('license-activate-btn');
+    btn.disabled = true;
+    try {
+        await apiCall('POST', '/admin/license/activate', { license_key: key, owner_email: email });
+        showNotification('License activated!', 'success');
+        await loadLicenseStatus();
+    } catch (e) {
+        showNotification('Activation failed: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function deactivateLicense() {
+    if (!confirm('Deactivate the license? The device will be locked until a new license is activated.')) return;
+    try {
+        await apiCall('POST', '/admin/license/deactivate');
+        showNotification('License deactivated', 'info');
+        await loadLicenseStatus();
+        // Lock down the UI
+        lockDownForLicense(null);
+    } catch (e) {
+        showNotification('Deactivation failed: ' + e.message, 'error');
     }
 }
 </script>

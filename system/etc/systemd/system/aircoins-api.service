@@ -5,6 +5,9 @@ Wants=postgresql.service
 
 [Service]
 Type=simple
+# Load Supabase credentials for the license system (the - prefix means
+# systemd won't fail if the file is missing — safe on dev boxes).
+EnvironmentFile=-/opt/aircoins/.env
 ExecStart=/usr/local/bin/aircoins-api/aircoins-api
 # No ExecStop: systemd's default SIGTERM handling stops the server cleanly.
 Restart=always

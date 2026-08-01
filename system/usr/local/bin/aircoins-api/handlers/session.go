@@ -17,7 +17,8 @@ import (
 )
 
 type SessionHandler struct {
-	DB *sql.DB
+	DB             *sql.DB
+	LicenseHandler *LicenseHandler
 }
 
 // banActiveError is returned by creditSession when the caller's MAC is
@@ -641,6 +642,12 @@ func (h *SessionHandler) Status(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	licenseRequired := false
+	if h.LicenseHandler != nil {
+		licenseRequired = !h.LicenseHandler.IsLicenseValid()
+	}
+	response["license_required"] = licenseRequired
 
 	response["system"] = map[string]interface{}{
 		"online":     checkLighttpdRunning(),

@@ -448,6 +448,19 @@ cp "$SYSTEM_DIR/etc/sysctl.d/99-aircoins.conf" /etc/sysctl.d/99-aircoins.conf
 sysctl -p /etc/sysctl.d/99-aircoins.conf > /dev/null 2>&1 || true
 echo "  ✓ 99-aircoins.conf (ip_forward)"
 
+# Copy .env to /opt/aircoins/.env if present (Supabase credentials for the
+# license system). The systemd unit loads this via EnvironmentFile=.
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    mkdir -p /opt/aircoins
+    cp "$SCRIPT_DIR/.env" /opt/aircoins/.env
+    chown root:root /opt/aircoins/.env
+    chmod 600 /opt/aircoins/.env
+    echo "  ✓ .env → /opt/aircoins/.env (license credentials)"
+else
+    echo -e "  ${YELLOW}⚠ No .env file found. License system requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.${NC}"
+    echo -e "  ${YELLOW}  Create /opt/aircoins/.env with these variables before starting the service.${NC}"
+fi
+
 echo -e "${GREEN}  ✓ Configs deployed${NC}"
 
 # ============================================

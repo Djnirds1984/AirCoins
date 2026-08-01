@@ -1533,6 +1533,12 @@
 
             fetchJSON(API_STATUS_URL + '?t=' + Date.now())
                 .then(data => {
+                    // --- License lockdown ---
+                    if (data && data.license_required === true) {
+                        document.getElementById('license-lockdown').style.display = 'flex';
+                        return;
+                    }
+                    document.getElementById('license-lockdown').style.display = 'none';
                     const sess = data && data.session;
                     // If the server issued or echoed a session token, persist
                     // it so future requests carry the same identity.
@@ -1762,6 +1768,13 @@
         startApiPolling();
         updateDebugToken();
     </script>
+
+    <!-- License lockdown overlay — shown when license_required === true -->
+    <div id="license-lockdown" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; z-index:10000; background:rgba(0,0,0,0.92); justify-content:center; align-items:center; flex-direction:column; text-align:center; padding:40px;">
+        <div style="font-size:48px; margin-bottom:20px;">🔒</div>
+        <div style="font-size:22px; font-weight:600; color:#f44336; margin-bottom:12px;">System Unavailable</div>
+        <div style="font-size:14px; color:#aaa; max-width:320px;">Please contact the operator. This system requires a valid license to operate.</div>
+    </div>
 
     <!-- Debug session-token display -->
     <div id="debugTokenBar" style="position:fixed;bottom:0;left:0;right:0;text-align:center;padding:4px 8px;font-size:11px;font-family:monospace;color:#666;background:rgba(0,0,0,0.4);z-index:9999;pointer-events:none;">Session Token: <span id="debugTokenValue">…</span></div>

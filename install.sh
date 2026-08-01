@@ -15,7 +15,7 @@ set -e
 # ============================================
 # CONFIGURATION
 # ============================================
-VERSION="1.1.0"
+VERSION="1.0.0"
 INSTALL_DIR="/opt/aircoins"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYSTEM_DIR="$SCRIPT_DIR/system"
@@ -164,35 +164,25 @@ echo -e "${YELLOW}[2/10]${NC} Installing required packages..."
 
 if [ "$IS_ARM" = true ]; then
     # Full ARM installation (wired-only)
-    apt-get install -y -qq \
-        lighttpd \
-        usbutils \
-        wget \
-        curl \
-        jq \
-        bc \
-        postgresql \
-        postgresql-contrib \
-        golang-go \
-        vlan \
-        dnsmasq \
-        iptables \
-        conntrack
+    ARM_PACKAGES="lighttpd usbutils wget curl jq bc postgresql postgresql-contrib vlan dnsmasq iptables conntrack file"
+    X86_PACKAGES="lighttpd wget curl jq bc postgresql postgresql-contrib vlan dnsmasq iptables conntrack file"
 else
     # x86 installation
-    apt-get install -y -qq \
-        lighttpd \
-        wget \
-        curl \
-        jq \
-        bc \
-        postgresql \
-        postgresql-contrib \
-        golang-go \
-        vlan \
-        dnsmasq \
-        iptables \
-        conntrack
+    ARM_PACKAGES="lighttpd usbutils wget curl jq bc postgresql postgresql-contrib vlan dnsmasq iptables conntrack file"
+    X86_PACKAGES="lighttpd wget curl jq bc postgresql postgresql-contrib vlan dnsmasq iptables conntrack file"
+fi
+
+# Only install golang-go if no pre-compiled binary exists
+if [ ! -f "$SYSTEM_DIR/usr/local/bin/aircoins-api/aircoins-api" ] || \
+   ! file "$SYSTEM_DIR/usr/local/bin/aircoins-api/aircoins-api" 2>/dev/null | grep -q "ELF"; then
+    ARM_PACKAGES="$ARM_PACKAGES golang-go"
+    X86_PACKAGES="$X86_PACKAGES golang-go"
+fi
+
+if [ "$IS_ARM" = true ]; then
+    apt-get install -y -qq $ARM_PACKAGES
+else
+    apt-get install -y -qq $X86_PACKAGES
 fi
 
 echo -e "${GREEN}  ✓ Packages installed${NC}"
@@ -334,16 +324,25 @@ echo -e "${YELLOW}[4/10]${NC} Building Go API server..."
 
 cd "$SYSTEM_DIR/usr/local/bin/aircoins-api"
 
-# Download dependencies
-go mod tidy
+if [ -f "$SYSTEM_DIR/usr/local/bin/aircoins-api/aircoins-api" ] && \
+   file "$SYSTEM_DIR/usr/local/bin/aircoins-api/aircoins-api" 2>/dev/null | grep -q "ELF"; then
+    echo "  ✓ Pre-compiled binary detected, skipping Go build"
+    mkdir -p /usr/local/bin/aircoins-api
+    cp "$SYSTEM_DIR/usr/local/bin/aircoins-api/aircoins-api" /usr/local/bin/aircoins-api/
+    chmod +x /usr/local/bin/aircoins-api/aircoins-api
+else
+    # Download dependencies
+    go mod tidy
 
-# Build the binary
-go build -o aircoins-api .
+    # Build the binary with version injection
+    BUILD_VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "$VERSION")
+    go build -ldflags "-X main.Version=$BUILD_VERSION" -o aircoins-api .
 
-# Deploy
-mkdir -p /usr/local/bin/aircoins-api
-cp aircoins-api /usr/local/bin/aircoins-api/
-chmod +x /usr/local/bin/aircoins-api/aircoins-api
+    # Deploy
+    mkdir -p /usr/local/bin/aircoins-api
+    cp aircoins-api /usr/local/bin/aircoins-api/
+    chmod +x /usr/local/bin/aircoins-api/aircoins-api
+fi
 
 echo -e "${GREEN}  ✓ Go API built and deployed${NC}"
 

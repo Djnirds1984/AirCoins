@@ -3,12 +3,15 @@ package main
 import (
 	"aircoins-api/handlers"
 	"aircoins-api/models"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"time"
 )
+
+var Version = "dev"
 
 func main() {
 	// Database configuration
@@ -240,7 +243,7 @@ func main() {
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok","service":"aircoins-api"}`))
+		fmt.Fprintf(w, `{"status":"ok","version":"%s"}`, Version)
 	})
 
 	// Recover iptables auth state for surviving sessions (reboot safety)
@@ -256,7 +259,9 @@ func main() {
 	port := getEnv("PORT", "8080")
 	addr := ":" + port
 
-	log.Printf("AirCoins API server starting on %s", addr)
+	handlers.SetAPIVersion(Version)
+
+	log.Printf("AirCoins API %s starting on %s", Version, addr)
 
 	// Enable CORS for development
 	handler := enableCORS(mux)

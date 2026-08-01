@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+// apiVersion is set from main via SetAPIVersion at startup.
+var apiVersion = "dev"
+
+// SetAPIVersion stores the build version for use in middleware headers
+// and other handler responses. Call once from main before starting the server.
+func SetAPIVersion(v string) {
+	apiVersion = v
+}
+
 type tokenEntry struct {
 	AdminID   int
 	Username  string
@@ -94,6 +103,8 @@ func LicenseGateMiddleware(lh *LicenseHandler, next http.Handler) http.Handler {
 // AuthMiddleware wraps a handler, requiring a valid Bearer token.
 func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Version", apiVersion)
+
 		auth := r.Header.Get("Authorization")
 		if auth == "" || !strings.HasPrefix(auth, "Bearer ") {
 			sendJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})

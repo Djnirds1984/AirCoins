@@ -524,6 +524,33 @@ func (h *SystemHandler) Logs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ============================================
+// REBOOT
+// ============================================
+
+// Reboot initiates a system reboot. Uses cmd.Start() so the HTTP response
+// is sent before the server is killed by the reboot.
+func (h *SystemHandler) Reboot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cmd := exec.Command("sudo", "reboot")
+	if err := cmd.Start(); err != nil {
+		sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"message": "Failed to initiate reboot: " + err.Error(),
+		})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "System is rebooting...",
+	})
+}
+
 // checkServiceRunning checks if a systemd service is running
 func checkServiceRunning(service string) bool {
 	cmd := exec.Command("systemctl", "is-active", "--quiet", service)

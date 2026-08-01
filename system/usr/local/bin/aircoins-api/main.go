@@ -173,6 +173,7 @@ func main() {
 	mux.Handle("/api/system/info", adminProtected(systemHandler.GetSystemInfo))
 	mux.Handle("/api/system/services", adminProtected(systemHandler.GetServices))
 	mux.Handle("/api/system/services/", adminProtected(systemHandler.ControlService))
+	mux.Handle("/api/admin/system/reboot", adminProtected(systemHandler.Reboot))
 
 	// VLAN routes (network identity only — create/delete the 802.1Q iface)
 	mux.Handle("/api/vlan/list", adminProtected(handlers.VLANList))

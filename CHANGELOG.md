@@ -4,6 +4,16 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.2.0 — System Reboot & Update Checker
+
+**Release date:** August 2026
+
+### Added
+- **Reboot button** on the System page — allows admin to remotely reboot the SBC with confirmation dialog and auto-reconnect after 60 seconds
+- **Update checker** (`/api/admin/updater/check`) — Admin sidebar page that checks GitHub for new releases, shows version comparison, changelog, and links to the release download
+
+---
+
 ## v1.1.0
 
 **Release date:** August 2026

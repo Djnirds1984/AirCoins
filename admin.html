@@ -1353,6 +1353,7 @@
                             <th>ID</th>
                             <th>Client IP</th>
                             <th>Client MAC</th>
+                            <th>Hostname</th>
                             <th>Coins</th>
                             <th>Time Remaining</th>
                             <th>Status</th>
@@ -1360,7 +1361,7 @@
                         </tr>
                     </thead>
                     <tbody id="recent-sessions-body">
-                        <tr class="empty-row"><td colspan="7">No sessions yet</td></tr>
+                        <tr class="empty-row"><td colspan="8">No sessions yet</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1428,6 +1429,7 @@
                             <th>ID</th>
                             <th>Client IP</th>
                             <th>Client MAC</th>
+                            <th>Hostname</th>
                             <th>Coins Inserted</th>
                             <th>Time Remaining</th>
                             <th>Status</th>
@@ -1437,7 +1439,7 @@
                         </tr>
                     </thead>
                     <tbody id="sessions-table-body">
-                        <tr class="empty-row"><td colspan="9">Loading...</td></tr>
+                        <tr class="empty-row"><td colspan="10">Loading...</td></tr>
                     </tbody>
                 </table>
 
@@ -2356,7 +2358,7 @@ function renderSessionsTable(data) {
     }
 
     if (sessions.length === 0) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No sessions yet</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="8">No sessions yet</td></tr>';
         return;
     }
 
@@ -2370,6 +2372,7 @@ function renderSessionsTable(data) {
                 '<td>' + s.id + '</td>' +
                 '<td>' + (s.client_ip || '-') + '</td>' +
                 '<td>' + (s.client_mac || '-') + '</td>' +
+                '<td>' + (s.hostname || '\u2014') + '</td>' +
                 '<td>' + (s.coins_inserted || 0) + '</td>' +
                 '<td>' + mins + ' min</td>' +
                 '<td style="color:' + statusColor + ';">' + (s.status || 'unknown') + '</td>' +
@@ -2650,7 +2653,7 @@ async function loadSessions(isAutoRefresh) {
 function renderSessionsAdminTable(sessions) {
     var tbody = document.getElementById('sessions-table-body');
     if (!sessions || sessions.length === 0) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="9">No sessions found</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="10">No sessions found</td></tr>';
         return;
     }
 
@@ -2699,6 +2702,7 @@ function renderSessionsAdminTable(sessions) {
                 '<td>' + s.id + '</td>' +
                 '<td>' + (s.client_ip || '-') + '</td>' +
                 '<td>' + (s.client_mac || '-') + '</td>' +
+                '<td>' + (s.hostname || '\u2014') + '</td>' +
                 '<td>' + (s.coins_inserted || 0) + '</td>' +
                 '<td>' + mins + ' min</td>' +
                 '<td><span class="status-badge ' + badgeClass + '">' + badgeLabel + '</span></td>' +

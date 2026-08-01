@@ -289,6 +289,8 @@ func (h *AdminHandler) GetSessions(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		// Resolve client hostname from IP/MAC (cached, non-blocking).
+		s.Hostname = ResolveHostname(s.ClientIP, s.ClientMAC)
 		sessions = append(sessions, s)
 	}
 

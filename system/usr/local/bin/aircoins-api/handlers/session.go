@@ -506,7 +506,8 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC, sessionToken string,
 			    expires_at = EXCLUDED.expires_at,
 			    paused_at = NULL,
 			    remaining_seconds_at_pause = NULL,
-			    pause_count = 0
+			    pause_count = 0,
+			    session_token = EXCLUDED.session_token
 			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at, COALESCE(session_token, '')
 		`, clientIP, clientMAC, coinValue, addSeconds, sessionToken).
 			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt, &tokenOut)
@@ -642,8 +643,9 @@ func (h *SessionHandler) Status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response["system"] = map[string]interface{}{
-		"online": checkLighttpdRunning(),
-		"ip":     clientIP,
+		"online":     checkLighttpdRunning(),
+		"ip":         clientIP,
+		"client_mac": clientMAC,
 	}
 
 	sendJSON(w, http.StatusOK, response)

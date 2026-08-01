@@ -5077,7 +5077,7 @@ function updateLicenseUI(lic) {
     }
 
     // Show/hide activate form vs deactivate section
-    var showActivate = (status === 'trial' || status === 'locked' || status === 'expired');
+    var showActivate = (status === 'trial' || status === 'locked' || status === 'expired' || status === 'revoked');
     document.getElementById('license-activate-form').style.display = showActivate ? 'block' : 'none';
     document.getElementById('license-deactivate-section').style.display = (status === 'active') ? 'block' : 'none';
 

@@ -2275,7 +2275,8 @@
             Click "Check for Updates" to scan for new releases.
         </div>
         <div style="margin-top:16px; text-align:center;">
-            <button onclick="loadUpdater()" style="padding:10px 24px; border-radius:8px; border:none; background:#00bcd4; color:#fff; cursor:pointer; font-size:14px;">Check for Updates</button>
+            <button id="btn-check-update" onclick="loadUpdater()" style="padding:10px 24px; border-radius:8px; border:none; background:#00bcd4; color:#fff; cursor:pointer; font-size:14px;">Check for Updates</button>
+            <button id="btn-update" onclick="performUpdate()" style="display:none; padding:10px 24px; border-radius:8px; border:none; background:#f39c12; color:#fff; cursor:pointer; font-size:14px; font-weight:600; margin-left:8px;">⬆ Update Now</button>
         </div>
     </div>
 </div>
@@ -5370,6 +5371,11 @@ async function ztLeave(networkId) {
 // UPDATER
 // ============================================================
 
+function cleanVersion(v) {
+    if (!v) return 'unknown';
+    return v.startsWith('v') ? v : 'v' + v;
+}
+
 async function loadUpdater() {
     var el = document.getElementById('updater-content');
     el.innerHTML = '<div style="padding:20px; color:#888;">Checking for updates...</div>';
@@ -5387,7 +5393,7 @@ function updateUpdaterUI(data) {
         el.innerHTML = '<div style="padding:20px;">'
             + '<div style="color:#ff9800; font-size:16px; margin-bottom:8px;">⚠ Unable to check for updates</div>'
             + '<div style="color:#888; font-size:13px;">' + escapeHtml(data.error) + '</div>'
-            + '<div style="color:#666; font-size:12px; margin-top:8px;">Current version: v' + escapeHtml(data.current_version) + '</div>'
+            + '<div style="color:#666; font-size:12px; margin-top:8px;">Current version: ' + escapeHtml(cleanVersion(data.current_version)) + '</div>'
             + '</div>';
         return;
     }
@@ -5396,12 +5402,12 @@ function updateUpdaterUI(data) {
     var statusIcon = data.update_available ? '⬆' : '✓';
     var html = '<div style="padding:16px;">'
         + '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">'
-        + '<div><span style="color:#888; font-size:13px;">Installed:</span> <strong>v' + escapeHtml(data.current_version) + '</strong></div>'
+        + '<div><span style="color:#888; font-size:13px;">Installed:</span> <strong>' + escapeHtml(cleanVersion(data.current_version)) + '</strong></div>'
         + '<div style="padding:4px 12px; border-radius:16px; background:' + statusColor + '22; color:' + statusColor + '; font-size:13px; font-weight:600;">' + statusIcon + ' ' + statusText + '</div>'
         + '</div>';
     if (data.update_available) {
         html += '<div style="margin-bottom:16px;">'
-            + '<span style="color:#888; font-size:13px;">Latest:</span> <strong style="color:#00bcd4;">v' + escapeHtml(data.latest_version) + '</strong>'
+            + '<span style="color:#888; font-size:13px;">Latest:</span> <strong style="color:#00bcd4;">' + escapeHtml(cleanVersion(data.latest_version)) + '</strong>'
             + ' <span style="color:#666; font-size:12px;">(released ' + new Date(data.published_at).toLocaleDateString() + ')</span>'
             + '</div>';
         if (data.release_notes) {
@@ -5414,6 +5420,56 @@ function updateUpdaterUI(data) {
     }
     html += '</div>';
     el.innerHTML = html;
+    // Show/hide Update Now button
+    var updateBtn = document.getElementById('btn-update');
+    if (updateBtn) {
+        updateBtn.style.display = data.update_available ? 'inline-block' : 'none';
+    }
+}
+
+async function performUpdate() {
+    if (!confirm('This will download and install the latest update. The system will restart. Continue?')) return;
+
+    var btn = document.getElementById('btn-update');
+    var originalText = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Updating...';
+        btn.style.background = '#666';
+    }
+
+    try {
+        var data = await apiCall('POST', '/admin/updater/update');
+        if (data.success) {
+            showNotification('Update installed! ' + (data.version || '') + ' — Service is restarting. Page will reload in 30 seconds.', 'success');
+            // Show success message and changelog in the updater section
+            var section = document.getElementById('section-updater');
+            if (section) {
+                var successDiv = document.createElement('div');
+                successDiv.className = 'card';
+                successDiv.style.cssText = 'max-width:700px; margin-top:16px; border-left:4px solid #4caf50;';
+                successDiv.innerHTML = '<h3 style="color:#4caf50; margin-bottom:12px;">Update Successful!</h3>' +
+                    '<p>Updated to <strong>' + escapeHtml(data.version || 'latest') + '</strong></p>' +
+                    '<p style="color:#888; margin-top:8px;">Service is restarting. This page will reload automatically.</p>';
+                section.insertBefore(successDiv, section.firstChild);
+            }
+            setTimeout(function() { location.reload(); }, 30000);
+        } else {
+            showNotification('Update failed: ' + (data.message || 'Unknown error'), 'error');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+                btn.style.background = '#f39c12';
+            }
+        }
+    } catch (e) {
+        showNotification('Update request failed: ' + e.message, 'error');
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+            btn.style.background = '#f39c12';
+        }
+    }
 }
 </script>
 </body>

@@ -4,6 +4,16 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.1.0
+
+**Release date:** August 2026
+
+### Added
+
+- **Update checker** (`/api/admin/updater/check`) — Admin endpoint that queries the latest AirCoins release from GitHub and reports whether an update is available. Results are cached for 1 hour to avoid hammering the GitHub API. Supports `?force=true` to bypass the cache.
+
+---
+
 ## v1.0.0 — First Production Release
 
 **Release date:** August 2026  

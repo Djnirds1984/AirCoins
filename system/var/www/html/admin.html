@@ -1296,6 +1296,9 @@
             <a href="#" data-section="zerotier" class="nav-item">
                 <span class="icon">🌐</span><span class="label">ZeroTier</span>
             </a>
+            <a href="#" data-section="updater" class="nav-item">
+                <span class="icon">🔄</span><span class="label">Updater</span>
+            </a>
         </nav>
     </aside>
 
@@ -2257,6 +2260,19 @@
             </div>
         </div>
 
+<!-- Updater Section -->
+<div id="section-updater" class="section" style="display:none;">
+    <div class="card" style="max-width:700px;">
+        <h2 style="margin-bottom:20px;">Software Updates</h2>
+        <div id="updater-content" style="text-align:center; padding:20px; color:#888;">
+            Click "Check for Updates" to scan for new releases.
+        </div>
+        <div style="margin-top:16px; text-align:center;">
+            <button onclick="loadUpdater()" style="padding:10px 24px; border-radius:8px; border:none; background:#00bcd4; color:#fff; cursor:pointer; font-size:14px;">Check for Updates</button>
+        </div>
+    </div>
+</div>
+
     </div>
 </div>
 
@@ -2377,7 +2393,7 @@ async function checkAuth() {
 // ============================================================
 // ROUTER
 // ============================================================
-const SECTION_NAMES = ['dashboard', 'sessions', 'pricing', 'portal', 'settings', 'system', 'reports', 'license', 'zerotier'];
+const SECTION_NAMES = ['dashboard', 'sessions', 'pricing', 'portal', 'settings', 'system', 'reports', 'license', 'zerotier', 'updater'];
 const SECTION_TITLES = {
     dashboard: 'Dashboard',
     sessions: 'Sessions',
@@ -2387,7 +2403,8 @@ const SECTION_TITLES = {
     system: 'System',
     reports: 'Reports',
     license: 'License',
-    zerotier: 'ZeroTier'
+    zerotier: 'ZeroTier',
+    updater: 'Updater'
 };
 
 function showSection(name) {
@@ -2431,6 +2448,8 @@ function showSection(name) {
         loadLicenseStatus();
     } else if (name === 'zerotier') {
         loadZeroTierStatus();
+    } else if (name === 'updater') {
+        loadUpdater();
     }
 }
 
@@ -5314,6 +5333,56 @@ async function ztLeave(networkId) {
     } catch (e) {
         showNotification('Leave failed: ' + e.message, 'error');
     }
+}
+
+// ============================================================
+// UPDATER
+// ============================================================
+
+async function loadUpdater() {
+    var el = document.getElementById('updater-content');
+    el.innerHTML = '<div style="padding:20px; color:#888;">Checking for updates...</div>';
+    try {
+        var data = await apiCall('GET', '/admin/updater/check');
+        updateUpdaterUI(data);
+    } catch (e) {
+        el.innerHTML = '<div style="padding:20px; color:#f44336;">Failed to check: ' + e.message + '</div>';
+    }
+}
+
+function updateUpdaterUI(data) {
+    var el = document.getElementById('updater-content');
+    if (data.error) {
+        el.innerHTML = '<div style="padding:20px;">'
+            + '<div style="color:#ff9800; font-size:16px; margin-bottom:8px;">⚠ Unable to check for updates</div>'
+            + '<div style="color:#888; font-size:13px;">' + escapeHtml(data.error) + '</div>'
+            + '<div style="color:#666; font-size:12px; margin-top:8px;">Current version: v' + escapeHtml(data.current_version) + '</div>'
+            + '</div>';
+        return;
+    }
+    var statusColor = data.update_available ? '#ff9800' : '#4caf50';
+    var statusText = data.update_available ? 'Update Available' : 'Up to Date';
+    var statusIcon = data.update_available ? '⬆' : '✓';
+    var html = '<div style="padding:16px;">'
+        + '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">'
+        + '<div><span style="color:#888; font-size:13px;">Installed:</span> <strong>v' + escapeHtml(data.current_version) + '</strong></div>'
+        + '<div style="padding:4px 12px; border-radius:16px; background:' + statusColor + '22; color:' + statusColor + '; font-size:13px; font-weight:600;">' + statusIcon + ' ' + statusText + '</div>'
+        + '</div>';
+    if (data.update_available) {
+        html += '<div style="margin-bottom:16px;">'
+            + '<span style="color:#888; font-size:13px;">Latest:</span> <strong style="color:#00bcd4;">v' + escapeHtml(data.latest_version) + '</strong>'
+            + ' <span style="color:#666; font-size:12px;">(released ' + new Date(data.published_at).toLocaleDateString() + ')</span>'
+            + '</div>';
+        if (data.release_notes) {
+            html += '<div style="margin-bottom:16px;">'
+                + '<div style="color:#888; font-size:13px; margin-bottom:6px;">Release Notes:</div>'
+                + '<pre style="background:rgba(255,255,255,0.03); padding:12px; border-radius:8px; font-size:12px; white-space:pre-wrap; max-height:300px; overflow-y:auto; color:#ccc; margin:0;">' + escapeHtml(data.release_notes) + '</pre>'
+                + '</div>';
+        }
+        html += '<a href="' + escapeHtml(data.release_url) + '" target="_blank" style="display:inline-block; padding:8px 20px; border-radius:8px; background:#00bcd4; color:#fff; text-decoration:none; font-size:13px;">View Release on GitHub →</a>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
 }
 </script>
 </body>

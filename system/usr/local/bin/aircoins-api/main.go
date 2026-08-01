@@ -239,6 +239,10 @@ func main() {
 	// without a Bearer token).
 	mux.HandleFunc("/audio/", audioHandler.Serve)
 
+	// Updater route (check for new AirCoins releases on GitHub)
+	updaterHandler := handlers.NewUpdaterHandler()
+	mux.Handle("/api/admin/updater/check", adminProtected(updaterHandler.CheckForUpdate))
+
 	// Health check
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

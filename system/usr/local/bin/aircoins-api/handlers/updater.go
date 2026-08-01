@@ -209,14 +209,18 @@ func (h *UpdaterHandler) PerformUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Run install.sh with sudo
-	installCmd := exec.Command("sudo", "bash", installDir+"/install.sh")
-	installCmd.Dir = installDir
-	if output, err := installCmd.CombinedOutput(); err != nil {
-		sendJSON(w, http.StatusOK, map[string]interface{}{
-			"success": false, "message": "Install failed: " + string(output),
-		})
-		return
+	// === CRITICAL FIX ===
+	// Send success response BEFORE running install.sh, because install.sh
+	// will kill this server when it restarts the aircoins-api service.
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Update downloaded and extracted. Installing now...",
+		"version": release.TagName,
+	})
+
+	// Flush the response to ensure it's sent to the client immediately
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
 	}
 
 	// Clear cache so next check fetches fresh
@@ -225,14 +229,19 @@ func (h *UpdaterHandler) PerformUpdate(w http.ResponseWriter, r *http.Request) {
 	h.cached = nil
 	h.mu.Unlock()
 
-	// Restart the API service (fire-and-forget; don't wait for it)
-	exec.Command("sudo", "systemctl", "restart", "aircoins-api").Start()
-
-	sendJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"message": "Update installed successfully. Service is restarting.",
-		"version": release.TagName,
-	})
+	// Run install.sh in the background with "yes" piped for all prompts,
+	// then restart the service.
+	installScript := installDir + "/install.sh"
+	updateCmd := exec.Command("bash", "-c", fmt.Sprintf(
+		"yes | sudo bash %s && sudo systemctl restart aircoins-api", installScript,
+	))
+	updateCmd.Dir = installDir
+	// Log output to a file for debugging
+	logFile, _ := os.Create("/tmp/aircoins-update.log")
+	updateCmd.Stdout = logFile
+	updateCmd.Stderr = logFile
+	// Start but don't wait — the server will be killed during restart
+	updateCmd.Start()
 }
 
 // compareSemver compares two semantic version strings.

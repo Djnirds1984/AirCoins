@@ -1079,26 +1079,163 @@
             color: #ff4444;
         }
 
-        @media (max-width: 1100px) {
-            .sys-info-grid { grid-template-columns: repeat(2, 1fr); }
-            .services-grid { grid-template-columns: 1fr; }
+        /* ==================== MOBILE HAMBURGER & OVERLAY ==================== */
+        .mobile-menu-toggle {
+            display: none;
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            z-index: 1001;
+            background: #1a1a2e;
+            border: 1px solid rgba(255,255,255,0.15);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 22px;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 99;
         }
 
         /* ==================== RESPONSIVE ==================== */
         @media (max-width: 1100px) {
             .stats-grid { grid-template-columns: repeat(2, 1fr); }
-        }
-        @media (max-width: 768px) {
-            #sidebar { width: 60px; }
-            #sidebar .logo-text { opacity: 0; width: 0; }
-            #sidebar .nav-item .label { opacity: 0; }
-            #main-content { margin-left: 60px !important; }
-            #main-content.sidebar-collapsed { margin-left: 60px !important; }
-            .stats-grid { grid-template-columns: 1fr 1fr; }
+            .reports-summary-grid { grid-template-columns: repeat(2, 1fr); }
+            .sys-info-grid { grid-template-columns: repeat(2, 1fr); }
+            .services-grid { grid-template-columns: 1fr; }
             .sys-info-grid { grid-template-columns: 1fr; }
         }
-        @media (max-width: 500px) {
+        @media (max-width: 768px) {
+            .mobile-menu-toggle { display: block; }
+
+            #sidebar {
+                position: fixed;
+                left: -260px;
+                width: 220px;
+                z-index: 100;
+                transition: left 0.3s ease;
+                height: 100vh;
+            }
+            #sidebar.collapsed { width: 220px; }
+            #sidebar.mobile-open { left: 0; }
+            #sidebar .logo-text { opacity: 1 !important; width: auto !important; }
+            #sidebar .nav-item .label { opacity: 1 !important; }
+
+            .sidebar-overlay.active { display: block; }
+
+            #main-content {
+                margin-left: 0 !important;
+                width: 100% !important;
+            }
+            #main-content.sidebar-collapsed { margin-left: 0 !important; }
+
+            .section { padding: 16px 12px; }
+
+            #top-bar {
+                padding: 14px 16px 14px 56px;
+            }
+            #page-title { font-size: 18px; }
+
+            /* Stats grids */
+            .stats-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+            .reports-summary-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+            .sys-info-grid { grid-template-columns: 1fr; }
+            .services-grid { grid-template-columns: 1fr; }
+            .sysstats-grid { grid-template-columns: 1fr; }
+
+            /* Cards */
+            .stat-card, .summary-card, .settings-card, .pricing-form-card,
+            .system-info-card, .service-card, .log-viewer-card,
+            .sysstats-panel, .table-container, .reports-table-card {
+                padding: 14px;
+                margin-bottom: 14px;
+                max-width: 100%;
+                box-sizing: border-box;
+            }
+
+            /* Tables */
+            .table-container { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            .data-table { font-size: 12px; min-width: 500px; }
+            .data-table th, .data-table td { padding: 8px 8px; }
+            .reports-table-card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+            /* Forms */
+            .settings-row { flex-direction: column; gap: 10px; }
+            .settings-field { min-width: 100%; }
+            .pricing-form { flex-direction: column; }
+            .pricing-form .form-group input { width: 100% !important; box-sizing: border-box; }
+            .filter-bar .form-group input,
+            .filter-bar .form-group select { width: 100% !important; box-sizing: border-box; }
+            .log-filter-bar .form-group select,
+            .log-filter-bar .form-group input { width: 100% !important; box-sizing: border-box; }
+            .date-range-picker { flex-direction: column; align-items: stretch; }
+            .date-range-picker .form-group input[type="date"] { width: 100% !important; box-sizing: border-box; }
+
+            /* Inputs & buttons touch targets */
+            input, select, textarea { min-height: 44px; }
+            .btn { min-height: 44px; font-size: 14px; }
+            .btn-sm { min-height: 36px; }
+
+            /* VLAN form */
+            .vlan-form .form-row { flex-direction: column; gap: 10px; }
+
+            /* Log entries */
+            .log-entries { font-size: 11px; }
+            .log-entry { flex-wrap: wrap; gap: 4px; }
+            .log-entry .log-ts { min-width: auto; }
+            .log-entry .log-comp { min-width: auto; }
+
+            /* Section titles */
+            h2, h3 { font-size: 18px; }
+
+            /* Pre blocks */
+            pre { font-size: 11px; padding: 8px !important; overflow-x: auto; }
+
+            /* Portal editor */
+            .portal-editor-grid { grid-template-columns: 1fr; }
+            .color-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+            .theme-gallery { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+
+            /* Sessions toolbar */
+            .sessions-toolbar { flex-direction: column; align-items: stretch; }
+            .reports-toolbar { flex-direction: column; align-items: stretch; }
+            .pricing-header { flex-direction: column; align-items: stretch; gap: 10px; }
+            .date-presets { flex-wrap: wrap; }
+
+            /* Action buttons in tables */
+            .action-btns { flex-wrap: wrap; }
+            .svc-actions { flex-wrap: wrap; }
+
+            /* Stat card values */
+            .stat-card .sc-value { font-size: 22px; }
+            .summary-card .sc-value { font-size: 20px; }
+            .sysstats-temp-value { font-size: 36px; }
+
+            /* Modal */
+            .modal-card { margin: 12px; max-width: calc(100% - 24px); }
+        }
+        @media (max-width: 480px) {
             .stats-grid { grid-template-columns: 1fr; }
+            .reports-summary-grid { grid-template-columns: 1fr; }
+            .section { padding: 12px 8px; }
+            .stat-card, .summary-card, .settings-card, .pricing-form-card,
+            .system-info-card, .service-card, .log-viewer-card,
+            .sysstats-panel, .table-container, .reports-table-card {
+                padding: 10px;
+            }
+            .data-table { font-size: 11px; }
+            #top-bar { padding: 12px 12px 12px 50px; }
+            #page-title { font-size: 16px; }
+            .theme-gallery { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
         }
         /* VLAN Management + Portal Servers */
         .vlan-form .form-row { display: flex; gap: 15px; margin-bottom: 15px; }
@@ -1261,6 +1398,10 @@
 
 <!-- ==================== ADMIN PANEL ==================== -->
 <div id="admin-panel" style="display:none;">
+
+    <!-- Mobile hamburger toggle -->
+    <button class="mobile-menu-toggle" id="mobile-menu-toggle" title="Menu">&#9776;</button>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
     <!-- Sidebar -->
     <aside id="sidebar">
@@ -2467,13 +2608,28 @@ function showSection(name) {
 function toggleSidebar() {
     var sidebar = document.getElementById('sidebar');
     var mainContent = document.getElementById('main-content');
-    sidebar.classList.toggle('collapsed');
-    mainContent.classList.toggle('sidebar-collapsed');
-    localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed') ? '1' : '0');
+    var overlay = document.getElementById('sidebar-overlay');
+
+    // Mobile: use slide-in overlay instead of collapse
+    if (window.innerWidth <= 768) {
+        sidebar.classList.toggle('mobile-open');
+        overlay.classList.toggle('active');
+    } else {
+        sidebar.classList.toggle('collapsed');
+        mainContent.classList.toggle('sidebar-collapsed');
+        localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed') ? '1' : '0');
+    }
+}
+
+function closeSidebarMobile() {
+    var sidebar = document.getElementById('sidebar');
+    var overlay = document.getElementById('sidebar-overlay');
+    sidebar.classList.remove('mobile-open');
+    overlay.classList.remove('active');
 }
 
 function restoreSidebar() {
-    if (localStorage.getItem('sidebarCollapsed') === '1') {
+    if (window.innerWidth > 768 && localStorage.getItem('sidebarCollapsed') === '1') {
         document.getElementById('sidebar').classList.add('collapsed');
         document.getElementById('main-content').classList.add('sidebar-collapsed');
     }
@@ -4500,12 +4656,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Wire sidebar toggle
     document.getElementById('sidebar-toggle').addEventListener('click', toggleSidebar);
+    document.getElementById('mobile-menu-toggle').addEventListener('click', toggleSidebar);
+    document.getElementById('sidebar-overlay').addEventListener('click', closeSidebarMobile);
 
     // Wire nav items
     document.querySelectorAll('.nav-item').forEach(function(item) {
         item.addEventListener('click', function(e) {
             e.preventDefault();
             showSection(this.getAttribute('data-section'));
+            closeSidebarMobile();
         });
     });
 

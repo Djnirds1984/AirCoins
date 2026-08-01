@@ -4,6 +4,19 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.5.0 — Updater Fix, Mobile UI & Privacy
+
+**Release date:** August 2026
+
+### Fixed
+- **Updater "Failed to fetch" bug** — response now sent before install.sh runs, auto-answers prompts, ensures service restart
+- **Admin panel mobile layout** — hamburger menu, slide-in sidebar, full-width cards, scrollable tables, proper touch targets
+
+### Changed
+- Removed "View on GitHub" links from updater page to keep repository private
+
+---
+
 ## v1.4.0 — Changelog Display & Updater Improvements
 
 **Release date:** August 2026

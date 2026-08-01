@@ -3781,15 +3781,6 @@ function filterLogsLocal() {
     renderLogs();
 }
 
-function safeUrl(url) {
-    if (!url) return '#';
-    try {
-        var u = new URL(url);
-        if (u.protocol === 'http:' || u.protocol === 'https:') return escapeHtml(url);
-    } catch (_) {}
-    return '#';
-}
-
 function escapeHtml(str) {
     if (!str) return '';
     var div = document.createElement('div');
@@ -5575,7 +5566,6 @@ function updateUpdaterUI(data) {
                 + '<pre style="background:rgba(255,255,255,0.03); padding:12px; border-radius:8px; font-size:12px; white-space:pre-wrap; max-height:300px; overflow-y:auto; color:#ccc; margin:0;">' + escapeHtml(data.release_notes) + '</pre>'
                 + '</div>';
         }
-        html += '<a href="' + safeUrl(data.release_url) + '" target="_blank" style="display:inline-block; padding:8px 20px; border-radius:8px; background:#00bcd4; color:#fff; text-decoration:none; font-size:13px;">View Release on GitHub →</a>';
     } else {
         // Up to date — show release notes for the current version
         var notesVersion = data.latest_version || data.current_version;
@@ -5584,9 +5574,6 @@ function updateUpdaterUI(data) {
                 + '<h4 style="color:#4caf50; margin-bottom:8px; font-size:14px;">Release Notes — ' + escapeHtml(cleanVersion(notesVersion)) + '</h4>'
                 + '<pre style="background:rgba(255,255,255,0.03); padding:12px; border-radius:8px; font-size:12px; white-space:pre-wrap; max-height:400px; overflow-y:auto; color:#ccc; margin:0; line-height:1.6;">' + escapeHtml(data.release_notes) + '</pre>'
                 + '</div>';
-        }
-        if (data.release_url) {
-            html += '<div style="margin-top:12px;"><a href="' + safeUrl(data.release_url) + '" target="_blank" style="color:#00bcd4; text-decoration:none; font-size:13px;">View on GitHub →</a></div>';
         }
     }
     html += '</div>';

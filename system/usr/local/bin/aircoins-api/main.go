@@ -42,6 +42,11 @@ func main() {
 	// handled by migrations.sql 007).
 	handlers.MigrateLegacyPortalConfig()
 
+	// Ensure the audio upload directory exists.
+	if err := handlers.EnsureAudioDir(); err != nil {
+		log.Printf("WARNING: audio directory not available: %v", err)
+	}
+
 	// Initialize handlers
 	adminHandler := &handlers.AdminHandler{DB: models.DB}
 	sessionHandler := &handlers.SessionHandler{DB: models.DB}
@@ -178,6 +183,15 @@ func main() {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	}))
+
+	// Admin audio routes (auth-wrapped): upload, delete, list
+	audioHandler := &handlers.AudioHandler{DB: models.DB}
+	mux.HandleFunc("/api/admin/audio/", handlers.AuthMiddleware(audioHandler.AdminDispatch))
+	mux.HandleFunc("/api/admin/audio", handlers.AuthMiddleware(audioHandler.AdminList))
+
+	// Public audio serve (no auth — the captive portal fetches these
+	// without a Bearer token).
+	mux.HandleFunc("/audio/", audioHandler.Serve)
 
 	// Health check
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {

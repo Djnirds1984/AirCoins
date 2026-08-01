@@ -1061,6 +1061,34 @@
         // No local session restore: the status poll below mirrors whatever
         // session the server has for this client (survives page reloads).
 
+        // ==================== PORTAL AUDIO ====================
+        // Preload the three audio slots. If a slot 404s the element is inert.
+        var audioInsertCoin = new Audio('/audio/insertcoin');
+        var audioCoinDrop = new Audio('/audio/coindrop');
+        var audioDonePaying = new Audio('/audio/donepaying');
+        audioInsertCoin.preload = 'auto';
+        audioCoinDrop.preload = 'auto';
+        audioDonePaying.preload = 'auto';
+
+        function playAudioSafe(el) {
+            if (!el) return;
+            try {
+                el.currentTime = 0;
+                el.play().catch(function(){});
+            } catch (e) {}
+        }
+
+        function stopAudio(el) {
+            if (!el) return;
+            try { el.pause(); el.currentTime = 0; } catch (e) {}
+        }
+
+        function stopAllPortalAudio() {
+            stopAudio(audioInsertCoin);
+            stopAudio(audioCoinDrop);
+            stopAudio(audioDonePaying);
+        }
+
         // ==================== GPIO COIN LISTENER ====================
 
         // Coin slot arm/disarm API — the backend GPIO listener only
@@ -1168,6 +1196,9 @@
             // Open modal
             document.getElementById('gpioModal').classList.add('active');
 
+            // Play insert-coin audio (user gesture from tap guarantees play() works)
+            playAudioSafe(audioInsertCoin);
+
             // Arm the coin slot on the backend (GPIO listener wakes up).
             // Local fallback expiry keeps the countdown working if the
             // API is not reachable (dev/demo mode).
@@ -1273,6 +1304,9 @@
             // Flash notification
             showNotification('Coin detected! ₱' + amount + ' (' + minutesText + ')', 'success');
 
+            // Play coin-drop audio (reset + play for rapid successive coins)
+            playAudioSafe(audioCoinDrop);
+
             // Brief status flash then back to listening
             setTimeout(() => {
                 if (gpio.active) {
@@ -1369,6 +1403,9 @@
                     if (res.body && res.body.session_token) {
                         storeSessionToken(res.body.session_token);
                     }
+                    // Done paying success: stop insert-coin loop, play done-paying sound
+                    stopAudio(audioInsertCoin);
+                    playAudioSafe(audioDonePaying);
                     applyServerSession(res.body.session, res.body.extended);
                 })
                 .catch(err => {
@@ -1387,6 +1424,8 @@
             gpio.active = false;
             coinslotDisarm();
             document.getElementById('gpioModal').classList.remove('active');
+            // Stop all portal audio when modal closes (any path: success, cancel, error)
+            stopAllPortalAudio();
         }
 
         function gpioCancel() {

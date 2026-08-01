@@ -1639,6 +1639,56 @@
                         </div>
                     </div>
 
+                    <!-- Portal Audio -->
+                    <div class="settings-card">
+                        <div class="card-title">Portal Audio</div>
+                        <div class="gpio-info-text" style="margin-bottom:12px;">
+                            Upload short audio clips played on the captive portal when a user opens INSERT COIN, when each coin drops, and when DONE PAYING completes.
+                        </div>
+                        <!-- Insert Coin slot -->
+                        <div class="audio-slot-row" id="audio-slot-insertcoin" style="display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid #333;">
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                <strong style="min-width:150px;">Insert Coin Audio</strong>
+                                <span class="audio-current-label" id="audio-info-insertcoin" style="color:#888;font-size:13px;">No audio uploaded</span>
+                            </div>
+                            <audio controls id="audio-player-insertcoin" style="display:none;width:100%;max-width:400px;" preload="none"></audio>
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                <input type="file" accept="audio/*" id="audio-file-insertcoin">
+                                <button class="btn btn-primary btn-sm" id="audio-upload-btn-insertcoin" onclick="uploadPortalAudio('insertcoin')">Upload</button>
+                                <button class="btn btn-danger btn-sm" onclick="deletePortalAudio('insertcoin')">Delete</button>
+                                <span class="audio-upload-status" id="audio-status-insertcoin" style="font-size:12px;"></span>
+                            </div>
+                        </div>
+                        <!-- Coin Drop slot -->
+                        <div class="audio-slot-row" id="audio-slot-coindrop" style="display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid #333;">
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                <strong style="min-width:150px;">Coin Drop Audio</strong>
+                                <span class="audio-current-label" id="audio-info-coindrop" style="color:#888;font-size:13px;">No audio uploaded</span>
+                            </div>
+                            <audio controls id="audio-player-coindrop" style="display:none;width:100%;max-width:400px;" preload="none"></audio>
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                <input type="file" accept="audio/*" id="audio-file-coindrop">
+                                <button class="btn btn-primary btn-sm" id="audio-upload-btn-coindrop" onclick="uploadPortalAudio('coindrop')">Upload</button>
+                                <button class="btn btn-danger btn-sm" onclick="deletePortalAudio('coindrop')">Delete</button>
+                                <span class="audio-upload-status" id="audio-status-coindrop" style="font-size:12px;"></span>
+                            </div>
+                        </div>
+                        <!-- Done Paying slot -->
+                        <div class="audio-slot-row" id="audio-slot-donepaying" style="display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid #333;">
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                <strong style="min-width:150px;">Done Paying Audio</strong>
+                                <span class="audio-current-label" id="audio-info-donepaying" style="color:#888;font-size:13px;">No audio uploaded</span>
+                            </div>
+                            <audio controls id="audio-player-donepaying" style="display:none;width:100%;max-width:400px;" preload="none"></audio>
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                <input type="file" accept="audio/*" id="audio-file-donepaying">
+                                <button class="btn btn-primary btn-sm" id="audio-upload-btn-donepaying" onclick="uploadPortalAudio('donepaying')">Upload</button>
+                                <button class="btn btn-danger btn-sm" onclick="deletePortalAudio('donepaying')">Delete</button>
+                                <span class="audio-upload-status" id="audio-status-donepaying" style="font-size:12px;"></span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div style="display:flex; gap:12px;">
                         <button class="btn btn-primary" onclick="savePortalAppearance()">Save</button>
                         <button class="btn btn-ghost" onclick="resetPortalToDefault()">Reset to Default</button>
@@ -3925,6 +3975,7 @@ function syncPortalEditor() {
 
 async function loadPortalAppearance() {
     renderThemeGallery();
+    loadPortalAudio();
     try {
         var res = await apiCall('GET', '/portal/appearance');
         portalAppearance = {
@@ -4807,6 +4858,84 @@ async function runQDiag() {
         pre.textContent = out;
     } catch (e) {
         pre.textContent = 'Error: ' + e.message;
+    }
+}
+
+// === Portal Audio Management ===
+var AUDIO_SLOTS = ['insertcoin', 'coindrop', 'donepaying'];
+
+function formatBytes(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return Math.round(bytes / 1024) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+async function loadPortalAudio() {
+    try {
+        var res = await apiCall('GET', '/admin/audio');
+        var doc = (res && res.data) || {};
+        AUDIO_SLOTS.forEach(function(slot) {
+            var infoEl = document.getElementById('audio-info-' + slot);
+            var playerEl = document.getElementById('audio-player-' + slot);
+            var meta = doc[slot];
+            if (meta && meta.filename) {
+                infoEl.textContent = 'Currently: ' + meta.filename + ' (' + formatBytes(meta.size) + ')';
+                playerEl.src = '/audio/' + slot;
+                playerEl.style.display = 'block';
+            } else {
+                infoEl.textContent = 'No audio uploaded';
+                playerEl.removeAttribute('src');
+                playerEl.style.display = 'none';
+            }
+        });
+    } catch (e) {
+        showNotification('Failed to load audio slots: ' + e.message, 'error');
+    }
+}
+
+async function uploadPortalAudio(slot) {
+    var fileInput = document.getElementById('audio-file-' + slot);
+    var statusEl = document.getElementById('audio-status-' + slot);
+    var btn = document.getElementById('audio-upload-btn-' + slot);
+    if (!fileInput.files || !fileInput.files[0]) {
+        showNotification('Please select an audio file first', 'error');
+        return;
+    }
+    var formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+    btn.disabled = true;
+    statusEl.textContent = 'Uploading...';
+    statusEl.style.color = '';
+    try {
+        var res = await fetch('/api/admin/audio/' + slot, {
+            method: 'POST',
+            headers: authToken ? { 'Authorization': 'Bearer ' + authToken } : {},
+            body: formData
+        });
+        var data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || 'Upload failed');
+        statusEl.textContent = 'Uploaded!';
+        statusEl.style.color = '#4caf50';
+        fileInput.value = '';
+        await loadPortalAudio();
+        showNotification('Audio uploaded: ' + slot, 'success');
+    } catch (e) {
+        statusEl.textContent = 'Error: ' + e.message;
+        statusEl.style.color = '#f44336';
+        showNotification('Upload failed: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function deletePortalAudio(slot) {
+    if (!confirm('Delete the ' + slot + ' audio file? This cannot be undone.')) return;
+    try {
+        await apiCall('DELETE', '/admin/audio/' + slot);
+        await loadPortalAudio();
+        showNotification('Audio deleted: ' + slot, 'success');
+    } catch (e) {
+        showNotification('Delete failed: ' + e.message, 'error');
     }
 }
 </script>

@@ -83,22 +83,10 @@ rsync -a \
 # --- Security check ---
 echo ""
 echo "[3/4] Running security checks..."
-if tar tzf "$TARBALL_DIR" 2>/dev/null | grep -q '\.env$' && ! tar tzf "$TARBALL_DIR" 2>/dev/null | grep -q '\.env\.example$'; then
-    echo "ERROR: .env file found in tarball! Aborting."
-    rm -rf "$STAGING_DIR"
-    rm -f "$GO_SRC_DIR/aircoins-api"
-    exit 1
-fi
 
-# Check for .env (not .env.example) specifically
-ENV_FILES=$(tar tzf /dev/null 2>/dev/null || true)
-FOUND_ENV=false
-for f in $(find "$TARBALL_DIR" -name '.env' -not -name '.env.example' 2>/dev/null); do
-    FOUND_ENV=true
-    echo "ERROR: Found .env in tarball: $f"
-done
-if [ "$FOUND_ENV" = true ]; then
-    echo "ERROR: .env file must not be in the release tarball!"
+# Check staging directory for .env files (excluding .env.example)
+if find "$TARBALL_DIR" -name '.env' -not -name '.env.example' 2>/dev/null | grep -q .; then
+    echo "ERROR: .env file found in staging directory! Aborting."
     rm -rf "$STAGING_DIR"
     rm -f "$GO_SRC_DIR/aircoins-api"
     exit 1

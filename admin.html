@@ -1354,6 +1354,7 @@
                             <th>Client IP</th>
                             <th>Client MAC</th>
                             <th>Hostname</th>
+                            <th>Token</th>
                             <th>Coins</th>
                             <th>Total Coins</th>
                             <th>Time Remaining</th>
@@ -1362,7 +1363,7 @@
                         </tr>
                     </thead>
                     <tbody id="recent-sessions-body">
-                        <tr class="empty-row"><td colspan="9">No sessions yet</td></tr>
+                        <tr class="empty-row"><td colspan="10">No sessions yet</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1431,6 +1432,7 @@
                             <th>Client IP</th>
                             <th>Client MAC</th>
                             <th>Hostname</th>
+                            <th>Token</th>
                             <th>Coins Inserted</th>
                             <th>Total Coins</th>
                             <th>Time Remaining</th>
@@ -1441,7 +1443,7 @@
                         </tr>
                     </thead>
                     <tbody id="sessions-table-body">
-                        <tr class="empty-row"><td colspan="11">Loading...</td></tr>
+                        <tr class="empty-row"><td colspan="12">Loading...</td></tr>
                     </tbody>
                 </table>
 
@@ -2360,7 +2362,7 @@ function renderSessionsTable(data) {
     }
 
     if (sessions.length === 0) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="9">No sessions yet</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="10">No sessions yet</td></tr>';
         return;
     }
 
@@ -2376,6 +2378,7 @@ function renderSessionsTable(data) {
                 '<td>' + (s.client_ip || '-') + '</td>' +
                 '<td>' + (s.client_mac || '-') + '</td>' +
                 '<td>' + (s.hostname || '\u2014') + '</td>' +
+                '<td>' + (s.session_token || '\u2014') + '</td>' +
                 '<td>' + (s.coins_inserted || 0) + '</td>' +
                 '<td>' + lifetimeCoins + '</td>' +
                 '<td>' + mins + ' min</td>' +
@@ -2657,7 +2660,7 @@ async function loadSessions(isAutoRefresh) {
 function renderSessionsAdminTable(sessions) {
     var tbody = document.getElementById('sessions-table-body');
     if (!sessions || sessions.length === 0) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="11">No sessions found</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="12">No sessions found</td></tr>';
         return;
     }
 
@@ -2707,6 +2710,7 @@ function renderSessionsAdminTable(sessions) {
                 '<td>' + (s.client_ip || '-') + '</td>' +
                 '<td>' + (s.client_mac || '-') + '</td>' +
                 '<td>' + (s.hostname || '\u2014') + '</td>' +
+                '<td>' + (s.session_token || '\u2014') + '</td>' +
                 '<td>' + (s.coins_inserted || 0) + '</td>' +
                 '<td>' + lifetimeCoins + '</td>' +
                 '<td>' + mins + ' min</td>' +
@@ -2938,7 +2942,8 @@ async function viewSession(sessionId) {
             ['ID', s.id],
             ['Client IP', s.client_ip || '—'],
             ['Client MAC', s.client_mac || '—'],
-            ['Hostname', s.hostname || '—'],
+            ['Hostname', s.hostname || '\u2014'],
+            ['Session Token', s.session_token || '\u2014'],
             ['Coins Inserted', s.coins_inserted],
             ['Total Seconds', s.total_seconds],
             ['Remaining Seconds', s.remaining_seconds],
@@ -3043,6 +3048,8 @@ async function openEditSessionModal(sessionId) {
                     '<select id="edit-sess-status">' + statusOptions + '</select></div>' +
                 '<div class="form-group"><label for="edit-sess-shaped">Shaped Mbps (0 = clear)</label>' +
                     '<input type="number" id="edit-sess-shaped" min="0" step="1" value="' + (s.shaped_mbps || 0) + '"></div>' +
+                '<div class="form-group"><label for="edit-sess-token">Session Token (clear to NULL)</label>' +
+                    '<input type="text" id="edit-sess-token" value="' + (s.session_token || '') + '" placeholder="8 hex chars" maxlength="8"></div>' +
                 '<div class="modal-actions">' +
                     '<button class="btn btn-primary" onclick="submitEditSession(' + s.id + ')">Save</button>' +
                     '<button class="btn btn-ghost" onclick="closeEditSessionModal()">Cancel</button>' +
@@ -3068,6 +3075,7 @@ async function submitEditSession(sessionId) {
     var remainVal = parseInt(document.getElementById('edit-sess-remaining').value, 10);
     var statusVal = document.getElementById('edit-sess-status').value;
     var shapedVal = parseInt(document.getElementById('edit-sess-shaped').value, 10);
+    var tokenVal = document.getElementById('edit-sess-token').value.trim();
 
     // Validate MAC format
     if (macVal && !/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(macVal)) {
@@ -3094,7 +3102,8 @@ async function submitEditSession(sessionId) {
         total_seconds: totalVal,
         remaining_seconds: remainVal,
         status: statusVal,
-        shaped_mbps: shapedVal
+        shaped_mbps: shapedVal,
+        session_token: tokenVal
     };
 
     try {

@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"log"
 	"net"
 	"net/http"
@@ -27,6 +29,19 @@ import (
 const captiveRulesBin = "/usr/local/bin/aircoins-captive-rules"
 
 var macRegexp = regexp.MustCompile(`^([0-9a-f]{2}:){5}[0-9a-f]{2}$`)
+
+// generateSessionToken returns 8 hex chars (4 random bytes) for the
+// per-device session token used in MAC-randomization roaming.
+func generateSessionToken() string {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand.Read on Linux never fails in practice; fall back
+		// to a deterministic value so the caller always gets a token.
+		log.Printf("generateSessionToken: crypto/rand failed: %v", err)
+		return "00000000"
+	}
+	return hex.EncodeToString(b)
+}
 
 // clientIPFromRequest resolves the real client IP of an HTTP request:
 // first hop of X-Forwarded-For when present (requests come through

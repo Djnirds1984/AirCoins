@@ -105,6 +105,7 @@ type Session struct {
 	RemainingSecondsAtPause *int       `json:"remaining_seconds_at_pause,omitempty"`
 	PauseCount              int        `json:"pause_count"`
 	ShapedMbps              *int       `json:"shaped_mbps,omitempty"`
+	SessionToken           string     `json:"session_token,omitempty"`
 	QdiscInfo               *QdiscInfo `json:"qdisc_info,omitempty"`
 	Hostname                string     `json:"hostname,omitempty"`
 	CreatedAt               time.Time  `json:"created_at"`

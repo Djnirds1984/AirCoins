@@ -522,6 +522,18 @@ END
 $$;
 
 -- ============================================
+-- 012 - SESSIONS: per-device session token for MAC-randomization roaming
+-- ============================================
+-- A device roaming between SSIDs may change its MAC (phone MAC
+-- randomization). The session token (8 hex chars, generated client-side)
+-- identifies the device across MAC changes so the remaining time can be
+-- migrated to the new MAC transparently.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS session_token VARCHAR(8);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_session_token
+  ON sessions(session_token)
+  WHERE session_token IS NOT NULL AND session_token <> '';
+
+-- ============================================
 -- COMPLETION
 -- ============================================
 \echo 'Migrations applied.'

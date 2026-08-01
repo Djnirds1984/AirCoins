@@ -637,23 +637,52 @@
 
         // Load state from localStorage
         function loadState() {
-            const saved = localStorage.getItem('aircoins_state');
-            if (saved) {
-                const parsed = JSON.parse(saved);
-                // Pricing is deliberately NOT restored from localStorage —
-                // /api/pricing is the only source of tiers.
-                state.gpioPin = parsed.gpioPin || 7;
-                state.gpioCoinValue = parsed.gpioCoinValue || 1;
-                state.gpioPulseMode = parsed.gpioPulseMode || 'falling';
-            }
+            try {
+                const saved = localStorage.getItem('aircoins_state');
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    // Pricing is deliberately NOT restored from localStorage —
+                    // /api/pricing is the only source of tiers.
+                    state.gpioPin = parsed.gpioPin || 7;
+                    state.gpioCoinValue = parsed.gpioCoinValue || 1;
+                    state.gpioPulseMode = parsed.gpioPulseMode || 'falling';
+                }
+            } catch (e) {}
         }
 
         function saveState() {
-            localStorage.setItem('aircoins_state', JSON.stringify({
-                gpioPin: state.gpioPin,
-                gpioCoinValue: state.gpioCoinValue,
-                gpioPulseMode: state.gpioPulseMode
-            }));
+            try {
+                localStorage.setItem('aircoins_state', JSON.stringify({
+                    gpioPin: state.gpioPin,
+                    gpioCoinValue: state.gpioCoinValue,
+                    gpioPulseMode: state.gpioPulseMode
+                }));
+            } catch (e) {}
+        }
+
+        // ==================== SESSION TOKEN ====================
+        // Returns the 8-hex-char token stored in localStorage that the
+        // backend uses to link sessions across page reloads and device
+        // reboots. If no token exists yet, generates one via
+        // crypto.getRandomValues and persists it. Falls back to "" when
+        // storage is unavailable (private browsing, quota exceeded).
+        function getSessionToken() {
+            try {
+                var tok = localStorage.getItem('aircoins_session_token');
+                if (tok) return tok;
+                var buf = new Uint8Array(4);
+                crypto.getRandomValues(buf);
+                tok = Array.from(buf).map(function(b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+                localStorage.setItem('aircoins_session_token', tok);
+                return tok;
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function storeSessionToken(tok) {
+            if (!tok) return;
+            try { localStorage.setItem('aircoins_session_token', tok); } catch (e) {}
         }
 
         // ==================== COIN INSERT ====================
@@ -789,7 +818,7 @@
         // that a bare .catch() swallows and the portal goes silently blind.
         // Every JSON poll goes through here so that case is loud instead.
         function fetchJSON(url) {
-            return fetch(url, { headers: { 'Accept': 'application/json' } })
+            return fetch(url, { headers: { 'Accept': 'application/json', 'X-Session-Token': getSessionToken() } })
                 .then(r => {
                     if (!r.ok) throw new Error(url + ' -> HTTP ' + r.status);
                     const ctype = (r.headers.get('content-type') || '').toLowerCase();
@@ -996,7 +1025,7 @@
         function coinslotArm(durationSec) {
             return fetch(COINSLOT_ARM_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-Session-Token': getSessionToken() },
                 body: JSON.stringify({ duration_sec: durationSec })
             }).then(r => r.json().then(body => ({ status: r.status, body: body }))).catch(() => null);
         }
@@ -1264,7 +1293,7 @@
 
             fetch(SESSION_START_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Session-Token': getSessionToken() },
                 body: JSON.stringify({ pay_ticket: gpio.payTicket || '' })
             })
                 .then(r => r.json().catch(() => ({})).then(body => ({ ok: r.ok, status: r.status, body: body })))
@@ -1288,6 +1317,9 @@
                             'Failed to start session. Please try again.';
                         showNotification(msg, 'error');
                         return;
+                    }
+                    if (res.body && res.body.session_token) {
+                        storeSessionToken(res.body.session_token);
                     }
                     applyServerSession(res.body.session, res.body.extended);
                 })
@@ -1415,6 +1447,10 @@
             fetchJSON(API_STATUS_URL + '?t=' + Date.now())
                 .then(data => {
                     const sess = data && data.session;
+                    // If the server issued or echoed a session token, persist
+                    // it so future requests carry the same identity.
+                    var srvTok = (data && data.session_token) || (sess && sess.session_token);
+                    if (srvTok) storeSessionToken(srvTok);
                     const backendRemaining = sess ? (parseInt(sess.remaining, 10) || 0) : 0;
                     const isActive = !!(sess && sess.status === 'active' && backendRemaining > 0);
                     const isPaused = !!(sess && sess.paused);

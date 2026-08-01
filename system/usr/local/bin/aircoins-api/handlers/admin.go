@@ -242,13 +242,14 @@ func (h *AdminHandler) GetSessions(w http.ResponseWriter, r *http.Request) {
 	// active sessions so the admin table shows a real countdown.
 	// paused_at is included so the UI can render a "paused" badge.
 	// shaped_mbps is included so the UI can render a speed override input.
+	// session_token is included so the UI can render the roaming token.
 	dataQuery := fmt.Sprintf(`
 		SELECT id, client_ip, client_mac, coins_inserted, total_seconds,
 		       CASE WHEN status = 'active' AND expires_at IS NOT NULL
 		            THEN GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW())))::int
 		            ELSE COALESCE(remaining_seconds, 0) END AS remaining_seconds,
 		       status, started_at, activated_at, expired_at, expires_at, paused_at,
-		       shaped_mbps
+		       shaped_mbps, COALESCE(session_token, '')
 		FROM sessions
 		%s
 		ORDER BY started_at DESC
@@ -294,7 +295,7 @@ func (h *AdminHandler) GetSessions(w http.ResponseWriter, r *http.Request) {
 		err := rows.Scan(
 			&s.ID, &s.ClientIP, &s.ClientMAC, &s.CoinsInserted, &s.TotalSeconds,
 			&s.RemainingSeconds, &s.Status, &s.StartedAt, &s.ActivatedAt, &s.ExpiredAt, &s.ExpiresAt,
-			&s.PausedAt, &s.ShapedMbps,
+			&s.PausedAt, &s.ShapedMbps, &s.SessionToken,
 		)
 		if err != nil {
 			log.Printf("Error scanning session: %v", err)

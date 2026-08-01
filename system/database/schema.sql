@@ -119,6 +119,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     -- Per-session speed override (Mbps). NULL = use the portal's global
     -- per_device_bw_mbps from portal_qdisc_rules. >0 = override for this session.
     shaped_mbps INT,
+    -- Per-device session token for MAC-randomization roaming (migration 012).
+    -- 8 hex chars, generated client-side, unique per active session.
+    session_token VARCHAR(8),
     created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -154,6 +157,12 @@ BEGIN
     END IF;
 END
 $$;
+
+-- Per-device session token for MAC-randomization roaming (migration 012).
+-- Unique partial index so a token identifies exactly one active session.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_session_token
+  ON sessions(session_token)
+  WHERE session_token IS NOT NULL AND session_token <> '';
 
 -- ============================================
 -- TAP ANTI-ABUSE + SESSION PAUSE (migration 010)

@@ -45,7 +45,7 @@ func (h *SessionAdminHandler) GetSessionDetail(w http.ResponseWriter, r *http.Re
 		       status, started_at, activated_at, expired_at, expires_at,
 		       paused_at, remaining_seconds_at_pause,
 		       COALESCE(pause_count, 0),
-		       shaped_mbps, created_at
+		       shaped_mbps, COALESCE(session_token, ''), created_at
 		FROM sessions
 		WHERE id = $1
 	`, id).Scan(
@@ -53,7 +53,7 @@ func (h *SessionAdminHandler) GetSessionDetail(w http.ResponseWriter, r *http.Re
 		&s.CoinsInserted, &s.TotalSeconds, &s.RemainingSeconds,
 		&s.Status, &s.StartedAt, &s.ActivatedAt, &s.ExpiredAt, &s.ExpiresAt,
 		&s.PausedAt, &s.RemainingSecondsAtPause, &s.PauseCount,
-		&s.ShapedMbps, &s.CreatedAt,
+		&s.ShapedMbps, &s.SessionToken, &s.CreatedAt,
 	)
 	if err == sql.ErrNoRows {
 		sendJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "Session not found"})
@@ -117,6 +117,7 @@ type patchSessionRequest struct {
 	RemainingSeconds *int    `json:"remaining_seconds"`
 	Status           *string `json:"status"`
 	ShapedMbps       *int    `json:"shaped_mbps"`
+	SessionToken     *string `json:"session_token"`
 }
 
 // UpdateSession applies a partial update to a session row.
@@ -238,6 +239,15 @@ func (h *SessionAdminHandler) UpdateSession(w http.ResponseWriter, r *http.Reque
 			argIdx++
 		}
 	}
+	if req.SessionToken != nil {
+		if *req.SessionToken == "" {
+			setClauses = append(setClauses, "session_token = NULL")
+		} else {
+			setClauses = append(setClauses, fmt.Sprintf("session_token = $%d", argIdx))
+			args = append(args, *req.SessionToken)
+			argIdx++
+		}
+	}
 
 	if len(setClauses) == 0 {
 		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "No fields to update"})
@@ -281,14 +291,14 @@ func (h *SessionAdminHandler) UpdateSession(w http.ResponseWriter, r *http.Reque
 		       status, started_at, activated_at, expired_at, expires_at,
 		       paused_at, remaining_seconds_at_pause,
 		       COALESCE(pause_count, 0),
-		       shaped_mbps, created_at
+		       shaped_mbps, COALESCE(session_token, ''), created_at
 		FROM sessions WHERE id = $1
 	`, id).Scan(
 		&updated.ID, &updated.ClientIP, &updated.ClientMAC,
 		&updated.CoinsInserted, &updated.TotalSeconds, &updated.RemainingSeconds,
 		&updated.Status, &updated.StartedAt, &updated.ActivatedAt, &updated.ExpiredAt, &updated.ExpiresAt,
 		&updated.PausedAt, &updated.RemainingSecondsAtPause, &updated.PauseCount,
-		&updated.ShapedMbps, &updated.CreatedAt,
+		&updated.ShapedMbps, &updated.SessionToken, &updated.CreatedAt,
 	)
 	if err != nil {
 		log.Printf("UpdateSession: re-fetch failed for id=%d: %v", id, err)

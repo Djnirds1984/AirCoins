@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lib/pq"
@@ -36,6 +37,156 @@ func (e *banActiveError) Error() string {
 
 // remainingSQL computes the live remaining seconds of a session row.
 const remainingSQL = `GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW())))::int`
+
+// sessionRow holds the common columns returned by session lookups.
+type sessionRow struct {
+	id          int
+	mac         string
+	ip          string
+	coins       int
+	total       int
+	remaining   int
+	startedAt   time.Time
+	expiresAt   time.Time
+	pausedAt    sql.NullTime
+	shapedMbps *int
+	token       string
+}
+
+// sessionMutexes serializes concurrent MAC migrations for the same session.
+var sessionMutexes sync.Map
+
+// lookupSessionByTokenOrMAC finds an active session by token, MAC, or IP
+// (in that priority order). Returns the session, the lookup source, and
+// any error. Each lookup is a single index-seek query (no OR).
+func lookupSessionByTokenOrMAC(db *sql.DB, token, mac, ip string) (*sessionRow, string, error) {
+	lookupSQL := `SELECT id, COALESCE(client_mac,''), COALESCE(client_ip,''),
+		coins_inserted, total_seconds, ` + remainingSQL + `,
+		started_at, expires_at, paused_at, shaped_mbps, COALESCE(session_token,'')
+		FROM sessions
+		WHERE status = 'active' AND (paused_at IS NOT NULL OR expires_at > NOW())`
+
+	// 1. Token lookup (uses idx_sessions_session_token unique index)
+	if token != "" {
+		var s sessionRow
+		err := db.QueryRow(lookupSQL+` AND session_token = $1 LIMIT 1`, token).
+			Scan(&s.id, &s.mac, &s.ip, &s.coins, &s.total, &s.remaining,
+				&s.startedAt, &s.expiresAt, &s.pausedAt, &s.shapedMbps, &s.token)
+		if err == nil {
+			return &s, "token", nil
+		}
+		if err != sql.ErrNoRows {
+			return nil, "", err
+		}
+	}
+
+	// 2. MAC lookup (uses sessions_client_mac_uniq partial unique index)
+	if mac != "" {
+		var s sessionRow
+		err := db.QueryRow(lookupSQL+` AND client_mac = $1 ORDER BY started_at DESC LIMIT 1`, mac).
+			Scan(&s.id, &s.mac, &s.ip, &s.coins, &s.total, &s.remaining,
+				&s.startedAt, &s.expiresAt, &s.pausedAt, &s.shapedMbps, &s.token)
+		if err == nil {
+			return &s, "mac", nil
+		}
+		if err != sql.ErrNoRows {
+			return nil, "", err
+		}
+	}
+
+	// 3. IP lookup (uses idx_sessions_client_ip)
+	if ip != "" {
+		var s sessionRow
+		err := db.QueryRow(lookupSQL+` AND client_ip = $1 ORDER BY started_at DESC LIMIT 1`, ip).
+			Scan(&s.id, &s.mac, &s.ip, &s.coins, &s.total, &s.remaining,
+				&s.startedAt, &s.expiresAt, &s.pausedAt, &s.shapedMbps, &s.token)
+		if err == nil {
+			return &s, "ip", nil
+		}
+		if err != sql.ErrNoRows {
+			return nil, "", err
+		}
+	}
+
+	return nil, "none", nil
+}
+
+// migrateSessionMAC migrates a session from one MAC/IP to another when a
+// device roams between SSIDs (MAC randomization). Per-session mutex
+// prevents concurrent migrations races.
+func migrateSessionMAC(db *sql.DB, sessionID int, oldIP, oldMAC, newIP, newMAC, token string) error {
+	// Get-or-create per-session mutex
+	muI, _ := sessionMutexes.LoadOrStore(sessionID, &sync.Mutex{})
+	mu := muI.(*sync.Mutex)
+	mu.Lock()
+	defer func() {
+		mu.Unlock()
+		sessionMutexes.Delete(sessionID)
+	}()
+
+	// Re-read session (may have been migrated by a concurrent poll)
+	var currentMAC string
+	err := db.QueryRow(`SELECT COALESCE(client_mac,'') FROM sessions WHERE id = $1 AND status = 'active'`, sessionID).Scan(&currentMAC)
+	if err != nil {
+		return fmt.Errorf("re-read session %d: %w", sessionID, err)
+	}
+	if currentMAC == newMAC {
+		return nil // already migrated
+	}
+
+	// Transaction: expire conflicting row on newMAC, then UPDATE
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// If newMAC already owns a different active session, expire it first
+	_, err = tx.Exec(`
+		UPDATE sessions
+		SET status = 'expired', expires_at = NOW(), remaining_seconds = 0
+		WHERE client_mac = $1 AND id <> $2 AND status = 'active'
+	`, newMAC, sessionID)
+	if err != nil {
+		return err
+	}
+
+	// Migrate the session to the new MAC/IP
+	_, err = tx.Exec(`UPDATE sessions SET client_ip = $1, client_mac = $2 WHERE id = $3`, newIP, newMAC, sessionID)
+	if err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// Post-commit (non-fatal): iptables + tc adjustments
+	runCaptiveRules(db, "unauth", oldMAC, "token-migrate")
+	EnsurePerDeviceClass(db, "", oldMAC, oldIP, "remove")
+	runCaptiveRules(db, "auth", newMAC, "token-migrate")
+	EnsurePerDeviceClass(db, "", newMAC, newIP, "add")
+
+	// Re-apply shaped_mbps override on the new class if the session had one
+	var shapedMbps sql.NullInt64
+	_ = db.QueryRow(`SELECT shaped_mbps FROM sessions WHERE id = $1`, sessionID).Scan(&shapedMbps)
+	if shapedMbps.Valid && shapedMbps.Int64 > 0 {
+		newIface := ifaceForClientIP(db, newIP)
+		if newIface != "" {
+			rules := loadQdiscRules(db)
+			if rule, ok := rules[newIface]; ok && rule.Qdisc == "fq_codel" && rule.PerDeviceBwMbps > 0 {
+				if cerr := ChangeClientClassRate(newIface, newMAC, int(shapedMbps.Int64)); cerr != nil {
+					log.Printf("migrateSessionMAC: ChangeClientClassRate failed for session %d: %v", sessionID, cerr)
+				}
+			}
+		}
+	}
+
+	logAction(db, "INFO", "session", fmt.Sprintf("session %d migrated from %s/%s to %s/%s via token %s",
+		sessionID, oldMAC, oldIP, newMAC, newIP, token))
+
+	return nil
+}
 
 // ============================================
 // COIN WINDOW (unprocessed coin_events)
@@ -130,12 +281,19 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse pay_ticket from request body (ticket-based arm→start handoff).
+	// Parse pay_ticket and session_token from request body.
 	var req struct {
-		PayTicket string `json:"pay_ticket"`
+		PayTicket    string `json:"pay_ticket"`
+		SessionToken string `json:"session_token"`
 	}
 	if r.Body != nil {
 		json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	// Session token: body wins over header
+	sessionToken := req.SessionToken
+	if sessionToken == "" {
+		sessionToken = r.Header.Get("X-Session-Token")
 	}
 
 	clientIP := clientIPFromRequest(r)
@@ -196,7 +354,7 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, extended, err := h.creditSession(clientIP, clientMAC, coins.totalValue, coins.totalMinutes, coins.ids)
+	session, extended, err := h.creditSession(clientIP, clientMAC, sessionToken, coins.totalValue, coins.totalMinutes, coins.ids)
 	if err != nil {
 		// Check if the error is a ban rejection (F6: ban check inside tx)
 		if banErr, ok := err.(*banActiveError); ok {
@@ -247,7 +405,7 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 // creditSession creates a new active session or extends the caller's
 // existing one, and marks the credited coin_events processed — all in one
 // transaction so a crash can neither double-credit nor eat coins.
-func (h *SessionHandler) creditSession(clientIP, clientMAC string, coinValue, minutes int, eventIDs []int64) (map[string]interface{}, bool, error) {
+func (h *SessionHandler) creditSession(clientIP, clientMAC, sessionToken string, coinValue, minutes int, eventIDs []int64) (map[string]interface{}, bool, error) {
 	addSeconds := minutes * 60
 
 	tx, err := h.DB.Begin()
@@ -292,6 +450,7 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC string, coinValue, mi
 	var (
 		id, coinsTotal, totalSeconds, remaining int
 		expiresAt                               time.Time
+		tokenOut                                string
 	)
 
 	if extended {
@@ -306,11 +465,16 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC string, coinValue, mi
 			    client_ip = $3,
 			    client_mac = CASE WHEN $4 <> '' AND NOT EXISTS (
 			                     SELECT 1 FROM sessions x WHERE x.client_mac = $4 AND x.id <> sessions.id
-			                 ) THEN $4 ELSE client_mac END
+			                 ) THEN $4 ELSE client_mac END,
+			    session_token = CASE
+			        WHEN COALESCE(session_token, '') <> '' THEN session_token
+			        WHEN $6 <> '' THEN $6
+			        ELSE session_token
+			    END
 			WHERE id = $5
-			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at
-		`, coinValue, addSeconds, clientIP, clientMAC, existingID).
-			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt)
+			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at, COALESCE(session_token, '')
+		`, coinValue, addSeconds, clientIP, clientMAC, existingID, sessionToken).
+			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt, &tokenOut)
 	} else if clientMAC != "" {
 		// NEW/REUSE: one session row per device. If the MAC already owns a
 		// row in a terminal state (expired/cancelled/...), RESET that row
@@ -321,11 +485,14 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC string, coinValue, mi
 		// for partial-index arbiters. paused_at / remaining_seconds_at_pause
 		// / pause_count are cleared so a fresh start cannot inherit stale
 		// pause state.
+		if sessionToken == "" {
+			sessionToken = generateSessionToken()
+		}
 		err = tx.QueryRow(`
 			INSERT INTO sessions (client_ip, client_mac, coins_inserted, total_seconds,
 			                      remaining_seconds, status, started_at, activated_at, expires_at,
-			                      paused_at, remaining_seconds_at_pause, pause_count)
-			VALUES ($1, $2, $3::int, $4::int, $4::int, 'active', NOW(), NOW(), NOW() + ($4::int * INTERVAL '1 second'), NULL, NULL, 0)
+			                      paused_at, remaining_seconds_at_pause, pause_count, session_token)
+			VALUES ($1, $2, $3::int, $4::int, $4::int, 'active', NOW(), NOW(), NOW() + ($4::int * INTERVAL '1 second'), NULL, NULL, 0, $5)
 			ON CONFLICT (client_mac) WHERE client_mac IS NOT NULL AND client_mac <> '' AND client_mac <> '-'
 			DO UPDATE SET
 			    client_ip = EXCLUDED.client_ip,
@@ -340,18 +507,18 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC string, coinValue, mi
 			    paused_at = NULL,
 			    remaining_seconds_at_pause = NULL,
 			    pause_count = 0
-			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at
-		`, clientIP, clientMAC, coinValue, addSeconds).
-			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt)
+			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at, COALESCE(session_token, '')
+		`, clientIP, clientMAC, coinValue, addSeconds, sessionToken).
+			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt, &tokenOut)
 	} else {
 		// No resolvable MAC: excluded from the unique index, plain insert.
 		err = tx.QueryRow(`
 			INSERT INTO sessions (client_ip, client_mac, coins_inserted, total_seconds,
 			                      remaining_seconds, status, started_at, activated_at, expires_at)
 			VALUES ($1, $2, $3::int, $4::int, $4::int, 'active', NOW(), NOW(), NOW() + ($4::int * INTERVAL '1 second'))
-			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at
+			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at, ''
 		`, clientIP, clientMAC, coinValue, addSeconds).
-			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt)
+			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt, &tokenOut)
 	}
 	if err != nil {
 		return nil, false, err
@@ -372,14 +539,15 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC string, coinValue, mi
 	}
 
 	return map[string]interface{}{
-		"id":         id,
-		"status":     "active",
-		"ip":         clientIP,
-		"mac":        clientMAC,
-		"coins":      coinsTotal,
-		"total":      totalSeconds,
-		"remaining":  remaining,
-		"expires_at": expiresAt.Format(time.RFC3339),
+		"id":            id,
+		"status":        "active",
+		"ip":            clientIP,
+		"mac":           clientMAC,
+		"coins":         coinsTotal,
+		"total":         totalSeconds,
+		"remaining":     remaining,
+		"expires_at":    expiresAt.Format(time.RFC3339),
+		"session_token": tokenOut,
 	}, extended, nil
 }
 
@@ -388,8 +556,9 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC string, coinValue, mi
 // ============================================
 
 // Status returns the calling device's session for the portal poll.
-// Response shape is what index.html apiPoll() expects:
-// {has_session, session:{status,coins,total,remaining,...}, system:{online,ip}}
+// Supports token-based lookup for MAC-randomization roaming: if the
+// X-Session-Token header matches a session whose MAC differs from the
+// caller's current ARP-resolved MAC, the session is migrated.
 func (h *SessionHandler) Status(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -407,52 +576,53 @@ func (h *SessionHandler) Status(w http.ResponseWriter, r *http.Request) {
 	// seconds, so no ping probe here.
 	clientMAC := neighborMAC(clientIP)
 
-	var (
-		id, coinsTotal, totalSeconds, remaining int
-		mac                                     string
-		startedAt, expiresAt                    time.Time
-		pausedAt                                sql.NullTime
-	)
-	err := h.DB.QueryRow(`
-		SELECT id, COALESCE(client_mac, ''), coins_inserted, total_seconds,
-		       `+remainingSQL+`, started_at, expires_at, paused_at
-		FROM sessions
-		WHERE status = 'active' AND (paused_at IS NOT NULL OR expires_at > NOW())
-		  AND (($1 <> '' AND client_mac = $1) OR client_ip = $2)
-		ORDER BY started_at DESC
-		LIMIT 1
-	`, clientMAC, clientIP).Scan(&id, &mac, &coinsTotal, &totalSeconds, &remaining, &startedAt, &expiresAt, &pausedAt)
+	// Read session token from header (portal attaches from localStorage)
+	sessionToken := r.Header.Get("X-Session-Token")
 
-	if err != nil && err != sql.ErrNoRows {
+	sess, source, err := lookupSessionByTokenOrMAC(h.DB, sessionToken, clientMAC, clientIP)
+	if err != nil {
 		log.Printf("Error fetching session status: %v", err)
 	}
 
 	response := map[string]interface{}{
-		"timestamp":   makeTimestamp(),
-		"has_session": err == nil,
+		"timestamp":     makeTimestamp(),
+		"has_session":   sess != nil,
+		"session_token": "",
 	}
 
-	if err == nil {
-		paused := pausedAt.Valid
-		// When paused, remaining_seconds is frozen at the pause snapshot
-		// so the portal can display it even though expires_at is in the past
-		// relative to a paused timer.
+	if sess != nil {
+		response["session_token"] = sess.token
+
+		// Trigger MAC migration when token matched but device is on a
+		// different MAC (roamed to another SSID/VLAN).
+		if source == "token" && sess.mac != "" && clientMAC != "" && sess.mac != clientMAC {
+			if merr := migrateSessionMAC(h.DB, sess.id, sess.ip, sess.mac, clientIP, clientMAC, sessionToken); merr != nil {
+				log.Printf("Status: migration failed for session %d: %v", sess.id, merr)
+			} else {
+				// Update in-memory row to reflect the new MAC/IP
+				sess.mac = clientMAC
+				sess.ip = clientIP
+			}
+		}
+
+		remaining := sess.remaining
+		paused := sess.pausedAt.Valid
 		if paused {
 			var snap sql.NullInt64
-			_ = h.DB.QueryRow(`SELECT remaining_seconds_at_pause FROM sessions WHERE id=$1`, id).Scan(&snap)
+			_ = h.DB.QueryRow(`SELECT remaining_seconds_at_pause FROM sessions WHERE id=$1`, sess.id).Scan(&snap)
 			if snap.Valid {
 				remaining = int(snap.Int64)
 			}
 		}
 		response["session"] = map[string]interface{}{
-			"id":         id,
+			"id":         sess.id,
 			"status":     "active",
-			"coins":      coinsTotal,
-			"total":      totalSeconds,
+			"coins":      sess.coins,
+			"total":      sess.total,
 			"remaining":  remaining,
-			"started":    startedAt.Unix(),
-			"mac":        mac,
-			"expires_at": expiresAt.Format(time.RFC3339),
+			"started":    sess.startedAt.Unix(),
+			"mac":        sess.mac,
+			"expires_at": sess.expiresAt.Format(time.RFC3339),
 			"paused":     paused,
 		}
 	}
@@ -582,7 +752,7 @@ func (h *SessionHandler) AdminCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientMAC := resolveClientMAC(req.ClientIP)
-	session, extended, err := h.creditSession(req.ClientIP, clientMAC, req.Coins, req.Minutes, nil)
+	session, extended, err := h.creditSession(req.ClientIP, clientMAC, "", req.Coins, req.Minutes, nil)
 	if err != nil {
 		log.Printf("Error creating admin session for %s: %v", req.ClientIP, err)
 		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to create session"})

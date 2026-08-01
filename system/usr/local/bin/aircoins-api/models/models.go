@@ -93,6 +93,7 @@ type Session struct {
 	ClientIP                string     `json:"client_ip,omitempty"`
 	ClientMAC               string     `json:"client_mac,omitempty"`
 	CoinsInserted           int        `json:"coins_inserted"`
+	TotalCoinsLifetime      int        `json:"total_coins_lifetime"`
 	TotalSeconds            int        `json:"total_seconds"`
 	RemainingSeconds        int        `json:"remaining_seconds"`
 	Status                  string     `json:"status"`

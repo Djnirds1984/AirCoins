@@ -267,6 +267,27 @@ func (h *AdminHandler) GetSessions(w http.ResponseWriter, r *http.Request) {
 	// Load qdisc rules once for all sessions so we can attach qdisc_info.
 	qdiscRules := loadQdiscRules(h.DB)
 
+	// Pre-compute lifetime coin totals per MAC (Option A: single aggregation query).
+	lifetimeCoins := make(map[string]int)
+	ltRows, ltErr := h.DB.Query(`
+		SELECT client_mac, COALESCE(SUM(coins_inserted), 0)
+		FROM sessions
+		WHERE client_mac IS NOT NULL AND client_mac <> '' AND client_mac <> '-'
+		GROUP BY client_mac
+	`)
+	if ltErr != nil {
+		log.Printf("Error fetching lifetime coin totals: %v", ltErr)
+	} else {
+		for ltRows.Next() {
+			var mac string
+			var total int
+			if err := ltRows.Scan(&mac, &total); err == nil {
+				lifetimeCoins[mac] = total
+			}
+		}
+		ltRows.Close()
+	}
+
 	sessions := make([]models.Session, 0)
 	for rows.Next() {
 		var s models.Session
@@ -278,6 +299,10 @@ func (h *AdminHandler) GetSessions(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("Error scanning session: %v", err)
 			continue
+		}
+		// Attach lifetime coin total for this session's MAC.
+		if s.ClientMAC != "" && s.ClientMAC != "-" {
+			s.TotalCoinsLifetime = lifetimeCoins[s.ClientMAC]
 		}
 		// Attach qdisc_info for this session's portal interface.
 		iface := ifaceForClientIP(h.DB, s.ClientIP)

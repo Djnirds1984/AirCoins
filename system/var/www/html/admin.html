@@ -1355,13 +1355,14 @@
                             <th>Client MAC</th>
                             <th>Hostname</th>
                             <th>Coins</th>
+                            <th>Total Coins</th>
                             <th>Time Remaining</th>
                             <th>Status</th>
                             <th>Started</th>
                         </tr>
                     </thead>
                     <tbody id="recent-sessions-body">
-                        <tr class="empty-row"><td colspan="8">No sessions yet</td></tr>
+                        <tr class="empty-row"><td colspan="9">No sessions yet</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1431,6 +1432,7 @@
                             <th>Client MAC</th>
                             <th>Hostname</th>
                             <th>Coins Inserted</th>
+                            <th>Total Coins</th>
                             <th>Time Remaining</th>
                             <th>Status</th>
                             <th>Speed (Mbps)</th>
@@ -1439,7 +1441,7 @@
                         </tr>
                     </thead>
                     <tbody id="sessions-table-body">
-                        <tr class="empty-row"><td colspan="10">Loading...</td></tr>
+                        <tr class="empty-row"><td colspan="11">Loading...</td></tr>
                     </tbody>
                 </table>
 
@@ -2358,7 +2360,7 @@ function renderSessionsTable(data) {
     }
 
     if (sessions.length === 0) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="8">No sessions yet</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="9">No sessions yet</td></tr>';
         return;
     }
 
@@ -2367,6 +2369,7 @@ function renderSessionsTable(data) {
         var statusColor = s.status === 'active' ? '#00ff88' : (s.status === 'expired' ? '#ff4444' : '#ffd700');
         var mins = Math.round((s.remaining_seconds || 0) / 60);
         var started = s.started_at ? new Date(s.started_at).toLocaleString() : '-';
+        var lifetimeCoins = (s.client_mac && s.client_mac !== '-') ? (s.total_coins_lifetime || 0) : '\u2014';
         tbody.innerHTML +=
             '<tr>' +
                 '<td>' + s.id + '</td>' +
@@ -2374,6 +2377,7 @@ function renderSessionsTable(data) {
                 '<td>' + (s.client_mac || '-') + '</td>' +
                 '<td>' + (s.hostname || '\u2014') + '</td>' +
                 '<td>' + (s.coins_inserted || 0) + '</td>' +
+                '<td>' + lifetimeCoins + '</td>' +
                 '<td>' + mins + ' min</td>' +
                 '<td style="color:' + statusColor + ';">' + (s.status || 'unknown') + '</td>' +
                 '<td>' + started + '</td>' +
@@ -2653,7 +2657,7 @@ async function loadSessions(isAutoRefresh) {
 function renderSessionsAdminTable(sessions) {
     var tbody = document.getElementById('sessions-table-body');
     if (!sessions || sessions.length === 0) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="10">No sessions found</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="11">No sessions found</td></tr>';
         return;
     }
 
@@ -2666,6 +2670,7 @@ function renderSessionsAdminTable(sessions) {
         var isPaused = s.status === 'active' && s.paused_at;
         var badgeClass = isPaused ? 'paused' : (s.status || 'pending');
         var badgeLabel = isPaused ? 'paused' : (s.status || 'unknown');
+        var lifetimeCoins = (s.client_mac && s.client_mac !== '-') ? (s.total_coins_lifetime || 0) : '\u2014';
 
         // Speed column: editable input for active sessions when FQ_CODEL
         // per-device shaping is active; disabled otherwise.
@@ -2703,6 +2708,7 @@ function renderSessionsAdminTable(sessions) {
                 '<td>' + (s.client_mac || '-') + '</td>' +
                 '<td>' + (s.hostname || '\u2014') + '</td>' +
                 '<td>' + (s.coins_inserted || 0) + '</td>' +
+                '<td>' + lifetimeCoins + '</td>' +
                 '<td>' + mins + ' min</td>' +
                 '<td><span class="status-badge ' + badgeClass + '">' + badgeLabel + '</span></td>' +
                 '<td>' + speedCell + '</td>' +

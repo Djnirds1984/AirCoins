@@ -111,13 +111,13 @@ func (h *SessionAdminHandler) GetSessionDetail(w http.ResponseWriter, r *http.Re
 // patchSessionRequest holds the optional fields accepted by PATCH.
 // Only non-nil fields are updated.
 type patchSessionRequest struct {
-	ClientIP        *string `json:"client_ip"`
-	ClientMAC       *string `json:"client_mac"`
-	CoinsInserted   *int    `json:"coins_inserted"`
-	TotalSeconds    *int    `json:"total_seconds"`
-	RemainingSeconds *int   `json:"remaining_seconds"`
-	Status          *string `json:"status"`
-	ShapedMbps      *int    `json:"shaped_mbps"`
+	ClientIP         *string `json:"client_ip"`
+	ClientMAC        *string `json:"client_mac"`
+	CoinsInserted    *int    `json:"coins_inserted"`
+	TotalSeconds     *int    `json:"total_seconds"`
+	RemainingSeconds *int    `json:"remaining_seconds"`
+	Status           *string `json:"status"`
+	ShapedMbps       *int    `json:"shaped_mbps"`
 }
 
 // UpdateSession applies a partial update to a session row.

@@ -683,6 +683,19 @@
         function storeSessionToken(tok) {
             if (!tok) return;
             try { localStorage.setItem('aircoins_session_token', tok); } catch (e) {}
+            updateDebugToken();
+        }
+
+        // ==================== DEBUG TOKEN DISPLAY ====================
+        function updateDebugToken() {
+            var el = document.getElementById('debugTokenValue');
+            if (!el) return;
+            try {
+                var tok = localStorage.getItem('aircoins_session_token');
+                el.textContent = tok || '(none)';
+            } catch (e) {
+                el.textContent = '(unavailable)';
+            }
         }
 
         // ==================== COIN INSERT ====================
@@ -1665,6 +1678,10 @@
 
         // Auto-start API polling when page loads
         startApiPolling();
+        updateDebugToken();
     </script>
+
+    <!-- Debug session-token display -->
+    <div id="debugTokenBar" style="position:fixed;bottom:0;left:0;right:0;text-align:center;padding:4px 8px;font-size:11px;font-family:monospace;color:#666;background:rgba(0,0,0,0.4);z-index:9999;pointer-events:none;">Session Token: <span id="debugTokenValue">…</span></div>
 </body>
 </html>

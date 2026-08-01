@@ -291,16 +291,16 @@ type WANStaticConfig struct {
 }
 
 type WANConfig struct {
-	Mode         string          `json:"mode"`          // "dhcp", "static", "vlan_dhcp"
+	Mode         string           `json:"mode"` // "dhcp", "static", "vlan_dhcp"
 	StaticConfig *WANStaticConfig `json:"static_config,omitempty"`
-	VLANID       *int            `json:"vlan_id,omitempty"`
+	VLANID       *int             `json:"vlan_id,omitempty"`
 }
 
 type WANRequest struct {
-	Mode         string          `json:"mode"`
+	Mode         string           `json:"mode"`
 	StaticConfig *WANStaticConfig `json:"static_config,omitempty"`
-	VLANID       *int            `json:"vlan_id,omitempty"`
-	ApplyToOS    bool            `json:"apply_to_os"`
+	VLANID       *int             `json:"vlan_id,omitempty"`
+	ApplyToOS    bool             `json:"apply_to_os"`
 }
 
 type WANAvailableVLAN struct {

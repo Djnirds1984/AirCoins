@@ -549,6 +549,11 @@ cp "$SYSTEM_DIR/usr/local/bin/aircoins-captive-rules" /usr/local/bin/
 chmod +x /usr/local/bin/aircoins-captive-rules
 echo "  ✓ aircoins-captive-rules"
 
+# ZeroTier installer (optional — admin can trigger install from the UI)
+cp "$SYSTEM_DIR/usr/local/bin/zerotier-install" /usr/local/bin/
+chmod +x /usr/local/bin/zerotier-install
+echo "  ✓ zerotier-install"
+
 echo -e "${GREEN}  ✓ All scripts deployed${NC}"
 
 # ============================================

@@ -127,6 +127,12 @@ func main() {
 	mux.Handle("/api/admin/license/activate", handlers.AuthMiddleware(http.HandlerFunc(licenseHandler.Activate)))
 	mux.Handle("/api/admin/license/deactivate", handlers.AuthMiddleware(http.HandlerFunc(licenseHandler.Deactivate)))
 
+	// ── ZeroTier endpoints (auth + license gate) ─────────────────────────
+	mux.Handle("/api/admin/zerotier/status", adminProtected(handlers.ZeroTierGetStatus))
+	mux.Handle("/api/admin/zerotier/install", adminProtected(handlers.ZeroTierInstall))
+	mux.Handle("/api/admin/zerotier/join", adminProtected(handlers.ZeroTierJoin))
+	mux.Handle("/api/admin/zerotier/leave", adminProtected(handlers.ZeroTierLeave))
+
 	// Session routes
 	// start/status/current are PUBLIC (portal-facing): the caller is
 	// identified by its own IP/MAC and credited only from unprocessed

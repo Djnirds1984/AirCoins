@@ -1293,6 +1293,9 @@
             <a href="#" data-section="license" class="nav-item">
                 <span class="icon">🔑</span><span class="label">License</span>
             </a>
+            <a href="#" data-section="zerotier" class="nav-item">
+                <span class="icon">🌐</span><span class="label">ZeroTier</span>
+            </a>
         </nav>
     </aside>
 
@@ -2203,6 +2206,57 @@
                 </div>
             </div>
         </div>
+        <!-- ZeroTier Section -->
+        <div id="section-zerotier" class="section" style="display:none;">
+            <div class="card" style="max-width:800px;">
+                <h2 style="margin-bottom:20px;">ZeroTier Remote Access</h2>
+
+                <!-- Install card (shown when not installed) -->
+                <div id="zt-install-card" style="display:none; padding:16px; border-radius:12px; background:rgba(255,255,255,0.03); margin-bottom:20px;">
+                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+                        <span style="font-size:28px;">📦</span>
+                        <div>
+                            <div style="font-size:16px; font-weight:600;">ZeroTier is not installed</div>
+                            <div style="font-size:13px; color:#888;">Install ZeroTier to remotely access this device from anywhere.</div>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="zt-install-btn" onclick="ztInstall()">Install ZeroTier</button>
+                    <div id="zt-install-progress" style="display:none; margin-top:12px; font-size:13px; color:#aaa;">Installing… this may take up to 3 minutes.</div>
+                </div>
+
+                <!-- Status card (shown when installed) -->
+                <div id="zt-status-card" style="display:none; padding:16px; border-radius:12px; background:rgba(255,255,255,0.03); margin-bottom:20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <span style="font-size:16px; font-weight:600;">Node Status</span>
+                        <span id="zt-status-pill" style="padding:4px 14px; border-radius:20px; font-size:13px; font-weight:600; background:#555;">Loading…</span>
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px 20px; font-size:13px;">
+                        <div><span style="color:#888;">Version:</span> <span id="zt-version">—</span></div>
+                        <div><span style="color:#888;">Node Address:</span> <span id="zt-address" style="font-family:monospace;">—</span></div>
+                        <div><span style="color:#888;">Service:</span> <span id="zt-service">—</span></div>
+                        <div><span style="color:#888;">Online:</span> <span id="zt-online">—</span></div>
+                    </div>
+                </div>
+
+                <!-- Join network form (shown when installed) -->
+                <div id="zt-join-card" style="display:none; padding:16px; border-radius:12px; background:rgba(255,255,255,0.03); margin-bottom:20px;">
+                    <h3 style="margin-bottom:12px;">Join a Network</h3>
+                    <div style="display:flex; gap:10px; max-width:500px;">
+                        <input type="text" id="zt-network-id-input" placeholder="16-digit Network ID (e.g. 8bd5124fd6f45ffe)" maxlength="16" style="flex:1; padding:10px 14px; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05); color:#fff; font-size:14px; font-family:monospace;">
+                        <button class="btn btn-primary" id="zt-join-btn" onclick="ztJoin()">Join</button>
+                    </div>
+                </div>
+
+                <!-- Networks list (shown when installed) -->
+                <div id="zt-networks-card" style="display:none; padding:16px; border-radius:12px; background:rgba(255,255,255,0.03); margin-bottom:20px;">
+                    <h3 style="margin-bottom:12px;">Joined Networks</h3>
+                    <div id="zt-networks-list" style="font-size:13px;">
+                        <div style="color:#888;">No networks joined.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 </div>
 
@@ -2323,7 +2377,7 @@ async function checkAuth() {
 // ============================================================
 // ROUTER
 // ============================================================
-const SECTION_NAMES = ['dashboard', 'sessions', 'pricing', 'portal', 'settings', 'system', 'reports', 'license'];
+const SECTION_NAMES = ['dashboard', 'sessions', 'pricing', 'portal', 'settings', 'system', 'reports', 'license', 'zerotier'];
 const SECTION_TITLES = {
     dashboard: 'Dashboard',
     sessions: 'Sessions',
@@ -2332,7 +2386,8 @@ const SECTION_TITLES = {
     settings: 'Settings',
     system: 'System',
     reports: 'Reports',
-    license: 'License'
+    license: 'License',
+    zerotier: 'ZeroTier'
 };
 
 function showSection(name) {
@@ -2374,6 +2429,8 @@ function showSection(name) {
         loadReports();
     } else if (name === 'license') {
         loadLicenseStatus();
+    } else if (name === 'zerotier') {
+        loadZeroTierStatus();
     }
 }
 
@@ -5122,6 +5179,140 @@ async function deactivateLicense() {
         lockDownForLicense(null);
     } catch (e) {
         showNotification('Deactivation failed: ' + e.message, 'error');
+    }
+}
+
+// ============================================================
+// ZEROTIER
+// ============================================================
+
+async function loadZeroTierStatus() {
+    try {
+        var st = await apiCall('GET', '/admin/zerotier/status');
+        updateZeroTierUI(st);
+    } catch (e) {
+        showNotification('Failed to load ZeroTier status: ' + e.message, 'error');
+    }
+}
+
+function updateZeroTierUI(st) {
+    var installCard = document.getElementById('zt-install-card');
+    var statusCard = document.getElementById('zt-status-card');
+    var joinCard = document.getElementById('zt-join-card');
+    var networksCard = document.getElementById('zt-networks-card');
+
+    if (!st || !st.installed) {
+        installCard.style.display = 'block';
+        statusCard.style.display = 'none';
+        joinCard.style.display = 'none';
+        networksCard.style.display = 'none';
+        return;
+    }
+
+    installCard.style.display = 'none';
+    statusCard.style.display = 'block';
+    joinCard.style.display = 'block';
+    networksCard.style.display = 'block';
+
+    // Status pill
+    var pill = document.getElementById('zt-status-pill');
+    if (st.online) {
+        pill.textContent = 'Online';
+        pill.style.background = '#00c853';
+        pill.style.color = '#fff';
+    } else if (st.service_up) {
+        pill.textContent = 'Offline';
+        pill.style.background = '#ff9800';
+        pill.style.color = '#000';
+    } else {
+        pill.textContent = 'Service Down';
+        pill.style.background = '#f44336';
+        pill.style.color = '#fff';
+    }
+
+    document.getElementById('zt-version').textContent = st.version || '—';
+    document.getElementById('zt-address').textContent = st.address || '—';
+    document.getElementById('zt-service').textContent = st.service_up ? 'Running' : 'Stopped';
+    document.getElementById('zt-online').textContent = st.online ? 'Yes' : 'No';
+
+    // Networks list
+    var listEl = document.getElementById('zt-networks-list');
+    if (!st.networks || st.networks.length === 0) {
+        listEl.innerHTML = '<div style="color:#888;">No networks joined.</div>';
+        return;
+    }
+
+    var html = '';
+    for (var i = 0; i < st.networks.length; i++) {
+        var n = st.networks[i];
+        var statusColor = (n.status === 'OK') ? '#00c853' : ((n.status === 'REQUESTING_CONFIGURATION' || n.status === 'ACCESS_DENIED') ? '#ff9800' : '#f44336');
+        var addrs = (n.addresses && n.addresses.length > 0) ? n.addresses.join(', ') : 'None';
+        html += '<div style="padding:12px; border-radius:8px; background:rgba(255,255,255,0.03); margin-bottom:10px;">';
+        html += '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">';
+        html += '<span style="font-weight:600; font-family:monospace; font-size:14px;">' + (n.name || n.network_id) + '</span>';
+        html += '<span style="padding:3px 10px; border-radius:14px; font-size:12px; font-weight:600; background:' + statusColor + '; color:#fff;">' + (n.status || 'Unknown') + '</span>';
+        html += '</div>';
+        html += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; font-size:12px; color:#aaa;">';
+        html += '<div><span style="color:#666;">Network ID:</span> ' + n.network_id + '</div>';
+        html += '<div><span style="color:#666;">Type:</span> ' + (n.type || '—') + '</div>';
+        html += '<div><span style="color:#666;">Addresses:</span> ' + addrs + '</div>';
+        html += '<div><span style="color:#666;">MAC:</span> ' + (n.mac || '—') + '</div>';
+        html += '</div>';
+        html += '<div style="margin-top:8px; text-align:right;">';
+        html += '<button class="btn btn-ghost" style="padding:5px 14px; font-size:12px; border-color:#f44336; color:#f44336;" onclick="ztLeave(\'' + n.network_id + '\')">Leave</button>';
+        html += '</div>';
+        html += '</div>';
+    }
+    listEl.innerHTML = html;
+}
+
+async function ztInstall() {
+    var btn = document.getElementById('zt-install-btn');
+    var progress = document.getElementById('zt-install-progress');
+    btn.disabled = true;
+    progress.style.display = 'block';
+    try {
+        var res = await apiCall('POST', '/admin/zerotier/install');
+        showNotification(res.message || 'ZeroTier installed!', 'success');
+        await loadZeroTierStatus();
+    } catch (e) {
+        showNotification('Installation failed: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        progress.style.display = 'none';
+    }
+}
+
+async function ztJoin() {
+    var input = document.getElementById('zt-network-id-input');
+    var networkId = input.value.trim().toLowerCase();
+    if (!networkId) { showNotification('Please enter a 16-digit network ID', 'error'); return; }
+    if (networkId.length !== 16 || !/^[0-9a-f]+$/.test(networkId)) {
+        showNotification('Network ID must be exactly 16 hex characters (0-9, a-f)', 'error');
+        return;
+    }
+    var btn = document.getElementById('zt-join-btn');
+    btn.disabled = true;
+    try {
+        var res = await apiCall('POST', '/admin/zerotier/join', { network_id: networkId });
+        showNotification(res.message || 'Joined network!', 'success');
+        input.value = '';
+        await loadZeroTierStatus();
+    } catch (e) {
+        showNotification('Join failed: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function ztLeave(networkId) {
+    if (!confirm('Leave ZeroTier network ' + networkId + '?')) return;
+    try {
+        var res = await apiCall('POST', '/admin/zerotier/leave', { network_id: networkId });
+        showNotification(res.message || 'Left network.', 'success');
+        await loadZeroTierStatus();
+    } catch (e) {
+        showNotification('Leave failed: ' + e.message, 'error');
     }
 }
 </script>

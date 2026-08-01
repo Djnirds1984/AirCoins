@@ -2687,16 +2687,15 @@ function renderSessionsAdminTable(sessions) {
             speedCell = effectiveMbps > 0 ? '<span style="color:#888;">' + effectiveMbps + '</span>' : '<span style="color:#555;">—</span>';
         }
 
-        var actions = '';
+        var actions = '<div class="action-btns" style="display:flex;gap:3px;flex-wrap:wrap;">';
+        actions += '<button class="btn btn-ghost btn-sm" style="padding:2px 6px;font-size:11px;" onclick="viewSession(' + s.id + ')" title="View details">&#128065;</button>';
+        actions += '<button class="btn btn-ghost btn-sm" style="padding:2px 6px;font-size:11px;" onclick="openEditSessionModal(' + s.id + ')" title="Edit session">&#9998;</button>';
         if (s.status === 'active') {
-            actions =
-                '<div class="action-btns">' +
-                    '<button class="btn btn-ghost btn-sm" onclick="openExtendModal(' + s.id + ', \'' + (s.client_ip || '') + '\')">Extend</button>' +
-                    '<button class="btn btn-danger btn-sm" onclick="endSession(' + s.id + ', \'' + (s.client_ip || '') + '\')">End</button>' +
-                '</div>';
-        } else {
-            actions = '<span style="color:#555;">—</span>';
+            actions += '<button class="btn btn-ghost btn-sm" style="padding:2px 6px;font-size:11px;" onclick="openExtendModal(' + s.id + ', \'' + (s.client_ip || '') + '\')" title="Extend">&#9201;</button>';
+            actions += '<button class="btn btn-danger btn-sm" style="padding:2px 6px;font-size:11px;" onclick="endSession(' + s.id + ', \'' + (s.client_ip || '') + '\')" title="End">&#10005;</button>';
         }
+        actions += '<button class="btn btn-danger btn-sm" style="padding:2px 6px;font-size:11px;background:rgba(220,50,50,0.15);" onclick="deleteSession(' + s.id + ', \'' + (s.client_mac || '') + '\', \'' + (s.client_ip || '') + '\')" title="Delete permanently">&#128465;</button>';
+        actions += '</div>';
         tbody.innerHTML +=
             '<tr>' +
                 '<td>' + s.id + '</td>' +
@@ -2911,6 +2910,216 @@ async function submitCreateSession() {
         }
     } catch (e) {
         if (e.message !== 'Unauthorized') showNotification('Failed to create session', 'error');
+    }
+}
+
+// ============================================================
+// SESSION CRUD: VIEW, EDIT, DELETE
+// ============================================================
+
+// --- View Session Modal (read-only detail + coin events) ---
+async function viewSession(sessionId) {
+    try {
+        var res = await apiCall('GET', '/admin/sessions/' + sessionId);
+        if (!res || !res.success || !res.data) {
+            showNotification('Failed to load session details', 'error');
+            return;
+        }
+        var s = res.data.session;
+        var events = res.data.coin_events || [];
+
+        var fields = [
+            ['ID', s.id],
+            ['Client IP', s.client_ip || '—'],
+            ['Client MAC', s.client_mac || '—'],
+            ['Hostname', s.hostname || '—'],
+            ['Coins Inserted', s.coins_inserted],
+            ['Total Seconds', s.total_seconds],
+            ['Remaining Seconds', s.remaining_seconds],
+            ['Status', s.status],
+            ['Started At', s.started_at ? new Date(s.started_at).toLocaleString() : '—'],
+            ['Activated At', s.activated_at ? new Date(s.activated_at).toLocaleString() : '—'],
+            ['Expires At', s.expires_at ? new Date(s.expires_at).toLocaleString() : '—'],
+            ['Expired At', s.expired_at ? new Date(s.expired_at).toLocaleString() : '—'],
+            ['Paused At', s.paused_at ? new Date(s.paused_at).toLocaleString() : '—'],
+            ['Remaining at Pause', s.remaining_seconds_at_pause != null ? s.remaining_seconds_at_pause : '—'],
+            ['Pause Count', s.pause_count],
+            ['Shaped Mbps', s.shaped_mbps != null ? s.shaped_mbps : '—'],
+            ['Created At', s.created_at ? new Date(s.created_at).toLocaleString() : '—']
+        ];
+
+        var fieldHtml = '';
+        fields.forEach(function(f) {
+            fieldHtml += '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.06);">' +
+                '<span style="color:#aaa;font-size:13px;">' + f[0] + '</span>' +
+                '<span style="color:#fff;font-size:13px;font-family:monospace;">' + f[1] + '</span></div>';
+        });
+
+        var eventsHtml = '';
+        if (events.length > 0) {
+            eventsHtml = '<div style="margin-top:16px;"><div style="font-weight:600;color:#ffd700;margin-bottom:8px;">Recent Coin Events</div>';
+            events.forEach(function(e) {
+                eventsHtml += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+                    '<span style="color:#ccc;">P' + e.coin_value + '</span>' +
+                    '<span style="color:#888;">' + new Date(e.detected_at).toLocaleString() + '</span>' +
+                    '<span style="color:' + (e.processed ? '#4caf50' : '#ff9800') + ';">' + (e.processed ? 'processed' : 'unprocessed') + '</span></div>';
+            });
+            eventsHtml += '</div>';
+        } else {
+            eventsHtml = '<div style="margin-top:16px;color:#666;font-size:12px;">No coin events for this session.</div>';
+        }
+
+        var overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.id = 'view-session-modal-overlay';
+        overlay.innerHTML =
+            '<div class="modal-card" style="max-width:520px;max-height:80vh;overflow-y:auto;">' +
+                '<div class="form-title">Session #' + s.id + ' Details</div>' +
+                '<div style="margin-bottom:12px;">' + fieldHtml + '</div>' +
+                eventsHtml +
+                '<div class="modal-actions">' +
+                    '<button class="btn btn-ghost" onclick="closeViewSessionModal()">Close</button>' +
+                '</div>' +
+            '</div>';
+        document.body.appendChild(overlay);
+    } catch (e) {
+        showNotification('Failed to load session: ' + e.message, 'error');
+    }
+}
+
+function closeViewSessionModal() {
+    var overlay = document.getElementById('view-session-modal-overlay');
+    if (overlay) overlay.remove();
+}
+
+// --- Edit Session Modal ---
+var _editSessionCache = null;
+
+async function openEditSessionModal(sessionId) {
+    try {
+        var res = await apiCall('GET', '/admin/sessions/' + sessionId);
+        if (!res || !res.success || !res.data) {
+            showNotification('Failed to load session for editing', 'error');
+            return;
+        }
+        var s = res.data.session;
+        _editSessionCache = s;
+
+        var statusOptions = ['active', 'expired', 'cancelled', 'paused'].map(function(st) {
+            return '<option value="' + st + '"' + (s.status === st ? ' selected' : '') + '>' + st + '</option>';
+        }).join('');
+
+        var overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.id = 'edit-session-modal-overlay';
+        overlay.innerHTML =
+            '<div class="modal-card" style="max-width:520px;max-height:85vh;overflow-y:auto;">' +
+                '<div class="form-title">Edit Session #' + s.id + '</div>' +
+                '<div style="margin-bottom:12px;padding:8px;background:rgba(255,255,255,0.03);border-radius:8px;font-size:12px;color:#888;">' +
+                    '<div>Hostname: ' + (s.hostname || '—') + '</div>' +
+                    '<div>Started: ' + (s.started_at ? new Date(s.started_at).toLocaleString() : '—') + '</div>' +
+                    '<div>Activated: ' + (s.activated_at ? new Date(s.activated_at).toLocaleString() : '—') + '</div>' +
+                    '<div>Expires: ' + (s.expires_at ? new Date(s.expires_at).toLocaleString() : '—') + '</div>' +
+                    '<div>Paused: ' + (s.paused_at ? new Date(s.paused_at).toLocaleString() : '—') + '</div>' +
+                    '<div>Created: ' + (s.created_at ? new Date(s.created_at).toLocaleString() : '—') + '</div>' +
+                '</div>' +
+                '<div class="form-group"><label for="edit-sess-ip">Client IP</label>' +
+                    '<input type="text" id="edit-sess-ip" value="' + (s.client_ip || '') + '"></div>' +
+                '<div class="form-group"><label for="edit-sess-mac">Client MAC</label>' +
+                    '<input type="text" id="edit-sess-mac" value="' + (s.client_mac || '') + '" placeholder="XX:XX:XX:XX:XX:XX"></div>' +
+                '<div class="form-group"><label for="edit-sess-coins">Coins Inserted</label>' +
+                    '<input type="number" id="edit-sess-coins" min="0" step="1" value="' + (s.coins_inserted || 0) + '"></div>' +
+                '<div class="form-group"><label for="edit-sess-total">Total Seconds</label>' +
+                    '<input type="number" id="edit-sess-total" min="0" step="1" value="' + (s.total_seconds || 0) + '"></div>' +
+                '<div class="form-group"><label for="edit-sess-remaining">Remaining Seconds</label>' +
+                    '<input type="number" id="edit-sess-remaining" min="0" step="1" value="' + (s.remaining_seconds || 0) + '"></div>' +
+                '<div class="form-group"><label for="edit-sess-status">Status</label>' +
+                    '<select id="edit-sess-status">' + statusOptions + '</select></div>' +
+                '<div class="form-group"><label for="edit-sess-shaped">Shaped Mbps (0 = clear)</label>' +
+                    '<input type="number" id="edit-sess-shaped" min="0" step="1" value="' + (s.shaped_mbps || 0) + '"></div>' +
+                '<div class="modal-actions">' +
+                    '<button class="btn btn-primary" onclick="submitEditSession(' + s.id + ')">Save</button>' +
+                    '<button class="btn btn-ghost" onclick="closeEditSessionModal()">Cancel</button>' +
+                '</div>' +
+            '</div>';
+        document.body.appendChild(overlay);
+    } catch (e) {
+        showNotification('Failed to load session: ' + e.message, 'error');
+    }
+}
+
+function closeEditSessionModal() {
+    var overlay = document.getElementById('edit-session-modal-overlay');
+    if (overlay) overlay.remove();
+    _editSessionCache = null;
+}
+
+async function submitEditSession(sessionId) {
+    var macVal = document.getElementById('edit-sess-mac').value.trim();
+    var ipVal = document.getElementById('edit-sess-ip').value.trim();
+    var coinsVal = parseInt(document.getElementById('edit-sess-coins').value, 10);
+    var totalVal = parseInt(document.getElementById('edit-sess-total').value, 10);
+    var remainVal = parseInt(document.getElementById('edit-sess-remaining').value, 10);
+    var statusVal = document.getElementById('edit-sess-status').value;
+    var shapedVal = parseInt(document.getElementById('edit-sess-shaped').value, 10);
+
+    // Validate MAC format
+    if (macVal && !/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(macVal)) {
+        showNotification('Invalid MAC format. Expected XX:XX:XX:XX:XX:XX', 'error');
+        return;
+    }
+    // Validate IP format
+    if (ipVal) {
+        var parts = ipVal.split('.');
+        if (parts.length !== 4 || parts.some(function(p) { var n = parseInt(p,10); return isNaN(n) || n < 0 || n > 255; })) {
+            showNotification('Invalid IP address format', 'error');
+            return;
+        }
+    }
+    if (isNaN(coinsVal) || coinsVal < 0) { showNotification('Coins must be non-negative', 'error'); return; }
+    if (isNaN(totalVal) || totalVal < 0) { showNotification('Total seconds must be non-negative', 'error'); return; }
+    if (isNaN(remainVal) || remainVal < 0) { showNotification('Remaining seconds must be non-negative', 'error'); return; }
+    if (isNaN(shapedVal) || shapedVal < 0) { showNotification('Shaped Mbps must be non-negative', 'error'); return; }
+
+    var body = {
+        client_ip: ipVal,
+        client_mac: macVal,
+        coins_inserted: coinsVal,
+        total_seconds: totalVal,
+        remaining_seconds: remainVal,
+        status: statusVal,
+        shaped_mbps: shapedVal
+    };
+
+    try {
+        var res = await apiCall('PATCH', '/admin/sessions/' + sessionId, body);
+        if (res && res.success) {
+            showNotification('Session updated successfully', 'success');
+            closeEditSessionModal();
+            loadSessions();
+        } else {
+            showNotification((res && res.message) || 'Failed to update session', 'error');
+        }
+    } catch (e) {
+        if (e.message !== 'Unauthorized') showNotification('Failed to update session: ' + e.message, 'error');
+    }
+}
+
+// --- Delete Session ---
+async function deleteSession(sessionId, mac, ip) {
+    if (!confirm('Delete session #' + sessionId + ' (MAC ' + (mac || '—') + ', IP ' + (ip || '—') + ')?\n\nThis permanently removes the row and its coin events. Daily stats are preserved.')) {
+        return;
+    }
+    try {
+        var res = await apiCall('DELETE', '/admin/sessions/' + sessionId);
+        if (res && res.success) {
+            showNotification('Session #' + sessionId + ' deleted', 'success');
+            loadSessions();
+        } else {
+            showNotification((res && res.message) || 'Failed to delete session', 'error');
+        }
+    } catch (e) {
+        if (e.message !== 'Unauthorized') showNotification('Failed to delete session: ' + e.message, 'error');
     }
 }
 

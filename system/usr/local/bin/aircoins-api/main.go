@@ -52,6 +52,7 @@ func main() {
 	coinslotHandler := &handlers.CoinslotHandler{DB: models.DB}
 	appearanceHandler := &handlers.AppearanceHandler{DB: models.DB}
 	qdiscHandler := &handlers.QdiscHandler{DB: models.DB}
+	sessionAdminHandler := &handlers.SessionAdminHandler{DB: models.DB}
 
 	// Setup routes
 	mux := http.NewServeMux()
@@ -62,12 +63,17 @@ func main() {
 	mux.HandleFunc("/api/admin/sessions", handlers.AuthMiddleware(adminHandler.GetSessions))
 	mux.HandleFunc("/api/admin/sessions/", handlers.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		// Dispatch /api/admin/sessions/<id>/shape to the Shape handler;
-		// everything else falls through to GetSession.
+		// PATCH and DELETE go to the session admin CRUD handler;
+		// GET for individual session goes to session admin (detail + coin_events).
 		if len(r.URL.Path) > len("/api/admin/sessions/") && r.URL.Path[len(r.URL.Path)-len("/shape"):] == "/shape" {
 			sessionHandler.Shape(w, r)
 			return
 		}
-		adminHandler.GetSession(w, r)
+		if r.Method == http.MethodPatch || r.Method == http.MethodDelete {
+			sessionAdminHandler.Dispatch(w, r)
+			return
+		}
+		sessionAdminHandler.Dispatch(w, r)
 	}))
 	mux.HandleFunc("/api/admin/settings", handlers.AuthMiddleware(adminHandler.Settings))
 	mux.HandleFunc("/api/admin/logs", handlers.AuthMiddleware(adminHandler.GetLogs))

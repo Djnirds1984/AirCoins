@@ -88,7 +88,7 @@ func (h *UpdaterHandler) CheckForUpdate(w http.ResponseWriter, r *http.Request) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		sendJSON(w, 200, map[string]interface{}{
 			"current_version":  apiVersion,
 			"update_available": false,
@@ -130,8 +130,14 @@ func (h *UpdaterHandler) CheckForUpdate(w http.ResponseWriter, r *http.Request) 
 // Returns -1 if a < b, 0 if equal, +1 if a > b.
 // "dev" is always considered less than any version.
 func compareSemver(a, b string) int {
+	if a == "dev" && b == "dev" {
+		return 0
+	}
 	if a == "dev" {
 		return -1
+	}
+	if b == "dev" {
+		return 1
 	}
 
 	a = strings.TrimLeft(a, "vV")
@@ -145,6 +151,13 @@ func compareSemver(a, b string) int {
 	}
 
 	for i := 0; i < 3; i++ {
+		// Strip pre-release suffix (e.g., "0-beta" → "0")
+		if idx := strings.IndexAny(aParts[i], "-+"); idx >= 0 {
+			aParts[i] = aParts[i][:idx]
+		}
+		if idx := strings.IndexAny(bParts[i], "-+"); idx >= 0 {
+			bParts[i] = bParts[i][:idx]
+		}
 		av, err := strconv.Atoi(aParts[i])
 		if err != nil {
 			return 0

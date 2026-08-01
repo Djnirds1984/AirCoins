@@ -3602,6 +3602,15 @@ function filterLogsLocal() {
     renderLogs();
 }
 
+function safeUrl(url) {
+    if (!url) return '#';
+    try {
+        var u = new URL(url);
+        if (u.protocol === 'http:' || u.protocol === 'https:') return escapeHtml(url);
+    } catch (_) {}
+    return '#';
+}
+
 function escapeHtml(str) {
     if (!str) return '';
     var div = document.createElement('div');
@@ -5346,7 +5355,7 @@ async function loadUpdater() {
         var data = await apiCall('GET', '/admin/updater/check');
         updateUpdaterUI(data);
     } catch (e) {
-        el.innerHTML = '<div style="padding:20px; color:#f44336;">Failed to check: ' + e.message + '</div>';
+        el.innerHTML = '<div style="padding:20px; color:#f44336;">Failed to check: ' + escapeHtml(e.message) + '</div>';
     }
 }
 
@@ -5379,7 +5388,7 @@ function updateUpdaterUI(data) {
                 + '<pre style="background:rgba(255,255,255,0.03); padding:12px; border-radius:8px; font-size:12px; white-space:pre-wrap; max-height:300px; overflow-y:auto; color:#ccc; margin:0;">' + escapeHtml(data.release_notes) + '</pre>'
                 + '</div>';
         }
-        html += '<a href="' + escapeHtml(data.release_url) + '" target="_blank" style="display:inline-block; padding:8px 20px; border-radius:8px; background:#00bcd4; color:#fff; text-decoration:none; font-size:13px;">View Release on GitHub →</a>';
+        html += '<a href="' + safeUrl(data.release_url) + '" target="_blank" style="display:inline-block; padding:8px 20px; border-radius:8px; background:#00bcd4; color:#fff; text-decoration:none; font-size:13px;">View Release on GitHub →</a>';
     }
     html += '</div>';
     el.innerHTML = html;

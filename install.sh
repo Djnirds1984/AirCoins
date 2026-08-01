@@ -162,23 +162,20 @@ echo -e "${GREEN}  ✓ System updated${NC}"
 # ============================================
 echo -e "${YELLOW}[2/10]${NC} Installing required packages..."
 
-if [ "$IS_ARM" = true ]; then
-    # Full ARM installation (wired-only)
-    ARM_PACKAGES="lighttpd usbutils wget curl jq bc postgresql postgresql-contrib vlan dnsmasq iptables conntrack file"
-    X86_PACKAGES="lighttpd wget curl jq bc postgresql postgresql-contrib vlan dnsmasq iptables conntrack file"
-else
-    # x86 installation
-    ARM_PACKAGES="lighttpd usbutils wget curl jq bc postgresql postgresql-contrib vlan dnsmasq iptables conntrack file"
-    X86_PACKAGES="lighttpd wget curl jq bc postgresql postgresql-contrib vlan dnsmasq iptables conntrack file"
-fi
+# Install 'file' first for ELF binary detection
+apt-get install -y -qq file 2>/dev/null || true
 
-# Only install golang-go if no pre-compiled binary exists
+# Determine package list (golang-go only if no pre-compiled binary)
+ARM_PACKAGES="lighttpd usbutils wget curl jq bc postgresql postgresql-contrib vlan dnsmasq iptables conntrack"
+X86_PACKAGES="lighttpd wget curl jq bc postgresql postgresql-contrib vlan dnsmasq iptables conntrack"
+
 if [ ! -f "$SYSTEM_DIR/usr/local/bin/aircoins-api/aircoins-api" ] || \
    ! file "$SYSTEM_DIR/usr/local/bin/aircoins-api/aircoins-api" 2>/dev/null | grep -q "ELF"; then
     ARM_PACKAGES="$ARM_PACKAGES golang-go"
     X86_PACKAGES="$X86_PACKAGES golang-go"
 fi
 
+# Install packages
 if [ "$IS_ARM" = true ]; then
     apt-get install -y -qq $ARM_PACKAGES
 else
@@ -336,7 +333,7 @@ else
 
     # Build the binary with version injection
     BUILD_VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "$VERSION")
-    go build -ldflags "-X main.Version=$BUILD_VERSION" -o aircoins-api .
+    go build -ldflags "-s -w -X main.Version=$BUILD_VERSION" -o aircoins-api .
 
     # Deploy
     mkdir -p /usr/local/bin/aircoins-api

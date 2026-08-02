@@ -4,6 +4,17 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.6.1 — Private Repo Support & Self-Recovery
+
+**Release date:** August 2026
+
+### Fixed
+- **Updater 404 on private repos** — added GITHUB_TOKEN authentication via environment variable
+- **System unreachable after update** — now restarts all critical services (lighttpd, dnsmasq, hostapd) after update completes
+- **Self-recovery** — service status logged to /tmp/aircoins-update.log for debugging
+
+---
+
 ## v1.6.0 — Faster Coin Detection
 
 **Release date:** August 2026

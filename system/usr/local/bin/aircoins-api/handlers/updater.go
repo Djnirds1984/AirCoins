@@ -62,6 +62,11 @@ func (h *UpdaterHandler) fetchLatest(force bool) (*releaseInfo, error) {
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "AirCoins-Updater")
 
+	// Add authentication token if available (required for private repos)
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
 	resp, err := h.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch release: %w", err)
@@ -233,7 +238,19 @@ func (h *UpdaterHandler) PerformUpdate(w http.ResponseWriter, r *http.Request) {
 	// then restart the service.
 	installScript := installDir + "/install.sh"
 	updateCmd := exec.Command("bash", "-c", fmt.Sprintf(
-		"yes | sudo bash %s && sudo systemctl restart aircoins-api", installScript,
+		"yes | sudo bash %s && " +
+		"sleep 2 && " +
+		"sudo systemctl restart aircoins-api && " +
+		"sleep 3 && " +
+		"sudo systemctl restart lighttpd && " +
+		"sudo systemctl restart dnsmasq && " +
+		"(sudo systemctl restart hostapd 2>/dev/null || true) && " +
+		"sleep 2 && " +
+		"echo '--- Service Status ---' >> /tmp/aircoins-update.log && " +
+		"sudo systemctl status aircoins-api --no-pager >> /tmp/aircoins-update.log 2>&1 && " +
+		"sudo systemctl status lighttpd --no-pager >> /tmp/aircoins-update.log 2>&1 && " +
+		"sudo systemctl status dnsmasq --no-pager >> /tmp/aircoins-update.log 2>&1",
+		installScript,
 	))
 	updateCmd.Dir = installDir
 	// Log output to a file for debugging

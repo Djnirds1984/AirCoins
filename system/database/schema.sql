@@ -274,6 +274,28 @@ INSERT INTO system_settings (key, value, description) VALUES
 ON CONFLICT (key) DO NOTHING;
 
 -- ============================================
+-- BRIDGE MANAGEMENT
+-- ============================================
+-- Linux bridge interfaces for grouping VLANs (or other interfaces) into
+-- a single L2 broadcast domain. bridge_config stores the bridge identity;
+-- bridge_members tracks which interfaces are enslaved to each bridge.
+-- The portal stack (portal_servers) can be provisioned on a bridge just
+-- like on a VLAN interface.
+CREATE TABLE IF NOT EXISTS bridge_config (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(32) UNIQUE NOT NULL,
+    description VARCHAR(100) DEFAULT '',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS bridge_members (
+    id SERIAL PRIMARY KEY,
+    bridge_id INT REFERENCES bridge_config(id) ON DELETE CASCADE,
+    member_iface VARCHAR(32) NOT NULL,
+    UNIQUE(bridge_id, member_iface)
+);
+
+-- ============================================
 -- FUNCTIONS
 -- ============================================
 

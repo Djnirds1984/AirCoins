@@ -168,6 +168,40 @@ type InterfaceInfo struct {
 }
 
 // ============================================
+// BRIDGE MODELS
+// ============================================
+// A bridge groups multiple interfaces (VLANs, physical ports) into a
+// single L2 broadcast domain. The portal stack (portal_servers) can be
+// provisioned on a bridge just like on a VLAN interface.
+
+type BridgeConfig struct {
+	ID          int       `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type BridgeInfo struct {
+	Name          string   `json:"name"`
+	Description   string   `json:"description"`
+	Members       []string `json:"members"`
+	IPCIDR        string   `json:"ip_cidr,omitempty"`
+	HasPortal     bool     `json:"has_portal"`
+	PortalEnabled bool     `json:"portal_enabled"`
+	Active        bool     `json:"active"`
+}
+
+type BridgeRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type BridgeMemberRequest struct {
+	BridgeName  string `json:"bridge_name"`
+	MemberIface string `json:"member_iface"`
+}
+
+// ============================================
 // PORTAL SERVER MODELS
 // ============================================
 

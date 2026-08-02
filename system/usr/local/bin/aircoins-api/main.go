@@ -182,6 +182,13 @@ func main() {
 	mux.Handle("/api/vlan/delete", adminProtected(handlers.VLANDelete))
 	mux.Handle("/api/vlan/interfaces", adminProtected(handlers.VLANInterfaces))
 
+	// Bridge routes (Linux bridge interfaces: create/delete, add/remove members)
+	mux.Handle("/api/bridge/list", adminProtected(handlers.BridgeList))
+	mux.Handle("/api/bridge/create", adminProtected(handlers.BridgeCreate))
+	mux.Handle("/api/bridge/delete", adminProtected(handlers.BridgeDelete))
+	mux.Handle("/api/bridge/member/add", adminProtected(handlers.BridgeAddMember))
+	mux.Handle("/api/bridge/member/remove", adminProtected(handlers.BridgeRemoveMember))
+
 	// WAN settings routes (auto-detect WAN port, DHCP/Static/VLAN DHCP modes)
 	mux.Handle("/api/admin/wan", adminProtected(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

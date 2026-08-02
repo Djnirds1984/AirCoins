@@ -335,11 +335,15 @@ func VLANInterfaces(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(name, ".") {
 			continue
 		}
-		// Only include physical devices: check for /sys/class/net/<name>/device symlink
-		// This excludes virtual interfaces like docker0, veth*, br-*, etc.
+		// Only include physical devices (check for /sys/class/net/<name>/device symlink)
+		// and bridge interfaces (check for /sys/class/net/<name>/bridge directory).
+		// This excludes other virtual interfaces like docker0, veth*, etc.
 		devicePath := "/sys/class/net/" + name + "/device"
+		bridgePath := "/sys/class/net/" + name + "/bridge"
 		if _, err := os.Stat(devicePath); err != nil {
-			continue
+			if _, err := os.Stat(bridgePath); err != nil {
+				continue
+			}
 		}
 
 		ip := getInterfaceIP(name)

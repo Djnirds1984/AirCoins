@@ -1422,6 +1422,9 @@
             <a href="#" data-section="portal" class="nav-item">
                 <span class="icon">🎨</span><span class="label">Portal</span>
             </a>
+            <a href="#" data-section="bridges" class="nav-item">
+                <span class="icon">🔗</span><span class="label">Bridges</span>
+            </a>
             <a href="#" data-section="settings" class="nav-item">
                 <span class="icon">⚙️</span><span class="label">Settings</span>
             </a>
@@ -2462,6 +2465,65 @@
     </div>
 </div>
 
+        <!-- Bridges Section -->
+        <div id="section-bridges" class="section" style="display:none;">
+
+            <!-- Bridge List Card -->
+            <div class="settings-card">
+                <h3>🔗 Network Bridges</h3>
+                <div class="vlan-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Description</th>
+                                <th>Members</th>
+                                <th>Portal</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bridge-table-body">
+                            <!-- populated by JS -->
+                        </tbody>
+                    </table>
+                    <div id="bridge-empty" style="display:none;text-align:center;padding:20px;color:#888;">
+                        No bridges configured. Create one below.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Create Bridge Card -->
+            <div class="settings-card">
+                <h3>➕ Create Bridge</h3>
+                <div class="vlan-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Bridge Name</label>
+                            <input type="text" id="bridge-name" placeholder="br0">
+                        </div>
+                        <div class="form-group">
+                            <label>Description</label>
+                            <input type="text" id="bridge-desc" placeholder="Main portal bridge">
+                        </div>
+                    </div>
+                    <button class="btn-primary" onclick="createBridge()">Create Bridge</button>
+                </div>
+            </div>
+
+            <!-- Manage Bridge Members Card -->
+            <div class="settings-card">
+                <h3>🧩 Manage Bridge Members</h3>
+                <div id="bridge-members-area">
+                    <!-- populated by JS: per-bridge member management -->
+                </div>
+                <div id="bridge-members-empty" style="display:none;text-align:center;padding:20px;color:#888;">
+                    Create a bridge first to manage members.
+                </div>
+            </div>
+
+        </div>
+
     </div>
 </div>
 
@@ -2582,12 +2644,13 @@ async function checkAuth() {
 // ============================================================
 // ROUTER
 // ============================================================
-const SECTION_NAMES = ['dashboard', 'sessions', 'pricing', 'portal', 'settings', 'system', 'reports', 'license', 'zerotier', 'updater'];
+const SECTION_NAMES = ['dashboard', 'sessions', 'pricing', 'portal', 'bridges', 'settings', 'system', 'reports', 'license', 'zerotier', 'updater'];
 const SECTION_TITLES = {
     dashboard: 'Dashboard',
     sessions: 'Sessions',
     pricing: 'Pricing',
     portal: 'Portal',
+    bridges: 'Bridges',
     settings: 'Settings',
     system: 'System',
     reports: 'Reports',
@@ -2626,6 +2689,8 @@ function showSection(name) {
         loadPauseRules();
         loadBannedTable();
         loadQdiscRules();
+    } else if (name === 'bridges') {
+        loadBridges();
     } else if (name === 'settings') {
         loadSettings();
     } else if (name === 'system') {
@@ -5796,6 +5861,181 @@ async function checkDownloadedFile() {
         }
     } catch (e) {
         // Silently fail — file check is not critical
+    }
+}
+
+// ============================================================
+// BRIDGES
+// ============================================================
+var bridgeListCache = [];
+var availableVlansForBridge = [];
+
+async function loadBridges() {
+    try {
+        const res = await apiCall('GET', '/bridge/list');
+        const bridges = res.bridges || [];
+        bridgeListCache = bridges;
+        const tbody = document.getElementById('bridge-table-body');
+        const empty = document.getElementById('bridge-empty');
+
+        if (bridges.length === 0) {
+            tbody.innerHTML = '';
+            empty.style.display = 'block';
+        } else {
+            empty.style.display = 'none';
+            tbody.innerHTML = bridges.map(function(b) {
+                const membersChips = (b.members || []).map(function(m) {
+                    return '<span style="display:inline-block;background:rgba(0,212,255,0.12);color:#00d4ff;padding:2px 8px;border-radius:6px;font-size:0.82em;margin:2px 3px;font-family:monospace;">' + m + '</span>';
+                }).join('');
+                const portalBadge = b.has_portal
+                    ? (b.portal_enabled
+                        ? '<span class="badge online">Portal Active</span>'
+                        : '<span class="badge warn">Portal (disabled)</span>')
+                    : '<span class="badge neutral">No Portal</span>';
+                const statusBadge = b.active
+                    ? '<span class="badge online">Active</span>'
+                    : '<span class="badge neutral">Inactive</span>';
+                return '<tr>' +
+                    '<td style="font-family:monospace;color:#00d4ff;font-weight:600;">' + b.name + '</td>' +
+                    '<td>' + (b.description || '<span style="color:#555;">—</span>') + '</td>' +
+                    '<td>' + (membersChips || '<span style="color:#555;">none</span>') + '</td>' +
+                    '<td>' + portalBadge + '</td>' +
+                    '<td>' + statusBadge + '</td>' +
+                    '<td><button class="btn btn-danger btn-sm" onclick="deleteBridge(\'' + b.name + '\')">Delete</button></td>' +
+                    '</tr>';
+            }).join('');
+        }
+
+        // Render per-bridge member management
+        renderBridgeMembers(bridges);
+
+        // Also fetch VLANs for add-member dropdown
+        loadAvailableVlansForBridge();
+    } catch (e) {
+        showNotification('Failed to load bridges: ' + e.message, 'error');
+    }
+}
+
+async function loadAvailableVlansForBridge() {
+    try {
+        const res = await apiCall('GET', '/vlan/list');
+        const vlans = res.vlans || [];
+        // Filter: VLANs with no IP, no portal, not already in a bridge
+        const allBridgeMembers = {};
+        bridgeListCache.forEach(function(b) {
+            (b.members || []).forEach(function(m) { allBridgeMembers[m] = true; });
+        });
+        availableVlansForBridge = vlans.filter(function(v) {
+            return !v.ip && !v.has_portal && !allBridgeMembers[v.interface];
+        });
+        // Re-render member dropdowns
+        renderBridgeMembers(bridgeListCache);
+    } catch (e) {
+        // silently fail — dropdown will just be empty
+    }
+}
+
+function renderBridgeMembers(bridges) {
+    const area = document.getElementById('bridge-members-area');
+    const emptyMsg = document.getElementById('bridge-members-empty');
+
+    if (!bridges || bridges.length === 0) {
+        area.innerHTML = '';
+        emptyMsg.style.display = 'block';
+        return;
+    }
+    emptyMsg.style.display = 'none';
+
+    area.innerHTML = bridges.map(function(b) {
+        const memberTags = (b.members || []).map(function(m) {
+            return '<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(0,212,255,0.12);color:#00d4ff;padding:3px 8px;border-radius:6px;font-size:0.85em;margin:3px 3px;font-family:monospace;">' +
+                m +
+                ' <button onclick="removeBridgeMember(\'' + b.name + '\',\'' + m + '\')" style="background:rgba(255,68,68,0.2);border:none;color:#ff4444;cursor:pointer;border-radius:50%;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;line-height:1;padding:0;" title="Remove">×</button>' +
+                '</span>';
+        }).join('');
+
+        const vlanOpts = availableVlansForBridge.map(function(v) {
+            return '<option value="' + v.interface + '">' + v.interface + (v.description ? ' (' + v.description + ')' : '') + '</option>';
+        }).join('');
+
+        return '<div style="margin-bottom:16px;padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;">' +
+            '<div style="font-weight:600;color:#00d4ff;font-family:monospace;margin-bottom:8px;">' + b.name +
+            (b.description ? ' <span style="color:#aaa;font-family:sans-serif;font-weight:400;">— ' + b.description + '</span>' : '') +
+            '</div>' +
+            '<div style="margin-bottom:8px;">' +
+            (memberTags || '<span style="color:#555;font-size:0.85em;">No members</span>') +
+            '</div>' +
+            '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+            '<select id="bridge-add-member-' + b.name + '" style="padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:#fff;font-size:0.85em;min-width:140px;">' +
+            '<option value="">Select VLAN…</option>' +
+            vlanOpts +
+            '</select>' +
+            '<button class="btn btn-primary btn-sm" onclick="addBridgeMemberFromSelect(\'' + b.name + '\')">Add Member</button>' +
+            '</div>' +
+            '</div>';
+    }).join('');
+}
+
+async function createBridge() {
+    const name = document.getElementById('bridge-name').value.trim();
+    const desc = document.getElementById('bridge-desc').value.trim();
+
+    if (!name) {
+        showNotification('Bridge name is required', 'error');
+        return;
+    }
+
+    try {
+        await apiCall('POST', '/bridge/create', { name: name, description: desc });
+        showNotification('Bridge "' + name + '" created', 'success');
+        document.getElementById('bridge-name').value = '';
+        document.getElementById('bridge-desc').value = '';
+        loadBridges();
+    } catch (e) {
+        showNotification('Failed to create bridge: ' + e.message, 'error');
+    }
+}
+
+async function deleteBridge(name) {
+    if (!confirm('Delete bridge "' + name + '"? This removes the bridge interface. Members and portal must be removed first.')) return;
+
+    try {
+        await apiCall('POST', '/bridge/delete', { name: name });
+        showNotification('Bridge "' + name + '" deleted', 'success');
+        loadBridges();
+    } catch (e) {
+        showNotification('Failed to delete bridge: ' + e.message, 'error');
+    }
+}
+
+async function addBridgeMember(bridgeName, memberIface) {
+    try {
+        await apiCall('POST', '/bridge/member/add', { bridge_name: bridgeName, member_iface: memberIface });
+        showNotification('Added "' + memberIface + '" to bridge "' + bridgeName + '"', 'success');
+        loadBridges();
+    } catch (e) {
+        showNotification('Failed to add member: ' + e.message, 'error');
+    }
+}
+
+function addBridgeMemberFromSelect(bridgeName) {
+    const sel = document.getElementById('bridge-add-member-' + bridgeName);
+    if (!sel || !sel.value) {
+        showNotification('Select a VLAN to add', 'error');
+        return;
+    }
+    addBridgeMember(bridgeName, sel.value);
+}
+
+async function removeBridgeMember(bridgeName, memberIface) {
+    if (!confirm('Remove "' + memberIface + '" from bridge "' + bridgeName + '"?')) return;
+
+    try {
+        await apiCall('POST', '/bridge/member/remove', { bridge_name: bridgeName, member_iface: memberIface });
+        showNotification('Removed "' + memberIface + '" from bridge "' + bridgeName + '"', 'success');
+        loadBridges();
+    } catch (e) {
+        showNotification('Failed to remove member: ' + e.message, 'error');
     }
 }
 </script>

@@ -1,19 +1,22 @@
 #!/bin/bash
 # AirCoins network restore — applies saved config on boot.
 #
-# Phase 1: recreate every saved VLAN interface (identity only — no IP,
+# Phase 1: recreate every saved VLAN interface (identity only—no IP,
 #          no DHCP; plain VLANs stay plain).
+# Phase 1b: create bridges and enslave member interfaces (from vlans).
 # Phase 2: provision every ENABLED portal server: portal IP, networkd
 #          ownership file, dnsmasq DHCP + DNS hijack, captive rules.
 #
 # Source of truth are the flat files the API maintains (boot runs
 # before the API/DB is up):
 #   /etc/pisowifi/vlans.conf    interface vlan_id description
+#   /etc/pisowifi/bridges.conf  bridge_name description member1 member2 ...
 #   /etc/pisowifi/portals.conf  interface ip/cidr dhcp_start dhcp_end lease enabled|disabled
 #
 # A pre-split vlans.conf (ip/cidr inline in the 3rd field) is honored as
 # a legacy fallback until the API rewrites the files on its first start.
 VLAN_CONF="/etc/pisowifi/vlans.conf"
+BRIDGES_CONF="/etc/pisowifi/bridges.conf"
 PORTAL_CONF="/etc/pisowifi/portals.conf"
 
 # Load 8021q kernel module
@@ -93,6 +96,60 @@ if [ -f "$VLAN_CONF" ]; then
         ip link set "$name" up 2>/dev/null
         logger -t aircoins-vlan "Restored VLAN $name"
     done < "$VLAN_CONF"
+fi
+
+# ============================================
+# PHASE 1b: Bridges and bridge members
+# ============================================
+if [ -f "$BRIDGES_CONF" ]; then
+    echo "=== Phase 1b: Bridges ==="
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$line" ]] && continue
+
+        # Parse: bridge_name description member1 member2 ...
+        read -ra parts <<< "$line"
+        bridge_name="${parts[0]}"
+        # parts[1] is description (skip for kernel operations)
+        members=("${parts[@]:2}")
+
+        # Create bridge if not exists
+        if ! ip link show "$bridge_name" &>/dev/null; then
+            echo "  Creating bridge $bridge_name"
+            ip link add name "$bridge_name" type bridge
+            ip link set "$bridge_name" up
+            logger -t aircoins-vlan "Created bridge $bridge_name"
+        fi
+
+        # Add members and clean up stale networkd configs
+        for member in "${members[@]}"; do
+            if ip link show "$member" &>/dev/null; then
+                current_master=$(ip -d link show "$member" 2>/dev/null | grep -oP 'master \K\S+')
+                if [ -z "$current_master" ]; then
+                    echo "  Adding $member to $bridge_name"
+                    ip link set "$member" master "$bridge_name"
+                    logger -t aircoins-vlan "Added $member to bridge $bridge_name"
+                elif [ "$current_master" != "$bridge_name" ]; then
+                    echo "  WARNING: $member already in bridge $current_master, skipping"
+                    logger -t aircoins-vlan "WARNING: $member already in bridge $current_master"
+                fi
+            else
+                echo "  WARNING: Member $member does not exist, skipping"
+                logger -t aircoins-vlan "WARNING: bridge member $member does not exist"
+            fi
+
+            # Remove stale networkd config — bridge members are IP-less;
+            # only the bridge itself gets a .network file (in Phase 2).
+            netfile="/etc/systemd/network/04-aircoins-${member}.network"
+            if [ -f "$netfile" ]; then
+                echo "  Removing stale networkd config for bridge member $member"
+                rm -f "$netfile"
+                reload_networkd=1
+                logger -t aircoins-vlan "Removed stale networkd config for bridge member $member"
+            fi
+        done
+    done < "$BRIDGES_CONF"
 fi
 
 # ============================================
@@ -236,4 +293,4 @@ if [ "$reload_networkd" -eq 1 ]; then
     networkctl reload 2>/dev/null
 fi
 
-logger -t aircoins-vlan "Network restore complete (VLANs + portal servers)"
+logger -t aircoins-vlan "Network restore complete (VLANs + bridges + portal servers)"

@@ -592,6 +592,16 @@ func PortalCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Refuse creating a portal on a bridge member interface (has a master bridge).
+	// Bridge members are enslaved to a bridge and cannot host their own portal stack.
+	if master := interfaceHasMaster(req.Interface); master != "" {
+		sendJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false,
+			Message: fmt.Sprintf("Interface %s is a bridge member of %s. Remove it from the bridge before creating a portal.", req.Interface, master),
+		})
+		return
+	}
+
 	ip, ipNet, err := net.ParseCIDR(req.IPCIDR)
 	if err != nil || ip.To4() == nil {
 		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid portal IP/CIDR (expected e.g. 10.0.22.1/24)"})

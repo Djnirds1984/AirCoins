@@ -4,6 +4,25 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.10.0 — Bridge/VLAN Portal Management
+
+**Release date:** August 2026
+
+### Added
+- **Network Bridges** — create and manage network bridges from the admin panel
+- **Bridge Members** — manually add/remove VLAN interfaces as layer-2 bridge members
+- **Portal on Bridge** — provision captive portals on bridge interfaces
+- **Bridges UI** — new Bridges section in admin sidebar
+- **Change Password** — new card on Settings page to change admin password
+- **Permanent device tokens** — soft-delete sessions, cookie backup for tokens
+
+### Changed
+- Boot script Phase 1b for bridge creation
+- Portal guards for bridge member VLANs
+- Updater self-recovery via systemd-run
+
+---
+
 ## v1.9.0 — Updater Self-Recovery + Change Password
 
 **Release date:** August 2026

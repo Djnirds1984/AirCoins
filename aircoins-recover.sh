@@ -32,7 +32,7 @@ fi
 # 1. Detect the main physical interface (skip loopback + VLANs)
 # ---------------------------------------------------------------------
 if [ -z "$IFACE" ]; then
-    echo "[1/7] Detecting main network interface..."
+    echo "[1/8] Detecting main network interface..."
     for candidate in /sys/class/net/*; do
         name=$(basename "$candidate")
         # Skip loopback, VLAN sub-interfaces, virtual/bridge devices
@@ -57,7 +57,7 @@ echo ""
 # ---------------------------------------------------------------------
 # 2. Stop and disable all per-VLAN DHCP services
 # ---------------------------------------------------------------------
-echo "[2/7] Stopping all VLAN DHCP services..."
+echo "[2/8] Stopping all VLAN DHCP services..."
 for unit in $(systemctl list-units --all --plain --no-legend 'dnsmasq@*' 2>/dev/null | awk '{print $1}'); do
     echo "      Stopping $unit"
     systemctl stop "$unit" 2>/dev/null
@@ -69,9 +69,23 @@ echo "      Done."
 echo ""
 
 # ---------------------------------------------------------------------
-# 3. Delete every VLAN sub-interface
+# 3. Clean up bridge interfaces
 # ---------------------------------------------------------------------
-echo "[3/7] Removing all VLAN interfaces..."
+echo "[3/8] Cleaning up bridge interfaces..."
+for iface in /sys/class/net/br*; do
+    [ -e "$iface" ] || continue
+    bridge_name=$(basename "$iface")
+    echo "      Removing bridge $bridge_name"
+    ip link set "$bridge_name" down 2>/dev/null
+    ip link delete "$bridge_name" type bridge 2>/dev/null
+done
+echo "      Done."
+echo ""
+
+# ---------------------------------------------------------------------
+# 4. Delete every VLAN sub-interface
+# ---------------------------------------------------------------------
+echo "[4/8] Removing all VLAN interfaces..."
 for vlan in $(ip -o link show type vlan 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1); do
     echo "      Deleting $vlan"
     ip link delete "$vlan" 2>/dev/null
@@ -80,9 +94,9 @@ echo "      Done."
 echo ""
 
 # ---------------------------------------------------------------------
-# 4. Disable VLAN auto-restore on boot and clear its config
+# 5. Disable VLAN auto-restore on boot and clear its config
 # ---------------------------------------------------------------------
-echo "[4/7] Disabling VLAN boot restore..."
+echo "[5/8] Disabling VLAN boot restore..."
 systemctl stop aircoins-vlans.service 2>/dev/null
 systemctl disable aircoins-vlans.service 2>/dev/null
 
@@ -91,14 +105,21 @@ if [ -f /etc/pisowifi/vlans.conf ]; then
     echo "      Backed up existing vlans.conf"
 fi
 rm -f /etc/pisowifi/vlans.conf 2>/dev/null
+
+if [ -f /etc/pisowifi/bridges.conf ]; then
+    cp /etc/pisowifi/bridges.conf "/etc/pisowifi/bridges.conf.bak.$(date +%s)" 2>/dev/null
+    echo "      Backed up existing bridges.conf"
+fi
+rm -f /etc/pisowifi/bridges.conf 2>/dev/null
+
 rm -f /etc/dnsmasq.d/*.conf 2>/dev/null
 echo "      Done."
 echo ""
 
 # ---------------------------------------------------------------------
-# 5. Restore the main interface IP
+# 6. Restore the main interface IP
 # ---------------------------------------------------------------------
-echo "[5/7] Restoring main interface $IFACE ..."
+echo "[6/8] Restoring main interface $IFACE ..."
 ip link set "$IFACE" up 2>/dev/null
 
 if ip addr show "$IFACE" 2>/dev/null | grep -q "inet ${MAIN_IP%/*}"; then
@@ -116,9 +137,9 @@ echo "      Done."
 echo ""
 
 # ---------------------------------------------------------------------
-# 6. Restart core services
+# 7. Restart core services
 # ---------------------------------------------------------------------
-echo "[6/7] Restarting core services..."
+echo "[7/8] Restarting core services..."
 systemctl daemon-reload 2>/dev/null
 for svc in ssh sshd lighttpd postgresql aircoins-api; do
     if systemctl list-unit-files --plain --no-legend 2>/dev/null | grep -q "^${svc}\.service"; then
@@ -129,9 +150,9 @@ done
 echo ""
 
 # ---------------------------------------------------------------------
-# 7. Report final state
+# 8. Report final state
 # ---------------------------------------------------------------------
-echo "[7/7] Current network state:"
+echo "[8/8] Current network state:"
 echo "---------------------------------------------------"
 ip -4 addr show 2>/dev/null | grep -E "^[0-9]+:|inet " | sed 's/^/      /'
 echo "---------------------------------------------------"

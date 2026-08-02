@@ -15,7 +15,7 @@ set -e
 # ============================================
 # CONFIGURATION
 # ============================================
-VERSION="1.9.0"
+VERSION="1.10.0"
 INSTALL_DIR="/opt/aircoins"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYSTEM_DIR="$SCRIPT_DIR/system"
@@ -614,6 +614,16 @@ fi
 if [ ! -f /etc/pisowifi/portals.conf ]; then
     echo "# AirCoins Portal Server Configuration" > /etc/pisowifi/portals.conf
     echo "# Format: interface ip/cidr dhcp_start dhcp_end lease enabled|disabled" >> /etc/pisowifi/portals.conf
+fi
+
+# Bridge configuration
+if [ ! -f /etc/pisowifi/bridges.conf ]; then
+    cat > /etc/pisowifi/bridges.conf << 'EOF'
+# AirCoins Bridge Configuration
+# Format: bridge_name description member1 member2 ...
+# Example: br0 Main portal bridge end0.22 end0.23
+EOF
+    echo "  Created /etc/pisowifi/bridges.conf"
 fi
 
 echo -e "${GREEN}  ✓ System configured${NC}"

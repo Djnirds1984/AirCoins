@@ -4,6 +4,17 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.6.2 — Critical Updater Fix
+
+**Release date:** August 2026
+
+### Fixed
+- **Updater destroying system** — replaced full install.sh with targeted file replacement
+- **Preserves configs** — .env, database, systemd units untouched during update
+- **Clean service restart** — stops API, copies files, starts all services in order
+
+---
+
 ## v1.6.1 — Private Repo Support & Self-Recovery
 
 **Release date:** August 2026

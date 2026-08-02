@@ -124,7 +124,7 @@ func (h *UpdaterHandler) CheckForUpdate(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// PerformUpdate downloads the latest release, extracts it, and runs install.sh.
+// PerformUpdate downloads the latest release, extracts it, and performs targeted file replacement.
 func (h *UpdaterHandler) PerformUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -215,7 +215,7 @@ func (h *UpdaterHandler) PerformUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// === CRITICAL FIX ===
-	// Send success response BEFORE running install.sh, because install.sh
+	// Send success response BEFORE running the update, because the update
 	// will kill this server when it restarts the aircoins-api service.
 	sendJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -234,24 +234,47 @@ func (h *UpdaterHandler) PerformUpdate(w http.ResponseWriter, r *http.Request) {
 	h.cached = nil
 	h.mu.Unlock()
 
-	// Run install.sh in the background with "yes" piped for all prompts,
-	// then restart the service.
-	installScript := installDir + "/install.sh"
-	updateCmd := exec.Command("bash", "-c", fmt.Sprintf(
-		"yes | sudo bash %s && " +
-		"sleep 2 && " +
-		"sudo systemctl restart aircoins-api && " +
-		"sleep 3 && " +
-		"sudo systemctl restart lighttpd && " +
-		"sudo systemctl restart dnsmasq && " +
-		"(sudo systemctl restart hostapd 2>/dev/null || true) && " +
-		"sleep 2 && " +
-		"echo '--- Service Status ---' >> /tmp/aircoins-update.log && " +
-		"sudo systemctl status aircoins-api --no-pager >> /tmp/aircoins-update.log 2>&1 && " +
-		"sudo systemctl status lighttpd --no-pager >> /tmp/aircoins-update.log 2>&1 && " +
-		"sudo systemctl status dnsmasq --no-pager >> /tmp/aircoins-update.log 2>&1",
-		installScript,
-	))
+	// Targeted file replacement — does NOT run install.sh (which destroys the system).
+	// Only copies binary, HTML, scripts, CGI, recovery, and changelog.
+	// Preserves: .env, database, systemd units, network config.
+	updateScript := fmt.Sprintf(`
+echo "=== AirCoins Update: $(date) ===" >> /tmp/aircoins-update.log
+DIR="%s"
+sudo systemctl stop aircoins-api 2>/dev/null
+sleep 1
+# Update binary
+if [ -f "$DIR/system/usr/local/bin/aircoins-api/aircoins-api" ]; then
+    sudo cp "$DIR/system/usr/local/bin/aircoins-api/aircoins-api" /usr/local/bin/aircoins-api/aircoins-api
+    sudo chmod +x /usr/local/bin/aircoins-api/aircoins-api
+    echo "Binary updated" >> /tmp/aircoins-update.log
+fi
+# Update HTML
+[ -f "$DIR/admin.html" ] && sudo cp "$DIR/admin.html" /var/www/html/admin.html
+[ -f "$DIR/index.html" ] && sudo cp "$DIR/index.html" /var/www/html/index.html
+echo "HTML updated" >> /tmp/aircoins-update.log
+# Update scripts
+for s in gpio-coin-listener pisowifi-api-update pisowifi-ctl pisowifi-session-manager; do
+    [ -f "$DIR/system/usr/local/bin/$s" ] && sudo cp "$DIR/system/usr/local/bin/$s" /usr/local/bin/$s && sudo chmod +x /usr/local/bin/$s
+done
+echo "Scripts updated" >> /tmp/aircoins-update.log
+# Update recovery
+[ -f "$DIR/aircoins-recover.sh" ] && sudo cp "$DIR/aircoins-recover.sh" /opt/aircoins/aircoins-recover.sh && sudo chmod +x /opt/aircoins/aircoins-recover.sh
+# Update CGI
+[ -d "$DIR/system/usr/lib/cgi-bin" ] && sudo cp "$DIR/system/usr/lib/cgi-bin/"* /usr/lib/cgi-bin/ 2>/dev/null && sudo chmod +x /usr/lib/cgi-bin/* 2>/dev/null
+# Update CHANGELOG
+[ -f "$DIR/CHANGELOG.md" ] && sudo cp "$DIR/CHANGELOG.md" /opt/aircoins/CHANGELOG.md
+# Restart services
+sudo systemctl start aircoins-api
+sleep 2
+sudo systemctl restart lighttpd
+sudo systemctl restart dnsmasq
+(sudo systemctl restart hostapd 2>/dev/null || true)
+sleep 2
+sudo systemctl status aircoins-api --no-pager >> /tmp/aircoins-update.log 2>&1
+sudo systemctl status lighttpd --no-pager >> /tmp/aircoins-update.log 2>&1
+echo "=== Update Complete: $(date) ===" >> /tmp/aircoins-update.log
+`, installDir)
+	updateCmd := exec.Command("bash", "-c", updateScript)
 	updateCmd.Dir = installDir
 	// Log output to a file for debugging
 	logFile, _ := os.Create("/tmp/aircoins-update.log")

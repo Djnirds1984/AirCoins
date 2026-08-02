@@ -2323,6 +2323,7 @@
                         <span id="license-status-pill" style="padding:4px 14px; border-radius:20px; font-size:13px; font-weight:600; background:#555;">Loading…</span>
                     </div>
                     <div class="license-info-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:10px 20px; font-size:13px;">
+                        <div style="grid-column:1 / -1;"><span style="color:#888;">License Key:</span> <span id="license-key-display" style="font-family:monospace; letter-spacing:1px;">—</span></div>
                         <div><span style="color:#888;">Hardware ID:</span> <span id="license-hw-id" style="font-family:monospace;">—</span></div>
                         <div><span style="color:#888;">Owner Email:</span> <span id="license-email">—</span></div>
                         <div><span style="color:#888;">Trial Started:</span> <span id="license-trial-start">—</span></div>
@@ -5317,6 +5318,7 @@ function updateLicenseUI(lic) {
         pill.style.color = '#fff';
     }
 
+    document.getElementById('license-key-display').textContent = lic.license_key || '—';
     document.getElementById('license-hw-id').textContent = lic.hardware_id || '—';
     document.getElementById('license-email').textContent = lic.owner_email || '—';
     document.getElementById('license-trial-start').textContent = lic.trial_started_at ? new Date(lic.trial_started_at).toLocaleDateString() : '—';

@@ -4,6 +4,18 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.7.0 — Portal & License UI Improvements
+
+**Release date:** August 2026
+
+### Added
+- **License key display** — License page now shows the panel's license key
+
+### Changed
+- **Portal buttons** — Pause Time and Rates buttons now match Insert Coin button size with distinct colors
+
+---
+
 ## v1.6.2 — Critical Updater Fix
 
 **Release date:** August 2026

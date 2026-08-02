@@ -486,21 +486,53 @@
         }
         .paying-overlay.active { display: block; }
 
-        /* PAUSE / RESUME BUTTON */
+        /* PAUSE / RESUME BUTTON — same size as Insert Coin, orange color */
         .pause-resume-btn {
-            background: rgba(255,255,255,0.1);
-            color: #00d4ff;
-            border: 1px solid #00d4ff;
-            border-radius: 20px;
-            padding: 8px 20px;
-            font-size: 14px;
+            background: #f39c12;
+            color: #000;
+            border: none;
+            border-radius: 26px;
+            padding: 13px 34px;
+            font-size: 17px;
             font-weight: bold;
             cursor: pointer;
-            margin: 6px auto 0;
+            transition: 0.3s;
             display: none;
+            align-items: center;
+            gap: 8px;
+            margin: 6px auto 2px;
         }
-        .pause-resume-btn.active { display: inline-block; }
-        .pause-resume-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .pause-resume-btn:hover {
+            background: #e08e0b;
+            transform: scale(1.05);
+            box-shadow: 0 10px 40px rgba(243,156,18,0.5);
+        }
+        .pause-resume-btn:active { transform: scale(0.95); }
+        .pause-resume-btn.active { display: inline-flex; }
+        .pause-resume-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+        /* RATES BUTTON — same size as Insert Coin, teal color */
+        .rates-btn {
+            background: #00bcd4;
+            color: #000;
+            border: none;
+            border-radius: 26px;
+            padding: 13px 34px;
+            font-size: 17px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin: 6px auto 2px;
+        }
+        .rates-btn:hover {
+            background: #00a5bb;
+            transform: scale(1.05);
+            box-shadow: 0 10px 40px rgba(0,188,212,0.5);
+        }
+        .rates-btn:active { transform: scale(0.95); }
 
         /* PAUSED OVERLAY on timer card */
         .paused-overlay {
@@ -576,7 +608,7 @@
                 <button class="pause-resume-btn" id="pauseResumeBtn" onclick="togglePauseResume()">&#9208; Pause</button>
             </div>
             <div>
-                <button class="btn btn-primary" onclick="openRatesModal()">View Rates</button>
+                <button class="rates-btn" onclick="openRatesModal()">View Rates</button>
             </div>
         </div>
     </div>

@@ -48,7 +48,7 @@ A single-page command center. Monitor active sessions in real time, adjust prici
 Track your revenue with aggregated earnings summaries. View total earnings, coin counts, and session counts over any date range. All data is stored in PostgreSQL for reliable historical analysis.
 
 ### Over-the-Air Updates
-Stay current without touching the device. The built-in updater downloads new releases from Supabase Storage, verifies SHA256 integrity, and installs — all from the admin panel with a progress bar and self-recovery if anything goes wrong.
+Stay current without touching the device. The built-in updater downloads new releases, verifies SHA256 integrity, and installs — all from the admin panel with a progress bar and self-recovery if anything goes wrong.
 
 ### ZeroTier Remote Management
 Manage your hotspot from anywhere in the world. Join ZeroTier networks directly from the admin panel for secure, encrypted remote access — no port forwarding, no public IP, no hassle.
@@ -57,7 +57,7 @@ Manage your hotspot from anywhere in the world. Join ZeroTier networks directly 
 The system automatically detects your upstream internet interface and configures itself. Switch between DHCP and static modes, manage VLAN-based WAN tagging — all without editing config files.
 
 ### License System with Free Trial
-Every device starts with a **7-day free trial** — no account, no configuration. After that, Supabase-backed licensing keeps your deployment secure with hardware-ID binding, 24-hour heartbeat verification, and automatic lockdown for invalid licenses.
+Every device starts with a **7-day free trial** — no account, no configuration. After that, cloud-backed licensing keeps your deployment secure with hardware-ID binding, 24-hour heartbeat verification, and automatic lockdown for invalid licenses.
 
 ### Emergency Recovery
 One script restores your network if anything goes wrong. `aircoins-recover.sh` strips all VLANs and brings back the main interface — your hotspot is never down for long.
@@ -84,7 +84,7 @@ Sessions persist across reboots with soft-delete and cookie-based token backup. 
 
 ## Built With
 
-Go · lighttpd · dnsmasq · hostapd · Linux tc/htb · PostgreSQL · Supabase · WiringOP · ZeroTier
+Go · lighttpd · dnsmasq · hostapd · Linux tc/htb · PostgreSQL · WiringOP · ZeroTier
 
 ---
 

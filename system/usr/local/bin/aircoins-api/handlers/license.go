@@ -118,15 +118,34 @@ func (h *LicenseHandler) InitOrLoadLicense() error {
 		return fmt.Errorf("license: corrupt JSON in system_settings: %w", err)
 	}
 
+	// CRITICAL: Validate hardware identity on every load
+	liveHW := HardwareFingerprint()
+	if st.HardwareID != "" && st.HardwareID != liveHW {
+		log.Printf("license: HARDWARE MISMATCH — stored=%s live=%s — possible SD clone or hardware change", st.HardwareID, liveHW)
+		st.Status = "locked"
+		st.LastSupabaseError = fmt.Sprintf("Hardware mismatch (stored=%s, live=%s). License locked due to possible SD card clone.", st.HardwareID, liveHW)
+	} else if st.HardwareID == "" {
+		// No hardware ID stored (legacy state) — bind to current hardware
+		st.HardwareID = liveHW
+		log.Printf("license: binding to hardware_id=%s (was empty)", liveHW)
+	}
+
 	h.mu.Lock()
 	h.state = st
 	h.mu.Unlock()
+	h.saveState()
 	log.Printf("license: loaded state status=%s", st.Status)
 	return nil
 }
 
 // isLicenseValidLocked must be called with h.mu at least RLocked.
 func (h *LicenseHandler) isLicenseValidLocked() bool {
+	// Hardware identity check — prevents SD card clone bypass
+	liveHW := HardwareFingerprint()
+	if h.state.HardwareID != "" && h.state.HardwareID != liveHW {
+		return false
+	}
+
 	switch h.state.Status {
 	case "trial":
 		if time.Now().After(h.state.TrialExpiresAt) {
@@ -191,6 +210,18 @@ func (h *LicenseHandler) HeartbeatSupabase() error {
 	hwID := h.state.HardwareID
 	status := h.state.Status
 	h.mu.RUnlock()
+
+	// Validate hardware identity before heartbeat
+	liveHW := HardwareFingerprint()
+	if hwID != "" && hwID != liveHW {
+		log.Printf("license: hardware mismatch during heartbeat (stored=%s, live=%s) — skipping heartbeat", hwID, liveHW)
+		h.mu.Lock()
+		h.state.Status = "locked"
+		h.state.LastSupabaseError = fmt.Sprintf("Hardware mismatch during heartbeat (stored=%s, live=%s)", hwID, liveHW)
+		h.mu.Unlock()
+		h.saveState()
+		return fmt.Errorf("hardware mismatch")
+	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	now := time.Now().UTC()

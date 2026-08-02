@@ -74,6 +74,75 @@ func (h *AdminHandler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ChangePassword updates the password of the currently authenticated admin.
+// The account is resolved from the Bearer token, so a session can only ever
+// change its own password.
+func (h *AdminHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Resolve the admin from the token the AuthMiddleware already validated.
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	adminID, username, valid := ValidateToken(token)
+	if !valid {
+		sendJSON(w, http.StatusUnauthorized, models.APIResponse{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	var req models.ChangePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid request body"})
+		return
+	}
+
+	if req.CurrentPassword == "" || req.NewPassword == "" {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Current and new password are required"})
+		return
+	}
+	if len(req.NewPassword) < 6 {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "New password must be at least 6 characters"})
+		return
+	}
+
+	var currentHash string
+	err := h.DB.QueryRow("SELECT password_hash FROM admin_users WHERE id = $1", adminID).Scan(&currentHash)
+	if err == sql.ErrNoRows {
+		sendJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "Admin user not found"})
+		return
+	} else if err != nil {
+		log.Printf("Error fetching admin password hash: %v", err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Internal error"})
+		return
+	}
+
+	// Verify the current password. Use 400 (not 401) so the admin UI shows the
+	// error inline instead of treating it as an expired session and logging out.
+	if err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(req.CurrentPassword)); err != nil {
+		h.logAction("WARN", "admin", "Password change failed (wrong current password): "+username)
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Current password is incorrect"})
+		return
+	}
+
+	newHash, err := GeneratePasswordHash(req.NewPassword)
+	if err != nil {
+		log.Printf("Error hashing new password: %v", err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to hash password"})
+		return
+	}
+
+	_, err = h.DB.Exec("UPDATE admin_users SET password_hash = $1 WHERE id = $2", newHash, adminID)
+	if err != nil {
+		log.Printf("Error updating admin password: %v", err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to update password"})
+		return
+	}
+
+	h.logAction("INFO", "admin", "Admin password changed: "+username)
+	sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "Password changed successfully"})
+}
+
 // GetStats returns dashboard statistics
 func (h *AdminHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

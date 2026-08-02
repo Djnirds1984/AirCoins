@@ -99,6 +99,7 @@ func main() {
 
 	// ── Admin routes (license-gated + auth) ──────────────────────────────
 	mux.HandleFunc("/api/admin/login", adminHandler.Login) // no gate, no auth
+	mux.Handle("/api/admin/password", adminProtected(adminHandler.ChangePassword))
 	mux.Handle("/api/admin/stats", adminProtected(adminHandler.GetStats))
 	mux.Handle("/api/admin/sessions", adminProtected(adminHandler.GetSessions))
 	mux.Handle("/api/admin/sessions/", adminProtected(func(w http.ResponseWriter, r *http.Request) {

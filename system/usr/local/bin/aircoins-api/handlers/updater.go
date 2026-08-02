@@ -290,8 +290,10 @@ func (h *UpdaterHandler) PerformUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract to temp directory
-	tmpDir := "/tmp/aircoins-update"
+	// Extract to a staging directory under /opt/aircoins — NOT /tmp, because the
+	// service runs with PrivateTmp=true and the detached updater below runs
+	// outside our mount namespace, where our private /tmp does not exist.
+	tmpDir := "/opt/aircoins/updates/staging"
 	os.RemoveAll(tmpDir)
 	extractDir := tmpDir + "/extracted"
 	os.MkdirAll(extractDir, 0755)
@@ -337,53 +339,77 @@ func (h *UpdaterHandler) PerformUpdate(w http.ResponseWriter, r *http.Request) {
 	// Targeted file replacement — does NOT run install.sh (which destroys the system).
 	// Only copies binary, HTML, scripts, CGI, recovery, and changelog.
 	// Preserves: .env, database, systemd units, network config.
-	updateScript := fmt.Sprintf(`
-echo "=== AirCoins Update: $(date) ===" >> /tmp/aircoins-update.log
+	// The script redirects its own output, so the launcher below needs no pipes.
+	const updateLogPath = "/tmp/aircoins-update.log"
+	updateScript := fmt.Sprintf(`#!/bin/bash
+exec >> %s 2>&1
+echo "=== AirCoins Update: $(date) ==="
 DIR="%s"
+# Give the HTTP response time to reach the browser before we kill the API.
+sleep 2
 sudo systemctl stop aircoins-api 2>/dev/null
 sleep 1
 # Update binary
 if [ -f "$DIR/system/usr/local/bin/aircoins-api/aircoins-api" ]; then
     sudo cp "$DIR/system/usr/local/bin/aircoins-api/aircoins-api" /usr/local/bin/aircoins-api/aircoins-api
     sudo chmod +x /usr/local/bin/aircoins-api/aircoins-api
-    echo "Binary updated" >> /tmp/aircoins-update.log
+    echo "Binary updated"
 fi
 # Update HTML
 [ -f "$DIR/admin.html" ] && sudo cp "$DIR/admin.html" /var/www/html/admin.html
 [ -f "$DIR/index.html" ] && sudo cp "$DIR/index.html" /var/www/html/index.html
-echo "HTML updated" >> /tmp/aircoins-update.log
+echo "HTML updated"
 # Update scripts
 for s in gpio-coin-listener pisowifi-api-update pisowifi-ctl pisowifi-session-manager; do
     [ -f "$DIR/system/usr/local/bin/$s" ] && sudo cp "$DIR/system/usr/local/bin/$s" /usr/local/bin/$s && sudo chmod +x /usr/local/bin/$s
 done
-echo "Scripts updated" >> /tmp/aircoins-update.log
+echo "Scripts updated"
 # Update recovery
 [ -f "$DIR/aircoins-recover.sh" ] && sudo cp "$DIR/aircoins-recover.sh" /opt/aircoins/aircoins-recover.sh && sudo chmod +x /opt/aircoins/aircoins-recover.sh
 # Update CGI
 [ -d "$DIR/system/usr/lib/cgi-bin" ] && sudo cp "$DIR/system/usr/lib/cgi-bin/"* /usr/lib/cgi-bin/ 2>/dev/null && sudo chmod +x /usr/lib/cgi-bin/* 2>/dev/null
 # Update CHANGELOG
 [ -f "$DIR/CHANGELOG.md" ] && sudo cp "$DIR/CHANGELOG.md" /opt/aircoins/CHANGELOG.md
-# Restart services
-sudo systemctl start aircoins-api
+# Restart services with retry — a single start can lose a race with the stop
+for i in 1 2 3; do
+    sudo systemctl start aircoins-api && break
+    sleep 2
+done
 sleep 2
 sudo systemctl restart lighttpd
 sudo systemctl restart dnsmasq
 (sudo systemctl restart hostapd 2>/dev/null || true)
 sleep 2
-sudo systemctl status aircoins-api --no-pager >> /tmp/aircoins-update.log 2>&1
-sudo systemctl status lighttpd --no-pager >> /tmp/aircoins-update.log 2>&1
-# Clean up downloaded tarball
+sudo systemctl status aircoins-api --no-pager
+sudo systemctl status lighttpd --no-pager
+# Clean up downloaded tarball and staging files
 rm -f /opt/aircoins/updates/aircoins-v*.tar.gz
-echo "=== Update Complete: $(date) ===" >> /tmp/aircoins-update.log
-`, installDir)
-	updateCmd := exec.Command("bash", "-c", updateScript)
-	updateCmd.Dir = installDir
-	// Log output to a file for debugging
-	logFile, _ := os.Create("/tmp/aircoins-update.log")
-	updateCmd.Stdout = logFile
-	updateCmd.Stderr = logFile
-	// Start but don't wait — the server will be killed during restart
-	updateCmd.Start()
+rm -rf %s
+echo "=== Update Complete: $(date) ==="
+`, updateLogPath, installDir, tmpDir)
+
+	// The script must outlive us: its first real action is `systemctl stop
+	// aircoins-api`, which SIGTERMs every process in this unit's cgroup.
+	scriptPath := "/opt/aircoins/updates/do-update.sh"
+	if err := os.WriteFile(scriptPath, []byte(updateScript), 0755); err != nil {
+		log.Printf("updater: cannot write %s: %v", scriptPath, err)
+		return
+	}
+
+	// systemd-run puts the script in its own transient unit, so it lives outside
+	// our cgroup and survives the stop. setsid (new session, new process group)
+	// is the fallback when systemd-run is unavailable.
+	var updateCmd *exec.Cmd
+	if runner, err := exec.LookPath("systemd-run"); err == nil {
+		updateCmd = exec.Command(runner, "--unit=aircoins-update", "--collect",
+			"--no-block", "/bin/bash", scriptPath)
+	} else {
+		updateCmd = exec.Command("setsid", "bash", scriptPath)
+	}
+	// Start but don't wait — this process is about to be stopped.
+	if err := updateCmd.Start(); err != nil {
+		log.Printf("updater: cannot launch %s: %v", scriptPath, err)
+	}
 }
 
 // DeleteDownload removes downloaded update tarballs from /opt/aircoins/updates/.

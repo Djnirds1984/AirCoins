@@ -233,6 +233,11 @@ type LoginResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
 type StatsGroup struct {
 	Earnings float64 `json:"earnings"`
 	Coins    int     `json:"coins"`

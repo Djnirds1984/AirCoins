@@ -2136,6 +2136,33 @@
             <div style="text-align: right; margin-top: 12px;">
                 <button class="btn btn-success" onclick="saveAllSettings()">Save All Settings</button>
             </div>
+
+            <!-- Change Password Card -->
+            <div class="settings-card" style="max-width:640px;margin-top:24px;">
+                <div class="card-title" style="display:flex;align-items:center;gap:8px;">&#128274; Change Password</div>
+                <div class="settings-form">
+                    <div class="settings-row">
+                        <div class="settings-field">
+                            <label for="pw-current">Current Password</label>
+                            <input type="password" id="pw-current" autocomplete="current-password" placeholder="Current password">
+                        </div>
+                    </div>
+                    <div class="settings-row">
+                        <div class="settings-field">
+                            <label for="pw-new">New Password</label>
+                            <input type="password" id="pw-new" autocomplete="new-password" placeholder="At least 6 characters">
+                        </div>
+                        <div class="settings-field">
+                            <label for="pw-confirm">Confirm New Password</label>
+                            <input type="password" id="pw-confirm" autocomplete="new-password" placeholder="Re-type new password">
+                        </div>
+                    </div>
+                    <div class="settings-row" style="align-items:center;margin-top:8px;">
+                        <button class="btn btn-primary" onclick="changeAdminPassword()">Change Password</button>
+                    </div>
+                    <div id="pw-save-status" style="font-size:13px;min-height:18px;margin-top:4px;"></div>
+                </div>
+            </div>
         </div>
 
         <!-- System Section -->
@@ -4141,6 +4168,45 @@ async function saveGpioConfig() {
 async function saveAllSettings() {
     await saveWANSettings();
     await saveGpioConfig();
+}
+
+// ============================================================
+// CHANGE PASSWORD
+// ============================================================
+async function changeAdminPassword() {
+    var currentPw = document.getElementById('pw-current').value;
+    var newPw = document.getElementById('pw-new').value;
+    var confirmPw = document.getElementById('pw-confirm').value;
+    var statusEl = document.getElementById('pw-save-status');
+
+    function fail(msg) {
+        statusEl.textContent = msg;
+        statusEl.style.color = '#f44336';
+        showNotification(msg, 'error');
+    }
+
+    if (!currentPw || !newPw || !confirmPw) { fail('All password fields are required'); return; }
+    if (newPw.length < 6) { fail('New password must be at least 6 characters'); return; }
+    if (newPw !== confirmPw) { fail('New passwords do not match'); return; }
+    if (newPw === currentPw) { fail('New password must be different from the current one'); return; }
+
+    statusEl.textContent = 'Saving…';
+    statusEl.style.color = '#aaa';
+
+    try {
+        var res = await apiCall('POST', '/admin/password', {
+            current_password: currentPw,
+            new_password: newPw
+        });
+        statusEl.textContent = (res && res.message) ? res.message : 'Password changed successfully';
+        statusEl.style.color = '#4caf50';
+        document.getElementById('pw-current').value = '';
+        document.getElementById('pw-new').value = '';
+        document.getElementById('pw-confirm').value = '';
+        showNotification('Password changed successfully', 'success');
+    } catch (e) {
+        fail('Error: ' + e.message);
+    }
 }
 
 // ============================================================

@@ -4,6 +4,20 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.9.0 — Updater Self-Recovery + Change Password
+
+**Release date:** August 2026
+
+### Fixed
+- **Updater kills itself during install** — update script now runs in its own systemd transient unit (`systemd-run`), completely outside the API's cgroup. `systemctl stop aircoins-api` no longer kills the update process.
+- **Services not restarting after update** — retry logic added for service restart, all services (aircoins-api, lighttpd, dnsmasq, hostapd) reliably restart
+- **Staging directory visibility** — moved from /tmp (private namespace) to /opt/aircoins/updates/staging for cross-unit access
+
+### Added
+- **Change Password** — new card on Settings page to change admin password (current password verification, min 6 chars)
+
+---
+
 ## v1.8.2 — UTF-8 BOM Fix
 
 **Release date:** August 2026

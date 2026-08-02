@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,26 +15,20 @@ import (
 	"time"
 )
 
-// UpdaterHandler caches GitHub release lookups to avoid hammering the API.
+// UpdaterHandler caches Supabase manifest lookups to avoid hammering the API.
 type UpdaterHandler struct {
 	mu       sync.RWMutex
 	cachedAt time.Time
-	cached   *releaseInfo
+	cached   *updateManifest
 	client   *http.Client
 }
 
-type releaseAsset struct {
-	Name               string `json:"name"`
-	BrowserDownloadURL string `json:"browser_download_url"`
-}
-
-type releaseInfo struct {
-	TagName     string         `json:"tag_name"`
-	Name        string         `json:"name"`
-	Body        string         `json:"body"`
-	HTMLURL     string         `json:"html_url"`
-	PublishedAt string         `json:"published_at"`
-	Assets      []releaseAsset `json:"assets"`
+type updateManifest struct {
+	Version      string `json:"version"`
+	ReleasedAt   string `json:"released_at"`
+	ReleaseNotes string `json:"release_notes"`
+	Tarball      string `json:"tarball"`
+	SHA256       string `json:"sha256"`
 }
 
 // NewUpdaterHandler creates an UpdaterHandler with a 10-second HTTP client.
@@ -42,34 +38,30 @@ func NewUpdaterHandler() *UpdaterHandler {
 	}
 }
 
-// fetchLatest returns the latest release info, using the cache when possible.
-// If force is true the cache is bypassed.
-func (h *UpdaterHandler) fetchLatest(force bool) (*releaseInfo, error) {
+// fetchLatest returns the latest update manifest from Supabase Storage,
+// using the cache when possible. If force is true the cache is bypassed.
+func (h *UpdaterHandler) fetchLatest(force bool) (*updateManifest, error) {
 	// Check cache (unless forced refresh)
 	h.mu.RLock()
 	if !force && h.cached != nil && time.Since(h.cachedAt) < 1*time.Hour {
-		release := *h.cached
+		manifest := *h.cached
 		h.mu.RUnlock()
-		return &release, nil
+		return &manifest, nil
 	}
 	h.mu.RUnlock()
 
-	// Fetch latest release from GitHub
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/Djnirds1984/AirCoins/releases/latest", nil)
-	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "AirCoins-Updater")
-
-	// Add authentication token if available (required for private repos)
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	supabaseURL := os.Getenv("SUPABASE_URL")
+	if supabaseURL == "" {
+		return nil, fmt.Errorf("SUPABASE_URL not set")
 	}
 
-	resp, err := h.client.Do(req)
+	manifestURL := fmt.Sprintf("%s/storage/v1/object/public/aircoins/manifest.json", supabaseURL)
+
+	// Use a 5-second timeout client for manifest fetch
+	manifestClient := &http.Client{Timeout: 5 * time.Second}
+	resp, err := manifestClient.Get(manifestURL)
 	if err != nil {
-		return nil, fmt.Errorf("fetch release: %w", err)
+		return nil, fmt.Errorf("fetch manifest: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -78,21 +70,21 @@ func (h *UpdaterHandler) fetchLatest(force bool) (*releaseInfo, error) {
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	var release releaseInfo
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, fmt.Errorf("decode release: %w", err)
+	var manifest updateManifest
+	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
+		return nil, fmt.Errorf("decode manifest: %w", err)
 	}
 
 	// Update cache
 	h.mu.Lock()
-	h.cached = &release
+	h.cached = &manifest
 	h.cachedAt = time.Now()
 	h.mu.Unlock()
 
-	return &release, nil
+	return &manifest, nil
 }
 
-// CheckForUpdate queries the latest GitHub release and compares versions.
+// CheckForUpdate queries the latest Supabase manifest and compares versions.
 func (h *UpdaterHandler) CheckForUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -101,7 +93,7 @@ func (h *UpdaterHandler) CheckForUpdate(w http.ResponseWriter, r *http.Request) 
 
 	force := r.URL.Query().Get("force") == "true"
 
-	release, err := h.fetchLatest(force)
+	manifest, err := h.fetchLatest(force)
 	if err != nil {
 		sendJSON(w, 200, map[string]interface{}{
 			"current_version":  apiVersion,
@@ -111,57 +103,45 @@ func (h *UpdaterHandler) CheckForUpdate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	updateAvailable := compareSemver(apiVersion, release.TagName) < 0
+	updateAvailable := compareSemver(apiVersion, manifest.Version) < 0
 
 	sendJSON(w, 200, map[string]interface{}{
 		"current_version":  apiVersion,
-		"latest_version":   release.TagName,
+		"latest_version":   manifest.Version,
 		"update_available": updateAvailable,
-		"release_url":      release.HTMLURL,
-		"release_notes":    release.Body,
-		"published_at":     release.PublishedAt,
+		"release_notes":    manifest.ReleaseNotes,
+		"published_at":     manifest.ReleasedAt,
 		"checked_at":       time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
-// PerformUpdate downloads the latest release, extracts it, and performs targeted file replacement.
-func (h *UpdaterHandler) PerformUpdate(w http.ResponseWriter, r *http.Request) {
+// DownloadUpdate fetches the manifest, downloads the tarball from Supabase
+// Storage, verifies its SHA256, and saves it to /opt/aircoins/updates/.
+func (h *UpdaterHandler) DownloadUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Get the latest release info (use cached or fetch fresh)
-	release, err := h.fetchLatest(false)
+	// Get manifest for tarball URL
+	manifest, err := h.fetchLatest(false)
 	if err != nil {
 		sendJSON(w, http.StatusOK, map[string]interface{}{
-			"success": false, "message": "Cannot fetch release info: " + err.Error(),
+			"success": false, "message": "Cannot fetch manifest: " + err.Error(),
 		})
 		return
 	}
 
-	// Find the .tar.gz asset
-	var downloadURL string
-	for _, a := range release.Assets {
-		if strings.HasSuffix(a.Name, ".tar.gz") {
-			downloadURL = a.BrowserDownloadURL
-			break
-		}
-	}
-	if downloadURL == "" {
-		sendJSON(w, http.StatusOK, map[string]interface{}{
-			"success": false, "message": "No .tar.gz asset found in release",
-		})
-		return
-	}
+	// Create download directory
+	os.MkdirAll("/opt/aircoins/updates", 0755)
 
-	// Download the tarball
-	tmpDir := "/tmp/aircoins-update"
-	os.RemoveAll(tmpDir)
-	os.MkdirAll(tmpDir, 0755)
+	// Construct full download URL
+	supabaseURL := os.Getenv("SUPABASE_URL")
+	downloadURL := fmt.Sprintf("%s/storage/v1/object/public/aircoins/%s", supabaseURL, manifest.Tarball)
 
-	tarballPath := tmpDir + "/release.tar.gz"
-	resp, err := h.client.Get(downloadURL)
+	// Use a separate client with 5-minute timeout for large downloads
+	dlClient := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := dlClient.Get(downloadURL)
 	if err != nil {
 		sendJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false, "message": "Download failed: " + err.Error(),
@@ -170,38 +150,140 @@ func (h *UpdaterHandler) PerformUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		sendJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false, "message": fmt.Sprintf("Download returned status %d", resp.StatusCode),
 		})
 		return
 	}
 
-	outFile, err := os.Create(tarballPath)
+	filename := fmt.Sprintf("aircoins-v%s.tar.gz", strings.TrimPrefix(manifest.Version, "v"))
+	filePath := "/opt/aircoins/updates/" + filename
+
+	outFile, err := os.Create(filePath)
 	if err != nil {
 		sendJSON(w, http.StatusOK, map[string]interface{}{
-			"success": false, "message": "Cannot create temp file: " + err.Error(),
+			"success": false, "message": "Cannot create file: " + err.Error(),
 		})
 		return
 	}
-	io.Copy(outFile, resp.Body)
-	outFile.Close()
+	defer outFile.Close()
 
-	// Extract
+	// Stream download to file
+	if _, err := io.Copy(outFile, resp.Body); err != nil {
+		sendJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false, "message": "Failed writing file: " + err.Error(),
+		})
+		return
+	}
+
+	// Verify SHA256 after download
+	downloadedFile, err := os.ReadFile(filePath)
+	if err != nil {
+		sendJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false, "message": "Cannot read downloaded file for verification: " + err.Error(),
+		})
+		return
+	}
+	hash := sha256.Sum256(downloadedFile)
+	actualSHA := hex.EncodeToString(hash[:])
+
+	if manifest.SHA256 != "" && actualSHA != manifest.SHA256 {
+		os.Remove(filePath)
+		sendJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("SHA256 mismatch: expected %s, got %s", manifest.SHA256, actualSHA),
+		})
+		return
+	}
+
+	// Return success JSON
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"success":  true,
+		"message":  "Download complete",
+		"version":  manifest.Version,
+		"filename": filename,
+	})
+}
+
+// CheckDownloadedFile checks if a downloaded update tarball exists in
+// /opt/aircoins/updates/ and returns its metadata.
+func (h *UpdaterHandler) CheckDownloadedFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	updateDir := "/opt/aircoins/updates"
+	entries, err := os.ReadDir(updateDir)
+	if err != nil {
+		sendJSON(w, http.StatusOK, map[string]interface{}{
+			"found": false,
+		})
+		return
+	}
+
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "aircoins-v") && strings.HasSuffix(e.Name(), ".tar.gz") {
+			info, _ := e.Info()
+			// Extract version from filename: "aircoins-v1.8.0.tar.gz" -> "v1.8.0"
+			version := strings.TrimPrefix(strings.TrimSuffix(e.Name(), ".tar.gz"), "aircoins-")
+			sendJSON(w, http.StatusOK, map[string]interface{}{
+				"found":    true,
+				"filename": e.Name(),
+				"version":  version,
+				"size":     info.Size(),
+			})
+			return
+		}
+	}
+
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"found": false,
+	})
+}
+
+// PerformUpdate installs from a previously downloaded local tarball file.
+func (h *UpdaterHandler) PerformUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Find the downloaded tarball in /opt/aircoins/updates/
+	updateDir := "/opt/aircoins/updates"
+	entries, _ := os.ReadDir(updateDir)
+	var tarballPath string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "aircoins-v") && strings.HasSuffix(e.Name(), ".tar.gz") {
+			tarballPath = updateDir + "/" + e.Name()
+			break
+		}
+	}
+	if tarballPath == "" {
+		sendJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false, "message": "No downloaded update file found. Please download first.",
+		})
+		return
+	}
+
+	// Extract to temp directory
+	tmpDir := "/tmp/aircoins-update"
+	os.RemoveAll(tmpDir)
 	extractDir := tmpDir + "/extracted"
 	os.MkdirAll(extractDir, 0755)
-	cmd := exec.Command("tar", "-xzf", tarballPath, "-C", extractDir)
-	if output, err := cmd.CombinedOutput(); err != nil {
+	extractCmd := exec.Command("tar", "-xzf", tarballPath, "-C", extractDir)
+	if output, err := extractCmd.CombinedOutput(); err != nil {
 		sendJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false, "message": "Extract failed: " + string(output),
 		})
 		return
 	}
 
-	// Find the extracted directory (e.g., /tmp/aircoins-update/extracted/aircoins-v1.2.0/)
-	entries, _ := os.ReadDir(extractDir)
+	// Find extracted directory
+	dirEntries, _ := os.ReadDir(extractDir)
 	var installDir string
-	for _, e := range entries {
+	for _, e := range dirEntries {
 		if e.IsDir() {
 			installDir = extractDir + "/" + e.Name()
 			break
@@ -214,16 +296,11 @@ func (h *UpdaterHandler) PerformUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// === CRITICAL FIX ===
-	// Send success response BEFORE running the update, because the update
-	// will kill this server when it restarts the aircoins-api service.
+	// Send response BEFORE install (install kills the server)
 	sendJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
-		"message": "Update downloaded and extracted. Installing now...",
-		"version": release.TagName,
+		"message": "Installing update...",
 	})
-
-	// Flush the response to ensure it's sent to the client immediately
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
@@ -272,6 +349,8 @@ sudo systemctl restart dnsmasq
 sleep 2
 sudo systemctl status aircoins-api --no-pager >> /tmp/aircoins-update.log 2>&1
 sudo systemctl status lighttpd --no-pager >> /tmp/aircoins-update.log 2>&1
+# Clean up downloaded tarball
+rm -f /opt/aircoins/updates/aircoins-v*.tar.gz
 echo "=== Update Complete: $(date) ===" >> /tmp/aircoins-update.log
 `, installDir)
 	updateCmd := exec.Command("bash", "-c", updateScript)
@@ -282,6 +361,29 @@ echo "=== Update Complete: $(date) ===" >> /tmp/aircoins-update.log
 	updateCmd.Stderr = logFile
 	// Start but don't wait — the server will be killed during restart
 	updateCmd.Start()
+}
+
+// DeleteDownload removes downloaded update tarballs from /opt/aircoins/updates/.
+func (h *UpdaterHandler) DeleteDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	updateDir := "/opt/aircoins/updates"
+	entries, _ := os.ReadDir(updateDir)
+	deleted := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "aircoins-v") && strings.HasSuffix(e.Name(), ".tar.gz") {
+			os.Remove(updateDir + "/" + e.Name())
+			deleted++
+		}
+	}
+
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Deleted %d file(s)", deleted),
+	})
 }
 
 // compareSemver compares two semantic version strings.

@@ -2418,7 +2418,19 @@
         </div>
         <div style="margin-top:16px; text-align:center;">
             <button id="btn-check-update" onclick="loadUpdater()" style="padding:10px 24px; border-radius:8px; border:none; background:#00bcd4; color:#fff; cursor:pointer; font-size:14px;">Check for Updates</button>
-            <button id="btn-update" onclick="performUpdate()" style="display:none; padding:10px 24px; border-radius:8px; border:none; background:#f39c12; color:#fff; cursor:pointer; font-size:14px; font-weight:600; margin-left:8px;">⬆ Update Now</button>
+            <button id="btn-download" onclick="downloadUpdate()" style="display:none; padding:10px 24px; border-radius:8px; border:none; background:#2196f3; color:#fff; cursor:pointer; font-size:14px; font-weight:600; margin-right:8px;">⬇ Download Update</button>
+            <button id="btn-install" onclick="installUpdate()" disabled style="display:none; padding:10px 24px; border-radius:8px; border:none; background:#4caf50; color:#fff; cursor:pointer; font-size:14px; font-weight:600; opacity:0.5;">⚡ Install Update</button>
+        </div>
+        <div id="update-progress" style="display:none; margin-top:16px; max-width:500px;">
+            <div style="background:#1a1a2e; border-radius:8px; overflow:hidden; height:24px; position:relative;">
+                <div id="update-progress-bar" style="height:100%; background:linear-gradient(90deg, #2196f3, #00bcd4); width:0%; transition:width 0.3s ease; border-radius:8px;"></div>
+            </div>
+            <div id="update-progress-text" style="color:#888; font-size:12px; margin-top:6px; text-align:center;"></div>
+        </div>
+        <div id="downloaded-file-info" style="display:none; margin-top:12px; padding:10px 16px; background:rgba(76,175,80,0.1); border:1px solid rgba(76,175,80,0.3); border-radius:8px;">
+            <span style="color:#4caf50;">✓</span> <span id="downloaded-filename" style="color:#ccc; font-family:monospace; font-size:12px;"></span>
+            <span id="downloaded-version" style="color:#00bcd4; margin-left:8px;"></span>
+            <a href="#" onclick="deleteDownload()" style="color:#f44336; font-size:12px; margin-left:12px; text-decoration:none;">✕ Delete</a>
         </div>
     </div>
 </div>
@@ -5534,6 +5546,7 @@ async function loadUpdater() {
     try {
         var data = await apiCall('GET', '/admin/updater/check');
         updateUpdaterUI(data);
+        checkDownloadedFile();
     } catch (e) {
         el.innerHTML = '<div style="padding:20px; color:#f44336;">Failed to check: ' + escapeHtml(e.message) + '</div>';
     }
@@ -5580,55 +5593,143 @@ function updateUpdaterUI(data) {
     }
     html += '</div>';
     el.innerHTML = html;
-    // Show/hide Update Now button
-    var updateBtn = document.getElementById('btn-update');
-    if (updateBtn) {
-        updateBtn.style.display = data.update_available ? 'inline-block' : 'none';
+    // Show/hide Download and Install buttons
+    var dlBtn = document.getElementById('btn-download');
+    var installBtn = document.getElementById('btn-install');
+    if (data.update_available) {
+        if (dlBtn) dlBtn.style.display = 'inline-block';
+        if (installBtn) installBtn.style.display = 'inline-block';
+    } else {
+        if (dlBtn) dlBtn.style.display = 'none';
+        if (installBtn) installBtn.style.display = 'none';
+    }
+    checkDownloadedFile();
+}
+
+async function downloadUpdate() {
+    var btn = document.getElementById('btn-download');
+    var progressBar = document.getElementById('update-progress-bar');
+    var progressText = document.getElementById('update-progress-text');
+    var progress = document.getElementById('update-progress');
+
+    if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Downloading...'; btn.style.background = '#666'; }
+    if (progress) progress.style.display = 'block';
+    if (progressBar) progressBar.style.width = '50%';
+    if (progressText) progressText.textContent = 'Downloading update...';
+
+    try {
+        var data = await apiCall('POST', '/admin/updater/download');
+        if (data.success) {
+            if (progressBar) progressBar.style.width = '100%';
+            if (progressText) progressText.textContent = '✓ Download complete — ready to install';
+            showNotification('Download complete: ' + (data.version || ''), 'success');
+            // Enable install button
+            var installBtn = document.getElementById('btn-install');
+            if (installBtn) { installBtn.disabled = false; installBtn.style.opacity = '1'; installBtn.style.display = 'inline-block'; }
+            // Show file info
+            var fileInfo = document.getElementById('downloaded-file-info');
+            if (fileInfo) { fileInfo.style.display = 'block'; }
+            var fn = document.getElementById('downloaded-filename');
+            if (fn) fn.textContent = data.filename || '';
+            var ver = document.getElementById('downloaded-version');
+            if (ver) ver.textContent = data.version || '';
+            // Disable download button
+            if (btn) { btn.disabled = true; btn.innerHTML = '✓ Downloaded'; }
+        } else {
+            showNotification('Download failed: ' + (data.message || 'Unknown error'), 'error');
+            if (btn) { btn.disabled = false; btn.innerHTML = '⬇ Download Update'; btn.style.background = '#2196f3'; }
+            if (progressBar) progressBar.style.width = '0%';
+            if (progressText) progressText.textContent = 'Download failed';
+        }
+    } catch (e) {
+        showNotification('Download failed: ' + e.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerHTML = '⬇ Download Update'; btn.style.background = '#2196f3'; }
+        if (progress) progress.style.display = 'none';
     }
 }
 
-async function performUpdate() {
-    if (!confirm('This will download and install the latest update. The system will restart. Continue?')) return;
+async function installUpdate() {
+    if (!confirm('This will install the downloaded update. The system will restart. Continue?')) return;
 
-    var btn = document.getElementById('btn-update');
-    var originalText = btn ? btn.innerHTML : '';
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '⏳ Updating...';
-        btn.style.background = '#666';
-    }
+    var btn = document.getElementById('btn-install');
+    var progressBar = document.getElementById('update-progress-bar');
+    var progressText = document.getElementById('update-progress-text');
+    var progress = document.getElementById('update-progress');
+
+    if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Installing...'; btn.style.background = '#666'; }
+    if (progress) progress.style.display = 'block';
+    if (progressBar) progressBar.style.width = '75%';
+    if (progressText) progressText.textContent = 'Installing update...';
 
     try {
         var data = await apiCall('POST', '/admin/updater/update');
         if (data.success) {
-            showNotification('Update installed! ' + (data.version || '') + ' — Service is restarting. Page will reload in 30 seconds.', 'success');
-            // Show success message and changelog in the updater section
-            var section = document.getElementById('section-updater');
-            if (section) {
-                var successDiv = document.createElement('div');
-                successDiv.className = 'card';
-                successDiv.style.cssText = 'max-width:700px; margin-top:16px; border-left:4px solid #4caf50;';
-                successDiv.innerHTML = '<h3 style="color:#4caf50; margin-bottom:12px;">Update Successful!</h3>' +
-                    '<p>Updated to <strong>' + escapeHtml(data.version || 'latest') + '</strong></p>' +
-                    '<p style="color:#888; margin-top:8px;">Service is restarting. This page will reload automatically.</p>';
-                section.insertBefore(successDiv, section.firstChild);
-            }
+            if (progressBar) { progressBar.style.width = '100%'; progressBar.style.background = 'linear-gradient(90deg, #4caf50, #8bc34a)'; }
+            if (progressText) progressText.textContent = '✓ Update complete — restarting services...';
+            showNotification('Update installed! Service is restarting. Page will reload in 30 seconds.', 'success');
             setTimeout(function() { location.reload(); }, 30000);
         } else {
-            showNotification('Update failed: ' + (data.message || 'Unknown error'), 'error');
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = originalText;
-                btn.style.background = '#f39c12';
-            }
+            showNotification('Install failed: ' + (data.message || 'Unknown error'), 'error');
+            if (btn) { btn.disabled = false; btn.innerHTML = '⚡ Install Update'; btn.style.background = '#4caf50'; }
+            if (progressText) progressText.textContent = 'Install failed';
         }
     } catch (e) {
-        showNotification('Update request failed: ' + e.message, 'error');
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-            btn.style.background = '#f39c12';
+        showNotification('Install failed: ' + e.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerHTML = '⚡ Install Update'; btn.style.background = '#4caf50'; }
+    }
+}
+
+async function deleteDownload() {
+    if (!confirm('Delete the downloaded update file?')) return;
+    try {
+        var data = await apiCall('DELETE', '/admin/updater/download');
+        if (data.success) {
+            showNotification('Downloaded file deleted', 'success');
+            // Hide file info
+            var fileInfo = document.getElementById('downloaded-file-info');
+            if (fileInfo) fileInfo.style.display = 'none';
+            // Disable install button
+            var installBtn = document.getElementById('btn-install');
+            if (installBtn) { installBtn.disabled = true; installBtn.style.opacity = '0.5'; }
+            // Re-enable download button
+            var dlBtn = document.getElementById('btn-download');
+            if (dlBtn) { dlBtn.disabled = false; dlBtn.innerHTML = '⬇ Download Update'; dlBtn.style.background = '#2196f3'; }
+            // Hide progress
+            var progress = document.getElementById('update-progress');
+            if (progress) progress.style.display = 'none';
         }
+    } catch (e) {
+        showNotification('Delete failed: ' + e.message, 'error');
+    }
+}
+
+async function checkDownloadedFile() {
+    try {
+        var data = await apiCall('GET', '/admin/updater/downloaded');
+        if (data.found) {
+            // Show file info
+            var fileInfo = document.getElementById('downloaded-file-info');
+            if (fileInfo) fileInfo.style.display = 'block';
+            var fn = document.getElementById('downloaded-filename');
+            if (fn) fn.textContent = data.filename;
+            var ver = document.getElementById('downloaded-version');
+            if (ver) ver.textContent = data.version;
+            // Enable install button
+            var installBtn = document.getElementById('btn-install');
+            if (installBtn) { installBtn.style.display = 'inline-block'; installBtn.disabled = false; installBtn.style.opacity = '1'; }
+            // Disable download button (already downloaded)
+            var dlBtn = document.getElementById('btn-download');
+            if (dlBtn) { dlBtn.disabled = true; dlBtn.innerHTML = '✓ Downloaded'; }
+            // Show progress as complete
+            var progress = document.getElementById('update-progress');
+            if (progress) progress.style.display = 'block';
+            var bar = document.getElementById('update-progress-bar');
+            if (bar) bar.style.width = '100%';
+            var text = document.getElementById('update-progress-text');
+            if (text) text.textContent = '✓ Downloaded — ready to install';
+        }
+    } catch (e) {
+        // Silently fail — file check is not critical
     }
 }
 </script>

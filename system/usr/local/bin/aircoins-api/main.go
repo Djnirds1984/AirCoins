@@ -240,10 +240,22 @@ func main() {
 	// without a Bearer token).
 	mux.HandleFunc("/audio/", audioHandler.Serve)
 
-	// Updater route (check for new AirCoins releases on GitHub)
+	// Updater routes (check/download/install/delete updates from Supabase Storage)
 	updaterHandler := handlers.NewUpdaterHandler()
 	mux.Handle("/api/admin/updater/check", adminProtected(updaterHandler.CheckForUpdate))
 	mux.Handle("/api/admin/updater/update", adminProtected(updaterHandler.PerformUpdate))
+	downloadRouter := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			updaterHandler.DownloadUpdate(w, r)
+		case http.MethodDelete:
+			updaterHandler.DeleteDownload(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.Handle("/api/admin/updater/download", adminProtected(downloadRouter))
+	mux.Handle("/api/admin/updater/downloaded", adminProtected(updaterHandler.CheckDownloadedFile))
 
 	// Health check
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {

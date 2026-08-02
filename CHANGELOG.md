@@ -4,6 +4,28 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.8.0 — Supabase Storage Updater
+
+**Release date:** August 2026
+
+### Added
+- **Two-step update flow** — separate Download and Install buttons for safer updates
+- **Progress bar** — visual status indicator during download and installation
+- **Supabase Storage integration** — updater now uses Supabase Storage instead of GitHub Releases
+- **publish-release.sh** — new script to upload releases to Supabase Storage bucket
+
+### Changed
+- **Updater backend** — refactored to fetch manifest.json from Supabase Storage (public bucket, no auth needed)
+- **Install from local file** — PerformUpdate now installs from pre-downloaded tarball in /opt/aircoins/updates/
+- **SHA256 verification** — downloaded tarballs are verified against manifest checksum
+- **5-minute download timeout** — fixed 10-second timeout that was too short for large files
+
+### Removed
+- **GitHub Releases dependency** — no longer uses GitHub API for update checks
+- **GITHUB_TOKEN** — deprecated in favor of Supabase Storage
+
+---
+
 ## v1.7.0 — Portal & License UI Improvements
 
 **Release date:** August 2026

@@ -6,6 +6,9 @@
     <title>AirCoins Admin</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        select {
+            color-scheme: dark;
+        }
         select option {
             background: #1a1a2e;
             color: #e0e0e0;
@@ -371,8 +374,7 @@
                     text-transform: uppercase;
                     letter-spacing: 0.5px;
                 }
-                .settings-field input,
-                .settings-field select {
+                .settings-field input {
                     padding: 10px 14px;
                     border: 1px solid rgba(255,255,255,0.15);
                     border-radius: 10px;
@@ -381,20 +383,26 @@
                     font-size: 14px;
                     transition: border-color 0.2s;
                 }
+                .settings-field select {
+                    padding: 10px 36px 10px 14px;
+                    border: 1px solid rgba(255,255,255,0.15);
+                    border-radius: 10px;
+                    background: #1a1a2e;
+                    color: #e0e0e0;
+                    font-size: 14px;
+                    transition: border-color 0.2s;
+                    -webkit-appearance: none;
+                    appearance: none;
+                    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23e0e0e0' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+                    background-repeat: no-repeat;
+                    background-position: right 12px center;
+                }
                 .settings-field input:focus,
                 .settings-field select:focus {
                     outline: none;
                     border-color: #00d4ff;
                 }
                 .settings-field input::placeholder { color: #555; }
-                .settings-field select option {
-                    background: #1a1a2e;
-                    color: #fff;
-                }
-                .settings-field select optgroup {
-                    color: #00d4ff;
-                    font-weight: 600;
-                }
                 .gpio-info-text {
                     font-size: 13px;
                     color: #aaa;
@@ -625,8 +633,7 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        .filter-bar .form-group input,
-        .filter-bar .form-group select {
+        .filter-bar .form-group input {
             padding: 8px 12px;
             border: 1px solid rgba(255,255,255,0.15);
             border-radius: 10px;
@@ -636,12 +643,26 @@
             width: 150px;
             transition: border-color 0.2s;
         }
+        .filter-bar .form-group select {
+            padding: 8px 36px 8px 12px;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 10px;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-size: 13px;
+            width: 150px;
+            transition: border-color 0.2s;
+            -webkit-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23e0e0e0' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+        }
         .filter-bar .form-group input:focus,
         .filter-bar .form-group select:focus {
             outline: none;
             border-color: #00d4ff;
         }
-        .filter-bar .form-group select option { background: #1a1a2e; color: #fff; }
         .filter-bar .form-group input::placeholder { color: #555; }
         .pagination-bar {
             display: flex;
@@ -658,14 +679,18 @@
             align-items: center;
         }
         .pagination-controls select {
-            padding: 6px 10px;
+            padding: 6px 32px 6px 10px;
             border: 1px solid rgba(255,255,255,0.15);
             border-radius: 8px;
-            background: rgba(255,255,255,0.05);
-            color: #fff;
+            background: #1a1a2e;
+            color: #e0e0e0;
             font-size: 13px;
+            -webkit-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23e0e0e0' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
         }
-        .pagination-controls select option { background: #1a1a2e; color: #fff; }
         .status-badge {
             display: inline-block;
             padding: 3px 10px;
@@ -868,7 +893,21 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        .log-filter-bar .form-group select,
+        .log-filter-bar .form-group select {
+            padding: 7px 34px 7px 11px;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 10px;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-size: 13px;
+            width: 140px;
+            transition: border-color 0.2s;
+            -webkit-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23e0e0e0' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 11px center;
+        }
         .log-filter-bar .form-group input {
             padding: 7px 11px;
             border: 1px solid rgba(255,255,255,0.15);
@@ -884,7 +923,6 @@
             outline: none;
             border-color: #00d4ff;
         }
-        .log-filter-bar .form-group select option { background: #1a1a2e; color: #fff; }
         .log-filter-bar .form-group input::placeholder { color: #555; }
         .log-entries {
             max-height: 500px;
@@ -1250,7 +1288,8 @@
         .vlan-form .form-row { display: flex; gap: 15px; margin-bottom: 15px; }
         .vlan-form .form-group { flex: 1; }
         .vlan-form label { display: block; margin-bottom: 5px; color: #aaa; font-size: 0.85em; }
-        .vlan-form input, .vlan-form select { width: 100%; padding: 8px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: #fff; }
+        .vlan-form input { width: 100%; padding: 8px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: #fff; }
+        .vlan-form select { width: 100%; padding: 8px 32px 8px 12px; background: #1a1a2e; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: #e0e0e0; -webkit-appearance: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23e0e0e0' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
         .iface-badge { display: inline-block; padding: 4px 12px; margin: 4px; border-radius: 12px; font-size: 0.85em; }
         .iface-up { background: rgba(0,255,136,0.15); color: #00ff88; border: 1px solid rgba(0,255,136,0.3); }
         .iface-down { background: rgba(255,68,68,0.15); color: #ff4444; border: 1px solid rgba(255,68,68,0.3); }
@@ -5975,7 +6014,7 @@ function renderBridgeMembers(bridges) {
             (memberTags || '<span style="color:#555;font-size:0.85em;">No members</span>') +
             '</div>' +
             '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
-            '<select id="bridge-add-member-' + b.name + '" style="padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:#fff;font-size:0.85em;min-width:140px;">' +
+            '<select id="bridge-add-member-' + b.name + '" style="padding:6px 32px 6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:#1a1a2e;color:#e0e0e0;color-scheme:dark;font-size:0.85em;min-width:140px;appearance:none;-webkit-appearance:none;background-image:url(data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2712%27%20height=%2712%27%20viewBox=%270%200%2012%2012%27%3E%3Cpath%20fill=%27%23e0e0e0%27%20d=%27M6%208L1%203h10z%27/%3E%3C/svg%3E);background-repeat:no-repeat;background-position:right%208px%20center;">' +
             '<option value="">Select VLAN…</option>' +
             vlanOpts +
             '</select>' +

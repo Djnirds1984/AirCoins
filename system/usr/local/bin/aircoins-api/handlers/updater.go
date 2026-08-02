@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -50,12 +51,13 @@ func (h *UpdaterHandler) fetchLatest(force bool) (*updateManifest, error) {
 	}
 	h.mu.RUnlock()
 
-	supabaseURL := os.Getenv("SUPABASE_URL")
+	supabaseURL := strings.TrimRight(os.Getenv("SUPABASE_URL"), "/")
 	if supabaseURL == "" {
 		return nil, fmt.Errorf("SUPABASE_URL not set")
 	}
 
 	manifestURL := fmt.Sprintf("%s/storage/v1/object/public/aircoins/manifest.json", supabaseURL)
+	log.Printf("[updater] fetching manifest: %s", manifestURL)
 
 	// Use a 5-second timeout client for manifest fetch
 	manifestClient := &http.Client{Timeout: 5 * time.Second}
@@ -67,7 +69,8 @@ func (h *UpdaterHandler) fetchLatest(force bool) (*updateManifest, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		log.Printf("[updater] manifest fetch failed: HTTP %d from %s: %s", resp.StatusCode, manifestURL, string(body))
+		return nil, fmt.Errorf("HTTP %d fetching manifest: %s", resp.StatusCode, string(body))
 	}
 
 	var manifest updateManifest
@@ -135,9 +138,18 @@ func (h *UpdaterHandler) DownloadUpdate(w http.ResponseWriter, r *http.Request) 
 	// Create download directory
 	os.MkdirAll("/opt/aircoins/updates", 0755)
 
-	// Construct full download URL
-	supabaseURL := os.Getenv("SUPABASE_URL")
-	downloadURL := fmt.Sprintf("%s/storage/v1/object/public/aircoins/%s", supabaseURL, manifest.Tarball)
+	// Construct full download URL — trim trailing slash from base and
+	// leading slash from tarball path to avoid double-slash 404s.
+	supabaseURL := strings.TrimRight(os.Getenv("SUPABASE_URL"), "/")
+	if supabaseURL == "" {
+		sendJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false, "message": "SUPABASE_URL is not set on this device.",
+		})
+		return
+	}
+	tarball := strings.TrimLeft(manifest.Tarball, "/")
+	downloadURL := fmt.Sprintf("%s/storage/v1/object/public/aircoins/%s", supabaseURL, tarball)
+	log.Printf("[updater] downloading tarball: %s", downloadURL)
 
 	// Use a separate client with 5-minute timeout for large downloads
 	dlClient := &http.Client{Timeout: 5 * time.Minute}
@@ -151,8 +163,10 @@ func (h *UpdaterHandler) DownloadUpdate(w http.ResponseWriter, r *http.Request) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		log.Printf("[updater] download failed: HTTP %d from %s: %s", resp.StatusCode, downloadURL, string(body))
 		sendJSON(w, http.StatusOK, map[string]interface{}{
-			"success": false, "message": fmt.Sprintf("Download returned status %d", resp.StatusCode),
+			"success": false, "message": fmt.Sprintf("Download returned status %d: %s", resp.StatusCode, string(body)),
 		})
 		return
 	}
@@ -188,7 +202,7 @@ func (h *UpdaterHandler) DownloadUpdate(w http.ResponseWriter, r *http.Request) 
 	hash := sha256.Sum256(downloadedFile)
 	actualSHA := hex.EncodeToString(hash[:])
 
-	if manifest.SHA256 != "" && actualSHA != manifest.SHA256 {
+	if manifest.SHA256 != "" && !strings.EqualFold(actualSHA, manifest.SHA256) {
 		os.Remove(filePath)
 		sendJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false,

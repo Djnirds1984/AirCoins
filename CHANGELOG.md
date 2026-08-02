@@ -4,6 +4,18 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.8.1 — Updater Download Fix
+
+**Release date:** August 2026
+
+### Fixed
+- **Download 404 error** — trim trailing slashes from SUPABASE_URL, fix URL construction
+- **SHA256 case mismatch** — case-insensitive hash comparison
+- **Better error messages** — download errors now include response details
+- **Debug logging** — logs exact URLs being fetched for troubleshooting
+
+---
+
 ## v1.8.0 — Supabase Storage Updater
 
 **Release date:** August 2026

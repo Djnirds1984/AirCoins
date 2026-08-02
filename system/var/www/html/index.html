@@ -486,21 +486,53 @@
         }
         .paying-overlay.active { display: block; }
 
-        /* PAUSE / RESUME BUTTON */
+        /* PAUSE / RESUME BUTTON — same size as Insert Coin, orange color */
         .pause-resume-btn {
-            background: rgba(255,255,255,0.1);
-            color: #00d4ff;
-            border: 1px solid #00d4ff;
-            border-radius: 20px;
-            padding: 8px 20px;
-            font-size: 14px;
+            background: #f39c12;
+            color: #000;
+            border: none;
+            border-radius: 26px;
+            padding: 13px 34px;
+            font-size: 17px;
             font-weight: bold;
             cursor: pointer;
-            margin: 6px auto 0;
+            transition: 0.3s;
             display: none;
+            align-items: center;
+            gap: 8px;
+            margin: 6px auto 2px;
         }
-        .pause-resume-btn.active { display: inline-block; }
-        .pause-resume-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .pause-resume-btn:hover {
+            background: #e08e0b;
+            transform: scale(1.05);
+            box-shadow: 0 10px 40px rgba(243,156,18,0.5);
+        }
+        .pause-resume-btn:active { transform: scale(0.95); }
+        .pause-resume-btn.active { display: inline-flex; }
+        .pause-resume-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+        /* RATES BUTTON — same size as Insert Coin, teal color */
+        .rates-btn {
+            background: #00bcd4;
+            color: #000;
+            border: none;
+            border-radius: 26px;
+            padding: 13px 34px;
+            font-size: 17px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin: 6px auto 2px;
+        }
+        .rates-btn:hover {
+            background: #00a5bb;
+            transform: scale(1.05);
+            box-shadow: 0 10px 40px rgba(0,188,212,0.5);
+        }
+        .rates-btn:active { transform: scale(0.95); }
 
         /* PAUSED OVERLAY on timer card */
         .paused-overlay {
@@ -576,7 +608,7 @@
                 <button class="pause-resume-btn" id="pauseResumeBtn" onclick="togglePauseResume()">&#9208; Pause</button>
             </div>
             <div>
-                <button class="btn btn-primary" onclick="openRatesModal()">View Rates</button>
+                <button class="rates-btn" onclick="openRatesModal()">View Rates</button>
             </div>
         </div>
     </div>
@@ -703,12 +735,21 @@
         // storage is unavailable (private browsing, quota exceeded).
         function getSessionToken() {
             try {
+                // Try localStorage first
                 var tok = localStorage.getItem('aircoins_session_token');
                 if (tok) return tok;
+                // Try cookie fallback (survives WiFi forget on most browsers)
+                var match = document.cookie.match(/aircoins_token=([^;]+)/);
+                if (match) {
+                    tok = match[1];
+                    try { localStorage.setItem('aircoins_session_token', tok); } catch (e) {}
+                    return tok;
+                }
+                // Generate new token
                 var buf = new Uint8Array(4);
                 crypto.getRandomValues(buf);
                 tok = Array.from(buf).map(function(b) { return ('0' + b.toString(16)).slice(-2); }).join('');
-                localStorage.setItem('aircoins_session_token', tok);
+                storeSessionToken(tok);
                 return tok;
             } catch (e) {
                 return '';
@@ -718,6 +759,8 @@
         function storeSessionToken(tok) {
             if (!tok) return;
             try { localStorage.setItem('aircoins_session_token', tok); } catch (e) {}
+            // Also store in cookie (survives WiFi forget on most browsers)
+            document.cookie = "aircoins_token=" + tok + "; path=/; max-age=31536000; SameSite=Lax";
             updateDebugToken();
         }
 
@@ -1140,7 +1183,7 @@
                     return;
                 }
                 pollCoinslotStatus();
-            }, 2000);
+            }, 1000);
         }
 
         // Feeds the coins reported by the backend into the modal. Rows are
@@ -1520,7 +1563,7 @@
         // they arrive through /api/coinslot/status while the modal is armed.
 
         const API_ENABLED = true;           // Set false to disable API polling
-        const API_POLL_INTERVAL = 5000;     // Server sync every 5 seconds
+        const API_POLL_INTERVAL = 2000;     // Server sync every 2 seconds
         const API_STATUS_URL = '/api/session/status';
         const SESSION_START_URL = '/api/session/start';
         let apiPollTimer = null;

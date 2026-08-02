@@ -322,8 +322,10 @@ func (h *SessionAdminHandler) UpdateSession(w http.ResponseWriter, r *http.Reque
 // DELETE /api/admin/sessions/<id>
 // ============================================
 
-// DeleteSession permanently removes a session row and its coin events.
-// Daily stats are NOT touched (revenue reports preserve history).
+// DeleteSession soft-deletes a session: marks it expired so the MAC→token
+// mapping (sessions_client_mac_uniq partial unique index) is preserved.
+// The row stays in the database, preventing a duplicate MAC slot on next
+// payment. Daily stats are NOT touched (revenue reports preserve history).
 func (h *SessionAdminHandler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -351,44 +353,28 @@ func (h *SessionAdminHandler) DeleteSession(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	tx, err := h.DB.Begin()
-	if err != nil {
-		log.Printf("DeleteSession: begin tx failed: %v", err)
-		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to begin transaction"})
-		return
-	}
-	defer tx.Rollback()
-
 	// Step 1: If session is active, revoke iptables and remove tc class.
 	if status == "active" {
 		runCaptiveRules(h.DB, "unauth", mac, "admin-delete")
 		EnsurePerDeviceClass(h.DB, "", mac, clientIP, "remove")
 	}
 
-	// Step 2: Delete coin_events first (FK has no ON DELETE CASCADE —
-	// schema.sql line 189: session_id INTEGER REFERENCES sessions(id)).
-	if _, err := tx.Exec(`DELETE FROM coin_events WHERE session_id = $1`, id); err != nil {
-		log.Printf("DeleteSession: delete coin_events failed for id=%d: %v", id, err)
-		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to delete coin events"})
-		return
-	}
-
-	// Step 3: Delete the session row.
-	// NOTE: daily_stats is intentionally NOT modified. Revenue reports
-	// preserve historical data even when individual sessions are deleted.
-	if _, err := tx.Exec(`DELETE FROM sessions WHERE id = $1`, id); err != nil {
-		log.Printf("DeleteSession: delete session failed for id=%d: %v", id, err)
+	// Step 2: Soft-delete — mark expired, zero remaining, set expired_at.
+	// The row is preserved so the sessions_client_mac_uniq partial unique
+	// index keeps the MAC→token slot. coin_events are also preserved.
+	_, err = h.DB.Exec(`
+		UPDATE sessions
+		SET status = 'expired', expired_at = NOW(), expires_at = NOW(),
+		    remaining_seconds = 0
+		WHERE id = $1
+	`, id)
+	if err != nil {
+		log.Printf("DeleteSession: soft-delete failed for id=%d: %v", id, err)
 		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to delete session"})
 		return
 	}
 
-	if err := tx.Commit(); err != nil {
-		log.Printf("DeleteSession: commit failed: %v", err)
-		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to commit deletion"})
-		return
-	}
-
-	logAction(h.DB, "INFO", "session", fmt.Sprintf("Session %d deleted by admin (mac=%s, ip=%s)", id, mac, clientIP))
+	logAction(h.DB, "INFO", "session", fmt.Sprintf("Session %d soft-deleted by admin (mac=%s, ip=%s)", id, mac, clientIP))
 	sendJSON(w, http.StatusOK, map[string]interface{}{
 		"success":    true,
 		"deleted":    true,

@@ -735,12 +735,21 @@
         // storage is unavailable (private browsing, quota exceeded).
         function getSessionToken() {
             try {
+                // Try localStorage first
                 var tok = localStorage.getItem('aircoins_session_token');
                 if (tok) return tok;
+                // Try cookie fallback (survives WiFi forget on most browsers)
+                var match = document.cookie.match(/aircoins_token=([^;]+)/);
+                if (match) {
+                    tok = match[1];
+                    try { localStorage.setItem('aircoins_session_token', tok); } catch (e) {}
+                    return tok;
+                }
+                // Generate new token
                 var buf = new Uint8Array(4);
                 crypto.getRandomValues(buf);
                 tok = Array.from(buf).map(function(b) { return ('0' + b.toString(16)).slice(-2); }).join('');
-                localStorage.setItem('aircoins_session_token', tok);
+                storeSessionToken(tok);
                 return tok;
             } catch (e) {
                 return '';
@@ -750,6 +759,8 @@
         function storeSessionToken(tok) {
             if (!tok) return;
             try { localStorage.setItem('aircoins_session_token', tok); } catch (e) {}
+            // Also store in cookie (survives WiFi forget on most browsers)
+            document.cookie = "aircoins_token=" + tok + "; path=/; max-age=31536000; SameSite=Lax";
             updateDebugToken();
         }
 

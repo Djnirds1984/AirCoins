@@ -508,7 +508,7 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC, sessionToken string,
 			    paused_at = NULL,
 			    remaining_seconds_at_pause = NULL,
 			    pause_count = 0,
-			    session_token = EXCLUDED.session_token
+			    session_token = COALESCE(NULLIF(sessions.session_token, ''), EXCLUDED.session_token)
 			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at, COALESCE(session_token, '')
 		`, clientIP, clientMAC, coinValue, addSeconds, sessionToken).
 			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt, &tokenOut)

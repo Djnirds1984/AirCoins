@@ -73,8 +73,17 @@ func (h *UpdaterHandler) fetchLatest(force bool) (*updateManifest, error) {
 		return nil, fmt.Errorf("HTTP %d fetching manifest: %s", resp.StatusCode, string(body))
 	}
 
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read manifest body: %w", err)
+	}
+	// Strip UTF-8 BOM if present (Windows PowerShell adds it)
+	if len(bodyBytes) >= 3 && bodyBytes[0] == 0xEF && bodyBytes[1] == 0xBB && bodyBytes[2] == 0xBF {
+		bodyBytes = bodyBytes[3:]
+		log.Printf("[updater] stripped UTF-8 BOM from manifest")
+	}
 	var manifest updateManifest
-	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
+	if err := json.Unmarshal(bodyBytes, &manifest); err != nil {
 		return nil, fmt.Errorf("decode manifest: %w", err)
 	}
 

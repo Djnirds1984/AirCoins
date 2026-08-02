@@ -4,6 +4,16 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.8.2 — UTF-8 BOM Fix
+
+**Release date:** August 2026
+
+### Fixed
+- **Manifest parse error** — strip UTF-8 BOM from Supabase manifest.json before JSON decoding
+- **Defensive BOM handling** — Go code now handles BOM-prefixed JSON gracefully
+
+---
+
 ## v1.8.1 — Updater Download Fix
 
 **Release date:** August 2026

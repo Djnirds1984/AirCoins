@@ -4,6 +4,15 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.6.0 — Faster Coin Detection
+
+**Release date:** August 2026
+
+### Fixed
+- **Coin detection delay** — reduced polling interval for faster coin insertion detection on the portal page
+
+---
+
 ## v1.5.0 — Updater Fix, Mobile UI & Privacy
 
 **Release date:** August 2026

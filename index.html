@@ -1140,7 +1140,7 @@
                     return;
                 }
                 pollCoinslotStatus();
-            }, 2000);
+            }, 1000);
         }
 
         // Feeds the coins reported by the backend into the modal. Rows are
@@ -1520,7 +1520,7 @@
         // they arrive through /api/coinslot/status while the modal is armed.
 
         const API_ENABLED = true;           // Set false to disable API polling
-        const API_POLL_INTERVAL = 5000;     // Server sync every 5 seconds
+        const API_POLL_INTERVAL = 2000;     // Server sync every 2 seconds
         const API_STATUS_URL = '/api/session/status';
         const SESSION_START_URL = '/api/session/start';
         let apiPollTimer = null;

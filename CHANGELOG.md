@@ -4,6 +4,17 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.10.11 — Allow Admin Access When Locked
+
+**Release date:** August 2026
+
+### Fixed
+- **Locked devices can now access License and Updater pages** — Previously, locked devices were completely blocked from the admin panel. Now users can access the License page (to purchase/activate) and the Updater page (to update software) even when locked.
+- **Backend middleware** — Added `/api/admin/update/*` to the list of routes that bypass the license gate.
+- **Frontend lockdown** — Updated `lockDownForLicense()` and `showSection()` to keep License and Updater nav items visible.
+
+---
+
 ## v1.10.10 — WAN: Fix "Cannot find device eth0" on end0 Systems
 
 **Release date:** August 2026

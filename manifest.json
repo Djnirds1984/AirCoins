@@ -1,9 +1,16 @@
 ﻿{
-    "version":  "v1.10.10",
-    "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **WAN interface detection now scans for end0, eth0, enp*, ens*, enx*** â€” Previously only used `ip route show default` which fails when there\u0027s no default route. Now falls back to scanning `/sys/class/net` for the first Ethernet-like interface that is UP.\n- **Hardware fingerprint MAC detection** â€” Now scans for any Ethernet interface (end0, eth0, etc.) instead of hardcoded `eth0`.\n- **Stored eth_interface fallback** â€” Only used as last resort, and now verifies the interface actually exists before returning it.\n\n---",
-    "sha256":  "455ffee2cd3285c4c25a1042c4685500bac01609adbb001a418eb5b80d38aadb",
-    "tarball":  "releases/aircoins-v1.10.10.tar.gz",
+    "version":  "v1.10.11",
+    "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Locked devices can now access License and Updater pages** â€” Previously, locked devices were completely blocked from the admin panel. Now users can access the License page (to purchase/activate) and the Updater page (to update software) even when locked.\n- **Backend middleware** â€” Added `/api/admin/update/*` to the list of routes that bypass the license gate.\n- **Frontend lockdown** â€” Updated `lockDownForLicense()` and `showSection()` to keep License and Updater nav items visible.\n\n---",
+    "sha256":  "6e62586cebcf1d1ef452e21d25e7ab4c86f325b540bc7d002ee2728748995411",
+    "tarball":  "releases/aircoins-v1.10.11.tar.gz",
     "versions":  [
+                     {
+                         "released_at":  "2026-08-03T04:42:59Z",
+                         "sha256":  "6e62586cebcf1d1ef452e21d25e7ab4c86f325b540bc7d002ee2728748995411",
+                         "version":  "v1.10.11",
+                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Locked devices can now access License and Updater pages** â€” Previously, locked devices were completely blocked from the admin panel. Now users can access the License page (to purchase/activate) and the Updater page (to update software) even when locked.\n- **Backend middleware** â€” Added `/api/admin/update/*` to the list of routes that bypass the license gate.\n- **Frontend lockdown** â€” Updated `lockDownForLicense()` and `showSection()` to keep License and Updater nav items visible.\n\n---",
+                         "tarball":  "releases/aircoins-v1.10.11.tar.gz"
+                     },
                      {
                          "released_at":  "2026-08-03T04:25:04Z",
                          "sha256":  "455ffee2cd3285c4c25a1042c4685500bac01609adbb001a418eb5b80d38aadb",
@@ -31,14 +38,7 @@
                          "version":  "v1.10.7",
                          "release_notes":  "**Release date:** August 2026\n\n### Added\n- **Reset Sales Reports button** â€” New section at the bottom of the Reports page with a \"Reset All Sales Data\" button. Deletes all daily stats, coin events, and session records. Includes double confirmation to prevent accidental resets.\n\n---",
                          "tarball":  "releases/aircoins-v1.10.7.tar.gz"
-                     },
-                     {
-                         "released_at":  "2026-08-03T03:07:38Z",
-                         "sha256":  "ce5b97847dea308f198abec39422a15b3480cc67e34ad41e554187dd484bf930",
-                         "version":  "v1.10.6",
-                         "release_notes":  "**Release date:** August 2026\n\n### Changed\n- **Hardware change = fresh 7-day trial** â€” When the SD card is cloned to a new SBC board, the system detects the new CPU serial and automatically starts a fresh 7-day trial. No more \"locked\" state from hardware mismatch.\n- **Removed hardware mismatch lock** â€” The device no longer locks when the hardware ID changes. Instead, it treats the new board as a new device and starts a trial.\n- **Heartbeat uses live hardware ID** â€” The Supabase heartbeat now reports the actual hardware ID of the current board.\n\n### Business flow\n1. Flash image to SD card â†’ insert into new SBC board\n2. System detects new CPU serial (hardware ID)\n3. Automatic 7-day trial starts\n4. Buyer purchases license â†’ activates permanently\n5. If trial expires without purchase â†’ device locks (as expected)\n\n---",
-                         "tarball":  "releases/aircoins-v1.10.6.tar.gz"
                      }
                  ],
-    "released_at":  "2026-08-03T04:25:04Z"
+    "released_at":  "2026-08-03T04:42:59Z"
 }

@@ -2732,12 +2732,14 @@ function logout() {
 
 function lockDownForLicense(lic) {
     licenseLocked = true;
-    // Hide all nav items except License
+    // Hide all nav items except License and Updater
+    // Users need access to Updater to update software when locked
     document.querySelectorAll('.nav-item').forEach(function(el) {
-        if (el.getAttribute('data-section') !== 'license') {
-            el.style.display = 'none';
-        } else {
+        var section = el.getAttribute('data-section');
+        if (section === 'license' || section === 'updater') {
             el.style.display = 'flex';
+        } else {
+            el.style.display = 'none';
         }
     });
     showSection('license');
@@ -2776,7 +2778,8 @@ const SECTION_TITLES = {
 };
 
 function showSection(name) {
-    if (licenseLocked && name !== 'license') return;
+    // When locked, only allow License and Updater sections
+    if (licenseLocked && name !== 'license' && name !== 'updater') return;
     SECTION_NAMES.forEach(function(s) {
         var el = document.getElementById('section-' + s);
         if (el) el.style.display = (s === name) ? 'block' : 'none';

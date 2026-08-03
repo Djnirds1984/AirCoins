@@ -71,13 +71,20 @@ func ValidateToken(token string) (adminID int, username string, valid bool) {
 	return entry.AdminID, entry.Username, true
 }
 
-// LicenseGateMiddleware gates all admin routes behind a valid license.
+// LicenseGateMiddleware gates most admin routes behind a valid license.
 // Routes that must remain reachable even when the license is invalid
-// (license endpoints themselves, login, health) are passed through.
+// (license endpoints, updater, login, health) are passed through so
+// users can still update software or purchase a license.
 func LicenseGateMiddleware(lh *LicenseHandler, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+		// Always allow these routes through even when locked:
+		// - License endpoints (to activate/purchase)
+		// - Update endpoints (to update software)
+		// - Login (to authenticate)
+		// - Health (for auth check)
 		if strings.HasPrefix(path, "/api/admin/license/") ||
+			strings.HasPrefix(path, "/api/admin/update/") ||
 			strings.HasPrefix(path, "/api/admin/login") ||
 			strings.HasPrefix(path, "/api/health") {
 			next.ServeHTTP(w, r)

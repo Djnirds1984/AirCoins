@@ -473,58 +473,73 @@ func applyDHCP(wanIface string) map[string]interface{} {
 		log.Printf("applyDHCP: warning: %v", err)
 	}
 
-	// Restart the active DHCP client service (best-effort)
+	// Try to restart via systemd service first (works if a DHCP service exists)
 	svc := detectDHCPClientService()
 	if svc != "" {
-		if out, err := exec.Command("systemctl", "restart", svc).CombinedOutput(); err != nil {
-			return map[string]interface{}{
-				"success": false,
-				"error":   fmt.Sprintf("systemctl restart %s failed: %s", svc, string(out)),
-			}
+		if out, err := exec.Command("systemctl", "restart", svc).CombinedOutput(); err == nil {
+			return map[string]interface{}{"success": true, "message": "DHCP applied to " + wanIface + " (via " + svc + ")"}
+		} else {
+			log.Printf("applyDHCP: systemctl restart %s failed: %s — falling back to direct DHCP request", svc, string(out))
 		}
-		return map[string]interface{}{"success": true, "message": "DHCP applied to " + wanIface + " (via " + svc + ")"}
+	}
+
+	// Fallback: use requestDHCP which runs the DHCP binary directly
+	if err := requestDHCP(wanIface); err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("DHCP request on %s failed: %s", wanIface, err.Error()),
+		}
 	}
 	return map[string]interface{}{"success": true, "message": "DHCP applied to " + wanIface}
 }
 
-// applyStatic writes a static IP config to /etc/dhcpcd.conf and restarts
-// the dhcpcd service.
-// File written: /etc/dhcpcd.conf (appends a marked block)
+// applyStatic writes a static IP config using iproute2 commands directly.
+// This works regardless of whether dhcpcd, dhclient, or NetworkManager is installed.
 func applyStatic(wanIface string, sc *models.WANStaticConfig) map[string]interface{} {
 	cidr := subnetToCIDR(sc.Subnet)
 
-	// Build the static block
-	marker := "# --- AirCoins WAN static config BEGIN ---"
-	endMarker := "# --- AirCoins WAN static config END ---"
-	block := fmt.Sprintf(`%s
-interface %s
-static ip_address=%s/%s
-static routers=%s
-static domain_name_servers=%s %s
-%s
-`, marker, wanIface, sc.IP, cidr, sc.Gateway, sc.DNS1, sc.DNS2, endMarker)
+	// Remove any static block from dhcpcd.conf (cleanup if switching from dhcpcd mode)
+	if err := removeStaticFromDhcpcd(wanIface); err != nil {
+		log.Printf("applyStatic: warning removing dhcpcd block: %v", err)
+	}
 
-	// Read existing dhcpcd.conf, strip any previous AirCoins block
-	confPath := "/etc/dhcpcd.conf"
-	existing, _ := os.ReadFile(confPath)
-	cleaned := stripBlock(string(existing), marker, endMarker)
+	// Apply static IP directly via iproute2 (works on all modern Linux)
+	// 1. Flush existing addresses on the interface
+	if out, err := exec.Command("ip", "addr", "flush", "dev", wanIface).CombinedOutput(); err != nil {
+		log.Printf("applyStatic: ip addr flush warning: %s", string(out))
+	}
 
-	newContent := strings.TrimRight(cleaned, "\n") + "\n\n" + block
-	if err := os.WriteFile(confPath, []byte(newContent), 0644); err != nil {
+	// 2. Add the static IP
+	addCmd := fmt.Sprintf("%s/%s", sc.IP, cidr)
+	if out, err := exec.Command("ip", "addr", "add", addCmd, "dev", wanIface).CombinedOutput(); err != nil {
 		return map[string]interface{}{
 			"success": false,
-			"error":   fmt.Sprintf("failed to write %s: %v", confPath, err),
+			"error":   fmt.Sprintf("ip addr add %s failed: %s", addCmd, string(out)),
 		}
 	}
 
-	// Restart dhcpcd
-	if out, err := exec.Command("systemctl", "restart", "dhcpcd").CombinedOutput(); err != nil {
-		return map[string]interface{}{
-			"success": false,
-			"error":   fmt.Sprintf("wrote %s but systemctl restart dhcpcd failed: %s", confPath, string(out)),
+	// 3. Bring interface up
+	exec.Command("ip", "link", "set", wanIface, "up").Run()
+
+	// 4. Add default gateway
+	if sc.Gateway != "" {
+		exec.Command("ip", "route", "del", "default").Run()
+		if out, err := exec.Command("ip", "route", "add", "default", "via", sc.Gateway, "dev", wanIface).CombinedOutput(); err != nil {
+			log.Printf("applyStatic: gateway warning: %s", string(out))
 		}
 	}
-	return map[string]interface{}{"success": true, "message": fmt.Sprintf("Static IP %s/%s applied to %s", sc.IP, cidr, wanIface)}
+
+	// 5. Set DNS via resolv.conf
+	if sc.DNS1 != "" {
+		dns := sc.DNS1
+		if sc.DNS2 != "" {
+			dns += "\nnameserver " + sc.DNS2
+		}
+		os.WriteFile("/etc/resolv.conf", []byte("nameserver "+dns+"\n"), 0644)
+	}
+
+	log.Printf("applyStatic: applied %s/%s to %s (gateway=%s)", sc.IP, cidr, wanIface, sc.Gateway)
+	return map[string]interface{}{"success": true, "message": fmt.Sprintf("Static IP %s applied to %s", addCmd, wanIface)}
 }
 
 // applyVLANDHCP creates the VLAN interface if missing, brings it up,

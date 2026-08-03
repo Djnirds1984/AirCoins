@@ -1,9 +1,30 @@
 ﻿{
-    "version":  "v1.10.6",
-    "release_notes":  "**Release date:** August 2026\n\n### Changed\n- **Hardware change = fresh 7-day trial** â€” When the SD card is cloned to a new SBC board, the system detects the new CPU serial and automatically starts a fresh 7-day trial. No more \"locked\" state from hardware mismatch.\n- **Removed hardware mismatch lock** â€” The device no longer locks when the hardware ID changes. Instead, it treats the new board as a new device and starts a trial.\n- **Heartbeat uses live hardware ID** â€” The Supabase heartbeat now reports the actual hardware ID of the current board.\n\n### Business flow\n1. Flash image to SD card â†’ insert into new SBC board\n2. System detects new CPU serial (hardware ID)\n3. Automatic 7-day trial starts\n4. Buyer purchases license â†’ activates permanently\n5. If trial expires without purchase â†’ device locks (as expected)\n\n---",
-    "sha256":  "ce5b97847dea308f198abec39422a15b3480cc67e34ad41e554187dd484bf930",
-    "tarball":  "releases/aircoins-v1.10.6.tar.gz",
+    "version":  "v1.10.9",
+    "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **No more \"dhclient.service not found\" error** â€” `applyDHCP()` now falls back to running the DHCP binary directly (`dhclient -v eth0`) when `systemctl restart` fails. No dummy service needed.\n- **Static IP no longer depends on dhcpcd** â€” `applyStatic()` now uses `iproute2` commands directly (`ip addr add`, `ip route add`) instead of writing to `/etc/dhcpcd.conf` and restarting dhcpcd. Works on all modern Linux.\n- **VLAN DHCP already uses direct request** â€” `applyVLANDHCP()` was already fixed in v1.10.2.\n\n---",
+    "sha256":  "da6994c411fa2efbcbd2956492d8503d44f068c05baf618ccd13a03a8c3da710",
+    "tarball":  "releases/aircoins-v1.10.9.tar.gz",
     "versions":  [
+                     {
+                         "released_at":  "2026-08-03T04:07:33Z",
+                         "sha256":  "da6994c411fa2efbcbd2956492d8503d44f068c05baf618ccd13a03a8c3da710",
+                         "version":  "v1.10.9",
+                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **No more \"dhclient.service not found\" error** â€” `applyDHCP()` now falls back to running the DHCP binary directly (`dhclient -v eth0`) when `systemctl restart` fails. No dummy service needed.\n- **Static IP no longer depends on dhcpcd** â€” `applyStatic()` now uses `iproute2` commands directly (`ip addr add`, `ip route add`) instead of writing to `/etc/dhcpcd.conf` and restarting dhcpcd. Works on all modern Linux.\n- **VLAN DHCP already uses direct request** â€” `applyVLANDHCP()` was already fixed in v1.10.2.\n\n---",
+                         "tarball":  "releases/aircoins-v1.10.9.tar.gz"
+                     },
+                     {
+                         "released_at":  "2026-08-03T03:37:28Z",
+                         "sha256":  "fcb3d4b9d611085057992f203aa6d70aadb53e631d083e00df129054c70e8a6b",
+                         "version":  "v1.10.8",
+                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Hardware fingerprint now detects cloned SD cards** â€” Added 3 new hardware ID sources: device tree serial (Allwinner SID), Ethernet MAC address, and auto-regeneration of `/etc/machine-id`. Previously, cloned SD cards had the same machine-id, so the system couldn\u0027t tell they were on a different board.\n- **Auto-regenerate machine-id** â€” When the SD card is moved to a new board, the system detects the hardware change (via MAC address or SoC serial) and regenerates `/etc/machine-id` with a new unique ID. This triggers a fresh 7-day trial automatically.\n- **Hardware stamp file** â€” New `/etc/machine-id.hardware-stamp` tracks which hardware the machine-id belongs to, so cloned cards are detected on first boot.\n\n---",
+                         "tarball":  "releases/aircoins-v1.10.8.tar.gz"
+                     },
+                     {
+                         "released_at":  "2026-08-03T03:28:04Z",
+                         "sha256":  "e7eb8b7f32cb6239b9b17e9125edd5361cd4a3213eb812c2953d6bf8bb9250f0",
+                         "version":  "v1.10.7",
+                         "release_notes":  "**Release date:** August 2026\n\n### Added\n- **Reset Sales Reports button** â€” New section at the bottom of the Reports page with a \"Reset All Sales Data\" button. Deletes all daily stats, coin events, and session records. Includes double confirmation to prevent accidental resets.\n\n---",
+                         "tarball":  "releases/aircoins-v1.10.7.tar.gz"
+                     },
                      {
                          "released_at":  "2026-08-03T03:07:38Z",
                          "sha256":  "ce5b97847dea308f198abec39422a15b3480cc67e34ad41e554187dd484bf930",
@@ -19,5 +40,5 @@
                          "tarball":  "releases/aircoins-v1.10.5.tar.gz"
                      }
                  ],
-    "released_at":  "2026-08-03T03:07:38Z"
+    "released_at":  "2026-08-03T04:07:33Z"
 }

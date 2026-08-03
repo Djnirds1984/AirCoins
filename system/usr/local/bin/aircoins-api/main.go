@@ -125,6 +125,7 @@ func main() {
 	mux.Handle("/api/admin/reports/earnings", adminProtected(reportsHandler.GetEarningsSummary))
 	mux.Handle("/api/admin/reports/daily", adminProtected(reportsHandler.GetDailyBreakdown))
 	mux.Handle("/api/admin/reports/coin-events", adminProtected(reportsHandler.GetCoinEvents))
+	mux.Handle("/api/admin/reports/reset", adminProtected(http.HandlerFunc(reportsHandler.ResetSalesReports)))
 
 	// ── License endpoints (auth only, NO license gate) ──────────────────
 	mux.Handle("/api/admin/license/status", handlers.AuthMiddleware(http.HandlerFunc(licenseHandler.Status)))

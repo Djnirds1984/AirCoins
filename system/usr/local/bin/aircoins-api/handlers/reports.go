@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -230,4 +232,98 @@ func parseDateRange(r *http.Request) (time.Time, time.Time) {
 // roundTo2 rounds a float to 2 decimal places
 func roundTo2(val float64) float64 {
 	return float64(int(val*100+0.5)) / 100
+}
+
+// ResetSalesReports deletes all sales data: daily_stats, coin_events, and sessions.
+// This is an irreversible operation — use with caution.
+func (h *ReportsHandler) ResetSalesReports(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse optional scope from request body
+	var req struct {
+		Scope string `json:"scope"` // "all" (default), "daily_stats", "coin_events", "sessions"
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	scope := req.Scope
+	if scope == "" {
+		scope = "all"
+	}
+
+	deleted := map[string]int{}
+
+	tx, err := h.DB.Begin()
+	if err != nil {
+		log.Printf("ResetSalesReports: begin tx failed: %v", err)
+		sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "message": "Failed to start reset transaction",
+		})
+		return
+	}
+	defer tx.Rollback()
+
+	if scope == "all" || scope == "coin_events" {
+		res, err := tx.Exec("DELETE FROM coin_events")
+		if err != nil {
+			log.Printf("ResetSalesReports: delete coin_events failed: %v", err)
+			sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"success": false, "message": "Failed to delete coin events: " + err.Error(),
+			})
+			return
+		}
+		n, _ := res.RowsAffected()
+		deleted["coin_events"] = int(n)
+	}
+
+	if scope == "all" || scope == "daily_stats" {
+		res, err := tx.Exec("DELETE FROM daily_stats")
+		if err != nil {
+			log.Printf("ResetSalesReports: delete daily_stats failed: %v", err)
+			sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"success": false, "message": "Failed to delete daily stats: " + err.Error(),
+			})
+			return
+		}
+		n, _ := res.RowsAffected()
+		deleted["daily_stats"] = int(n)
+	}
+
+	if scope == "all" || scope == "sessions" {
+		res, err := tx.Exec("DELETE FROM sessions")
+		if err != nil {
+			log.Printf("ResetSalesReports: delete sessions failed: %v", err)
+			sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"success": false, "message": "Failed to delete sessions: " + err.Error(),
+			})
+			return
+		}
+		n, _ := res.RowsAffected()
+		deleted["sessions"] = int(n)
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("ResetSalesReports: commit failed: %v", err)
+		sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "message": "Failed to commit reset",
+		})
+		return
+	}
+
+	total := 0
+	for _, v := range deleted {
+		total += v
+	}
+
+	log.Printf("ResetSalesReports: reset complete (scope=%s) — deleted %d total rows: %v", scope, total, deleted)
+
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Sales reports reset — deleted %d records", total),
+		"deleted": deleted,
+	})
 }

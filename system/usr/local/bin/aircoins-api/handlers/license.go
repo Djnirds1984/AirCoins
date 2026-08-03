@@ -45,12 +45,19 @@ func NewLicenseHandler(db *sql.DB) *LicenseHandler {
 	return &LicenseHandler{db: db}
 }
 
-// HardwareFingerprint returns a stable hardware identifier:
-// the CPU serial from /proc/cpuinfo, falling back to /etc/machine-id.
+// HardwareFingerprint returns a stable hardware identifier unique to each
+// physical SBC board. It tries multiple sources in order of reliability:
+//  1. CPU serial from /proc/cpuinfo (unique per SoC, when available)
+//  2. Device tree serial-number (Allwinner SID)
+//  3. Ethernet MAC address (usually burned into the board)
+//  4. /etc/machine-id (on SD card — regenerated if stale)
+//
+// If /etc/machine-id is used and doesn't match the current hardware stamp,
+// it is regenerated so that cloned SD cards get a unique identity.
 func HardwareFingerprint() string {
+	// 1. CPU serial from /proc/cpuinfo
 	f, err := os.Open("/proc/cpuinfo")
 	if err == nil {
-		defer f.Close()
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -58,32 +65,130 @@ func HardwareFingerprint() string {
 				parts := strings.SplitN(line, ":", 2)
 				if len(parts) == 2 {
 					serial := strings.TrimSpace(parts[1])
-					// Reject all-zeros serial (virtual machines / some boards)
-					allZero := true
-					for _, c := range serial {
-						if c != '0' {
-							allZero = false
-							break
-						}
-					}
-					if serial != "" && !allZero {
+					if serial != "" && !isAllZeros(serial) {
+						f.Close()
 						return serial
 					}
 				}
 			}
 		}
+		f.Close()
 	}
 
-	// Fallback: /etc/machine-id
-	data, err := os.ReadFile("/etc/machine-id")
-	if err == nil {
-		id := strings.TrimSpace(string(data))
-		if id != "" {
-			return id
+	// 2. Device tree serial-number (Allwinner SID e-fuse)
+	if data, err := os.ReadFile("/sys/firmware/devicetree/base/serial-number"); err == nil {
+		serial := strings.TrimRight(string(data), "\x00\n\r ")
+		if serial != "" && !isAllZeros(serial) {
+			return "dt-" + serial
 		}
 	}
 
-	return "unknown"
+	// 3. Ethernet MAC address (usually unique per board)
+	if mac := readFirstLine("/sys/class/net/eth0/address"); mac != "" {
+		mac = strings.ToLower(strings.TrimSpace(mac))
+		// Reject common dummy/universal MACs
+		if mac != "00:00:00:00:00:00" && mac != "02:00:00:00:00:00" && !strings.HasPrefix(mac, "02:00:00") {
+			return "mac-" + strings.ReplaceAll(mac, ":", "")
+		}
+	}
+
+	// 4. /etc/machine-id — but regenerate if it doesn't match current hardware
+	machineID := readFirstLine("/etc/machine-id")
+	hwStamp := buildHardwareStamp()
+
+	stampFile := "/etc/machine-id.hardware-stamp"
+	oldStamp := readFirstLine(stampFile)
+
+	if machineID != "" && oldStamp == hwStamp {
+		// machine-id matches this hardware — safe to use
+		return machineID
+	}
+
+	// Hardware stamp changed (or no stamp file) — regenerate machine-id
+	// This handles cloned SD cards: new board → new stamp → new machine-id
+	newID := generateMachineID()
+	os.WriteFile("/etc/machine-id", []byte(newID+"\n"), 0444)
+	os.WriteFile(stampFile, []byte(hwStamp+"\n"), 0644)
+	log.Printf("license: regenerated /etc/machine-id for new hardware (stamp=%s)", hwStamp)
+	return newID
+}
+
+// isAllZeros returns true if s consists entirely of '0' characters.
+func isAllZeros(s string) bool {
+	for _, c := range s {
+		if c != '0' {
+			return false
+		}
+	}
+	return true
+}
+
+// readFirstLine reads the first line of a file, returning "" on any error.
+func readFirstLine(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.SplitN(strings.TrimSpace(string(data)), "\n", 2)[0]
+}
+
+// buildHardwareStamp creates a fingerprint of the current hardware by
+// combining all available hardware identifiers. This is used to detect
+// when the SD card has been moved to a different board.
+func buildHardwareStamp() string {
+	var parts []string
+
+	// CPU serial
+	if f, err := os.Open("/proc/cpuinfo"); err == nil {
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "Serial") {
+				p := strings.SplitN(line, ":", 2)
+				if len(p) == 2 {
+					s := strings.TrimSpace(p[1])
+					if s != "" && !isAllZeros(s) {
+						parts = append(parts, "cpu:"+s)
+					}
+				}
+			}
+		}
+		f.Close()
+	}
+
+	// Device tree serial
+	if data, err := os.ReadFile("/sys/firmware/devicetree/base/serial-number"); err == nil {
+		s := strings.TrimRight(string(data), "\x00\n\r ")
+		if s != "" && !isAllZeros(s) {
+			parts = append(parts, "dt:"+s)
+		}
+	}
+
+	// Ethernet MAC
+	if mac := readFirstLine("/sys/class/net/eth0/address"); mac != "" {
+		mac = strings.ToLower(strings.TrimSpace(mac))
+		if mac != "00:00:00:00:00:00" {
+			parts = append(parts, "mac:"+mac)
+		}
+	}
+
+	if len(parts) == 0 {
+		return "unknown"
+	}
+	return strings.Join(parts, "|")
+}
+
+// generateMachineID creates a random 32-character hex string in the same
+// format as systemd-machine-id-setup.
+func generateMachineID() string {
+	f, err := os.Open("/dev/urandom")
+	if err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	defer f.Close()
+	buf := make([]byte, 16)
+	f.Read(buf)
+	return fmt.Sprintf("%x", buf)
 }
 
 // InitOrLoadLicense initialises the license state from the database, or

@@ -2442,6 +2442,20 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Reset Sales Reports -->
+            <div class="reports-table-card" style="border:1px solid rgba(244,67,54,0.2);">
+                <div class="card-title" style="color:#f44336;">
+                    <span>Reset Sales Reports</span>
+                </div>
+                <p style="color:#888;font-size:13px;margin:0 0 12px 0;">
+                    This will permanently delete all sales data including daily stats, coin events, and session records. This action cannot be undone.
+                </p>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button class="btn" onclick="resetSalesReports()" style="padding:8px 20px;border-radius:8px;border:none;background:#f44336;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">Reset All Sales Data</button>
+                    <span id="reset-sales-status" style="font-size:12px;color:#888;"></span>
+                </div>
+            </div>
         </div>
 
         <!-- License Section -->
@@ -4925,6 +4939,35 @@ function exportDailyCSV() {
     document.body.removeChild(link);
 
     showNotification('CSV exported successfully', 'success');
+}
+
+async function resetSalesReports() {
+    if (!confirm('Are you sure you want to reset ALL sales reports?\n\nThis will permanently delete:\n• All daily statistics\n• All coin events\n• All session records\n\nThis action CANNOT be undone.')) return;
+    // Double confirm
+    if (!confirm('FINAL WARNING: All sales data will be permanently deleted. Continue?')) return;
+
+    var statusEl = document.getElementById('reset-sales-status');
+    statusEl.textContent = 'Resetting…';
+    statusEl.style.color = '#ff9800';
+
+    try {
+        var data = await apiCall('POST', '/admin/reports/reset', { scope: 'all' });
+        if (data.success) {
+            statusEl.textContent = data.message || 'Reset complete';
+            statusEl.style.color = '#4caf50';
+            showNotification('Sales reports reset successfully', 'success');
+            // Reload reports to show empty state
+            loadReports();
+        } else {
+            statusEl.textContent = data.message || 'Reset failed';
+            statusEl.style.color = '#f44336';
+            showNotification('Reset failed: ' + (data.message || ''), 'error');
+        }
+    } catch (e) {
+        statusEl.textContent = 'Error: ' + e.message;
+        statusEl.style.color = '#f44336';
+        showNotification('Reset failed: ' + e.message, 'error');
+    }
 }
 
 // ============================================================

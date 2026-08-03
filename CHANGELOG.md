@@ -4,6 +4,37 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.10.9 — WAN: Fix dhclient/dhcpcd Service Error
+
+**Release date:** August 2026
+
+### Fixed
+- **No more "dhclient.service not found" error** — `applyDHCP()` now falls back to running the DHCP binary directly (`dhclient -v eth0`) when `systemctl restart` fails. No dummy service needed.
+- **Static IP no longer depends on dhcpcd** — `applyStatic()` now uses `iproute2` commands directly (`ip addr add`, `ip route add`) instead of writing to `/etc/dhcpcd.conf` and restarting dhcpcd. Works on all modern Linux.
+- **VLAN DHCP already uses direct request** — `applyVLANDHCP()` was already fixed in v1.10.2.
+
+---
+
+## v1.10.8 — Fix: Cloned SD Cards Now Get Fresh Trial
+
+**Release date:** August 2026
+
+### Fixed
+- **Hardware fingerprint now detects cloned SD cards** — Added 3 new hardware ID sources: device tree serial (Allwinner SID), Ethernet MAC address, and auto-regeneration of `/etc/machine-id`. Previously, cloned SD cards had the same machine-id, so the system couldn't tell they were on a different board.
+- **Auto-regenerate machine-id** — When the SD card is moved to a new board, the system detects the hardware change (via MAC address or SoC serial) and regenerates `/etc/machine-id` with a new unique ID. This triggers a fresh 7-day trial automatically.
+- **Hardware stamp file** — New `/etc/machine-id.hardware-stamp` tracks which hardware the machine-id belongs to, so cloned cards are detected on first boot.
+
+---
+
+## v1.10.7 — Reset Sales Reports
+
+**Release date:** August 2026
+
+### Added
+- **Reset Sales Reports button** — New section at the bottom of the Reports page with a "Reset All Sales Data" button. Deletes all daily stats, coin events, and session records. Includes double confirmation to prevent accidental resets.
+
+---
+
 ## v1.10.6 — License: Auto-Reset Trial on Hardware Change
 
 **Release date:** August 2026

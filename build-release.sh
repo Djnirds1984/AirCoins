@@ -81,7 +81,11 @@ if command -v rsync &>/dev/null; then
         --exclude='.gitignore' \
         "$SCRIPT_DIR/system/" "$TARBALL_DIR/system/"
 else
-    cp -r "$SCRIPT_DIR/system" "$TARBALL_DIR/system"
+    # Copy CONTENTS of system/ into the staging area.
+    # Using (cd src && cp -r . dst) to avoid the system/system/ nesting
+    # that cp -r src/ dst/ can produce depending on the cp implementation.
+    mkdir -p "$TARBALL_DIR/system"
+    (cd "$SCRIPT_DIR/system" && cp -r . "$TARBALL_DIR/system/")
     rm -rf "$TARBALL_DIR/system/.env" \
            "$TARBALL_DIR/system/__diff_tmp.txt" \
            "$TARBALL_DIR/system/.git" \

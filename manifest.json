@@ -1,7 +1,23 @@
 ﻿{
-    "released_at":  "2026-08-03T01:53:31Z",
-    "sha256":  "56d0c2eb14408183938ef965943565f1870bf5ecdcb57a892afb4a88ba45b35a",
-    "version":  "v1.10.1",
-    "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Multi-peso coins only counted as 1 pulse** â€” The `handle_coin_pulse()` function in `gpio-coin-listener` was blocking for 150ms+ and then waiting for the pin to go HIGH after each pulse. This caused all subsequent pulses in a rapid train to be missed. A 10-peso coin (10 pulses) was read as a single 1-peso coin.\n- **Debounce moved to callers** â€” The pin-wait logic is now handled by the polling loop and gpiomon loop (which need it for edge tracking), while `handle_coin_pulse()` returns immediately after a short 50ms electrical debounce. This allows every pulse in a multi-pulse coin to be detected.\n\n---",
-    "tarball":  "releases/aircoins-v1.10.1.tar.gz"
+    "version":  "v1.10.6",
+    "release_notes":  "**Release date:** August 2026\n\n### Changed\n- **Hardware change = fresh 7-day trial** â€” When the SD card is cloned to a new SBC board, the system detects the new CPU serial and automatically starts a fresh 7-day trial. No more \"locked\" state from hardware mismatch.\n- **Removed hardware mismatch lock** â€” The device no longer locks when the hardware ID changes. Instead, it treats the new board as a new device and starts a trial.\n- **Heartbeat uses live hardware ID** â€” The Supabase heartbeat now reports the actual hardware ID of the current board.\n\n### Business flow\n1. Flash image to SD card â†’ insert into new SBC board\n2. System detects new CPU serial (hardware ID)\n3. Automatic 7-day trial starts\n4. Buyer purchases license â†’ activates permanently\n5. If trial expires without purchase â†’ device locks (as expected)\n\n---",
+    "sha256":  "ce5b97847dea308f198abec39422a15b3480cc67e34ad41e554187dd484bf930",
+    "tarball":  "releases/aircoins-v1.10.6.tar.gz",
+    "versions":  [
+                     {
+                         "released_at":  "2026-08-03T03:07:38Z",
+                         "sha256":  "ce5b97847dea308f198abec39422a15b3480cc67e34ad41e554187dd484bf930",
+                         "version":  "v1.10.6",
+                         "release_notes":  "**Release date:** August 2026\n\n### Changed\n- **Hardware change = fresh 7-day trial** â€” When the SD card is cloned to a new SBC board, the system detects the new CPU serial and automatically starts a fresh 7-day trial. No more \"locked\" state from hardware mismatch.\n- **Removed hardware mismatch lock** â€” The device no longer locks when the hardware ID changes. Instead, it treats the new board as a new device and starts a trial.\n- **Heartbeat uses live hardware ID** â€” The Supabase heartbeat now reports the actual hardware ID of the current board.\n\n### Business flow\n1. Flash image to SD card â†’ insert into new SBC board\n2. System detects new CPU serial (hardware ID)\n3. Automatic 7-day trial starts\n4. Buyer purchases license â†’ activates permanently\n5. If trial expires without purchase â†’ device locks (as expected)\n\n---",
+                         "tarball":  "releases/aircoins-v1.10.6.tar.gz"
+                     },
+                     {
+                         "released_at":  "2026-08-03T03:01:59Z",
+                         "sha256":  "6f3611b55525cb15280a0508b982a486e78ab429b7a0bb32b543e1324c9339c0",
+                         "version":  "v1.10.5",
+                         "release_notes":  "**Release date:** August 2026\n\n### Added\n- **Version cards UI** â€” The updater now shows a card for each available version (up to 5), with individual Download and Install buttons per version.\n- **Easy rollback** â€” Download and install any previous version directly from the updater. If a new version causes issues, roll back to a stable version with one click.\n- **Auto-check on open** â€” The updater automatically checks for updates when you open the section. No more clicking \"Check for Updates\" manually.\n- **Smooth UI** â€” No more blinking/flickering during update checks. Status badges show \"Installed\", \"New\", or \"Older\" for each version card.\n- **Downloaded badge** â€” Already-downloaded versions show a blue \"Downloaded\" badge with an Install button.\n\n---",
+                         "tarball":  "releases/aircoins-v1.10.5.tar.gz"
+                     }
+                 ],
+    "released_at":  "2026-08-03T03:07:38Z"
 }

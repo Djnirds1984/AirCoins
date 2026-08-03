@@ -4,6 +4,67 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.10.6 — License: Auto-Reset Trial on Hardware Change
+
+**Release date:** August 2026
+
+### Changed
+- **Hardware change = fresh 7-day trial** — When the SD card is cloned to a new SBC board, the system detects the new CPU serial and automatically starts a fresh 7-day trial. No more "locked" state from hardware mismatch.
+- **Removed hardware mismatch lock** — The device no longer locks when the hardware ID changes. Instead, it treats the new board as a new device and starts a trial.
+- **Heartbeat uses live hardware ID** — The Supabase heartbeat now reports the actual hardware ID of the current board.
+
+### Business flow
+1. Flash image to SD card → insert into new SBC board
+2. System detects new CPU serial (hardware ID)
+3. Automatic 7-day trial starts
+4. Buyer purchases license → activates permanently
+5. If trial expires without purchase → device locks (as expected)
+
+---
+
+## v1.10.5 — Updater Refactor: Version Cards & Rollback
+
+**Release date:** August 2026
+
+### Added
+- **Version cards UI** — The updater now shows a card for each available version (up to 5), with individual Download and Install buttons per version.
+- **Easy rollback** — Download and install any previous version directly from the updater. If a new version causes issues, roll back to a stable version with one click.
+- **Auto-check on open** — The updater automatically checks for updates when you open the section. No more clicking "Check for Updates" manually.
+- **Smooth UI** — No more blinking/flickering during update checks. Status badges show "Installed", "New", or "Older" for each version card.
+- **Downloaded badge** — Already-downloaded versions show a blue "Downloaded" badge with an Install button.
+
+---
+
+## v1.10.4 — VLAN ISP IP Info & Internet Connectivity
+
+**Release date:** August 2026
+
+### Added
+- **VLAN ISP Connection Info panel** — When in VLAN DHCP mode, a separate green panel shows the VLAN interface's IP, subnet, gateway, and DNS (e.g. `end0.500`). Makes it easy to verify the VLAN ISP is connected.
+- **Internet connectivity check** — A status bar shows whether the device can actually reach the internet (pings 8.8.8.8). Green = connected, Red = no internet.
+- **VLAN interface status** — Shows whether the VLAN interface is up/down with a helpful message if the ISP link is not active.
+
+---
+
+## v1.10.3 — WAN IP Info Display
+
+**Release date:** August 2026
+
+### Added
+- **ISP Connection Info panel** — New card in WAN Settings showing the live IP address, subnet, gateway, and DNS obtained from the ISP. Includes interface status indicator (up/down). Refreshes automatically when you click the refresh button.
+
+---
+
+## v1.10.2 — VLAN WAN DHCP Client Auto-Detection
+
+**Release date:** August 2026
+
+### Fixed
+- **VLAN WAN apply failed: "dhcpcd end0.X failed"** — The WAN handler hardcoded `dhcpcd` for obtaining DHCP on VLAN interfaces, but Armbian systems typically use `dhclient`, `udhcpc`, or NetworkManager. The system now auto-detects the available DHCP client (dhclient → dhcpcd → udhcpc → nmcli) and uses whichever is installed.
+- **DHCP service restart also fixed** — Plain DHCP mode now restarts the correct DHCP client service instead of always trying `dhcpcd`.
+
+---
+
 ## v1.10.1 — GPIO Multi-Pulse Coin Counting Fix
 
 **Release date:** August 2026

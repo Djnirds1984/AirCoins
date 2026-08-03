@@ -40,6 +40,96 @@ func detectWANIface() string {
 }
 
 // ============================================
+// WAN IP INFO (live address, gateway, DNS)
+// ============================================
+
+// getWANIPInfo returns the live IP configuration of the WAN interface
+// by parsing ip-route and ip-addr output.  All fields are best-effort;
+// missing values are returned as empty strings.
+func getWANIPInfo(iface string) map[string]string {
+	info := map[string]string{
+		"ip":      "",
+		"subnet":  "",
+		"gateway": "",
+		"dns":     "",
+		"status":  "down",
+	}
+	if iface == "" {
+		return info
+	}
+
+	// --- IP address + CIDR ---
+	// ip -o -4 addr show <iface>
+	// → "2: eth0    inet 192.168.1.50/24 brd ..."
+	if out, err := exec.Command("ip", "-o", "-4", "addr", "show", iface).Output(); err == nil {
+		line := strings.TrimSpace(string(out))
+		if line != "" {
+			info["status"] = "up"
+			re := regexp.MustCompile(`inet\s+(\S+)`)
+			if m := re.FindStringSubmatch(line); m != nil {
+				cidr := m[1] // e.g. "192.168.1.50/24"
+				parts := strings.SplitN(cidr, "/", 2)
+				info["ip"] = parts[0]
+				if len(parts) == 2 {
+					info["subnet"] = "/" + parts[1]
+				}
+			}
+		}
+	}
+
+	// --- Gateway ---
+	// ip -o route show default dev <iface>
+	// → "default via 192.168.1.1 dev eth0 proto dhcp metric 100"
+	if out, err := exec.Command("ip", "-o", "route", "show", "default", "dev", iface).Output(); err == nil {
+		line := strings.TrimSpace(string(out))
+		re := regexp.MustCompile(`via\s+(\S+)`)
+		if m := re.FindStringSubmatch(line); m != nil {
+			info["gateway"] = m[1]
+		}
+	}
+
+	// --- DNS (from /etc/resolv.conf) ---
+	if data, err := os.ReadFile("/etc/resolv.conf"); err == nil {
+		var servers []string
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "nameserver") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					servers = append(servers, fields[1])
+				}
+			}
+		}
+		info["dns"] = strings.Join(servers, ", ")
+	}
+
+	return info
+}
+
+// checkInternetConnectivity tries to reach a public DNS server to
+// determine if the device has working internet.  Returns "yes", "no",
+// or "unknown" (when the ping binary is missing).
+func checkInternetConnectivity() string {
+	// Try ping first, fall back to wget
+	if _, err := exec.LookPath("ping"); err == nil {
+		// ping -c 1 -W 3 8.8.8.8  (1 packet, 3-second timeout)
+		err := exec.Command("ping", "-c", "1", "-W", "3", "8.8.8.8").Run()
+		if err == nil {
+			return "yes"
+		}
+		return "no"
+	}
+	if _, err := exec.LookPath("wget"); err == nil {
+		err := exec.Command("wget", "-q", "--spider", "--timeout=3", "http://8.8.8.8").Run()
+		if err == nil {
+			return "yes"
+		}
+		return "no"
+	}
+	return "unknown"
+}
+
+// ============================================
 // AVAILABLE VLANS (not claimed by any portal)
 // ============================================
 
@@ -129,8 +219,9 @@ func availableVLANs() []models.WANAvailableVLAN {
 // GET /api/admin/wan
 // ============================================
 
-// WANGet returns the current WAN config, auto-detected interface, and
-// the available (unused) VLAN list inline.
+// WANGet returns the current WAN config, auto-detected interface,
+// live IP info (address, gateway, DNS), VLAN IP info (when in VLAN mode),
+// internet connectivity status, and the available VLAN list.
 func WANGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -142,6 +233,21 @@ func WANGet(w http.ResponseWriter, r *http.Request) {
 	// Load persisted config from system_settings
 	cfg := loadWANConfig()
 
+	// Get live IP info from the base WAN interface
+	ipInfo := getWANIPInfo(iface)
+
+	// When in VLAN DHCP mode, also get IP info from the VLAN interface
+	var vlanIPInfo map[string]string
+	if cfg.Mode == "vlan_dhcp" && cfg.VLANID != nil && iface != "" {
+		vlanName := fmt.Sprintf("%s.%d", iface, *cfg.VLANID)
+		vlanIPInfo = getWANIPInfo(vlanName)
+		vlanIPInfo["interface"] = vlanName
+		vlanIPInfo["vlan_id"] = strconv.Itoa(*cfg.VLANID)
+	}
+
+	// Check internet connectivity
+	internet := checkInternetConnectivity()
+
 	sendJSON(w, http.StatusOK, map[string]interface{}{
 		"success":         true,
 		"iface":           iface,
@@ -149,6 +255,9 @@ func WANGet(w http.ResponseWriter, r *http.Request) {
 		"static_config":   cfg.StaticConfig,
 		"vlan_id":         cfg.VLANID,
 		"available_vlans": availableVLANs(),
+		"ip_info":         ipInfo,
+		"vlan_ip_info":    vlanIPInfo,
+		"internet":        internet,
 	})
 }
 
@@ -364,12 +473,16 @@ func applyDHCP(wanIface string) map[string]interface{} {
 		log.Printf("applyDHCP: warning: %v", err)
 	}
 
-	// Restart dhcpcd to pick up changes (best-effort)
-	if out, err := exec.Command("systemctl", "restart", "dhcpcd").CombinedOutput(); err != nil {
-		return map[string]interface{}{
-			"success": false,
-			"error":   fmt.Sprintf("systemctl restart dhcpcd failed: %s", string(out)),
+	// Restart the active DHCP client service (best-effort)
+	svc := detectDHCPClientService()
+	if svc != "" {
+		if out, err := exec.Command("systemctl", "restart", svc).CombinedOutput(); err != nil {
+			return map[string]interface{}{
+				"success": false,
+				"error":   fmt.Sprintf("systemctl restart %s failed: %s", svc, string(out)),
+			}
 		}
+		return map[string]interface{}{"success": true, "message": "DHCP applied to " + wanIface + " (via " + svc + ")"}
 	}
 	return map[string]interface{}{"success": true, "message": "DHCP applied to " + wanIface}
 }
@@ -415,11 +528,7 @@ static domain_name_servers=%s %s
 }
 
 // applyVLANDHCP creates the VLAN interface if missing, brings it up,
-// and requests DHCP on it.
-// NOTE: This brings the VLAN interface up with DHCP but does NOT set up
-// policy routing or adjust the default route metric. The admin may need
-// to configure routing separately if the ISP VLAN should become the
-// primary WAN path.
+// and requests DHCP on it using whatever DHCP client is available.
 func applyVLANDHCP(wanIface string, cfg models.WANConfig) map[string]interface{} {
 	if cfg.VLANID == nil {
 		return map[string]interface{}{"success": false, "error": "vlan_id is required"}
@@ -446,18 +555,90 @@ func applyVLANDHCP(wanIface string, cfg models.WANConfig) map[string]interface{}
 		}
 	}
 
-	// Request DHCP via dhcpcd on the VLAN interface
-	if out, err := exec.Command("dhcpcd", vlanName).CombinedOutput(); err != nil {
+	// Request DHCP on the VLAN interface using the available client
+	if err := requestDHCP(vlanName); err != nil {
 		return map[string]interface{}{
 			"success": false,
-			"error":   fmt.Sprintf("dhcpcd %s failed: %s", vlanName, string(out)),
+			"error":   err.Error(),
 		}
 	}
 
 	return map[string]interface{}{
 		"success": true,
-		"message": fmt.Sprintf("VLAN %s created and DHCP requested (note: default route may need manual policy routing)", vlanName),
+		"message": fmt.Sprintf("VLAN %s created and DHCP obtained", vlanName),
 	}
+}
+
+// ============================================
+// DHCP CLIENT DETECTION
+// ============================================
+
+// detectDHCPClientService returns the name of the active DHCP client
+// systemd service. Checks dhclient, dhcpcd, NetworkManager, and
+// systemd-networkd in order of likelihood on Armbian/Debian systems.
+func detectDHCPClientService() string {
+	candidates := []string{"dhclient", "dhcpcd", "NetworkManager", "systemd-networkd"}
+	for _, svc := range candidates {
+		if _, err := exec.LookPath(svc); err == nil {
+			// Verify the service is actually active
+			if out, err := exec.Command("systemctl", "is-active", svc).CombinedOutput(); err == nil {
+				if strings.TrimSpace(string(out)) == "active" {
+					return svc
+				}
+			}
+		}
+	}
+	// Fallback: just check if the binary exists even if service isn't "active"
+	for _, svc := range candidates {
+		if _, err := exec.LookPath(svc); err == nil {
+			return svc
+		}
+	}
+	return ""
+}
+
+// requestDHCP obtains a DHCP lease on the given interface using
+// whichever DHCP client is available on the system.
+func requestDHCP(iface string) error {
+	// Try dhclient first (most common on Armbian/Debian)
+	if dhclient, err := exec.LookPath("dhclient"); err == nil {
+		// Kill any existing dhclient on this interface, then request a lease
+		exec.Command(dhclient, "-r", iface).Run()
+		if out, err := exec.Command(dhclient, "-v", iface).CombinedOutput(); err != nil {
+			return fmt.Errorf("dhclient %s failed: %s", iface, string(out))
+		}
+		log.Printf("wan: obtained DHCP on %s via dhclient", iface)
+		return nil
+	}
+
+	// Try dhcpcd
+	if dhcpcd, err := exec.LookPath("dhcpcd"); err == nil {
+		if out, err := exec.Command(dhcpcd, iface).CombinedOutput(); err != nil {
+			return fmt.Errorf("dhcpcd %s failed: %s", iface, string(out))
+		}
+		log.Printf("wan: obtained DHCP on %s via dhcpcd", iface)
+		return nil
+	}
+
+	// Try udhcpc (BusyBox, common on embedded/Armbian)
+	if udhcpc, err := exec.LookPath("udhcpc"); err == nil {
+		if out, err := exec.Command(udhcpc, "-i", iface, "-n", "-q").CombinedOutput(); err != nil {
+			return fmt.Errorf("udhcpc %s failed: %s", iface, string(out))
+		}
+		log.Printf("wan: obtained DHCP on %s via udhcpc", iface)
+		return nil
+	}
+
+	// Try NetworkManager via nmcli
+	if nmcli, err := exec.LookPath("nmcli"); err == nil {
+		if out, err := exec.Command(nmcli, "device", "connect", iface).CombinedOutput(); err != nil {
+			return fmt.Errorf("nmcli connect %s failed: %s", iface, string(out))
+		}
+		log.Printf("wan: obtained DHCP on %s via NetworkManager", iface)
+		return nil
+	}
+
+	return fmt.Errorf("no DHCP client found (tried dhclient, dhcpcd, udhcpc, nmcli) — install one: apt install isc-dhcp-client")
 }
 
 // ============================================

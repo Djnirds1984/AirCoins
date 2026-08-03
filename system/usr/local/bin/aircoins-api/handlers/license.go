@@ -88,6 +88,9 @@ func HardwareFingerprint() string {
 
 // InitOrLoadLicense initialises the license state from the database, or
 // seeds a fresh 7-day trial if no row exists. Safe to call on every start.
+// If the hardware ID has changed (SD card cloned to a new board), it resets
+// to a fresh 7-day trial bound to the new hardware — this is the expected
+// business flow for deploying images to multiple buyers.
 func (h *LicenseHandler) InitOrLoadLicense() error {
 	var value string
 	err := h.db.QueryRow(
@@ -97,16 +100,17 @@ func (h *LicenseHandler) InitOrLoadLicense() error {
 	if err == sql.ErrNoRows {
 		// First run — seed a trial
 		now := time.Now().UTC()
+		hwID := HardwareFingerprint()
 		h.mu.Lock()
 		h.state = LicenseState{
 			Status:         "trial",
 			TrialStartedAt: now,
 			TrialExpiresAt: now.Add(7 * 24 * time.Hour),
-			HardwareID:     HardwareFingerprint(),
+			HardwareID:     hwID,
 		}
 		h.mu.Unlock()
 		h.saveState()
-		log.Printf("license: seeded 7-day trial (hardware_id=%s)", h.state.HardwareID)
+		log.Printf("license: seeded 7-day trial (hardware_id=%s)", hwID)
 		return nil
 	}
 	if err != nil {
@@ -118,12 +122,20 @@ func (h *LicenseHandler) InitOrLoadLicense() error {
 		return fmt.Errorf("license: corrupt JSON in system_settings: %w", err)
 	}
 
-	// CRITICAL: Validate hardware identity on every load
+	// CRITICAL: Validate hardware identity on every load.
+	// If the hardware ID changed (SD card cloned to new board), reset to a
+	// fresh 7-day trial. This is the expected business flow: flash image →
+	// new board → new hardware ID → 7-day trial → buyer purchases license.
 	liveHW := HardwareFingerprint()
 	if st.HardwareID != "" && st.HardwareID != liveHW {
-		log.Printf("license: HARDWARE MISMATCH — stored=%s live=%s — possible SD clone or hardware change", st.HardwareID, liveHW)
-		st.Status = "locked"
-		st.LastSupabaseError = fmt.Sprintf("Hardware mismatch (stored=%s, live=%s). License locked due to possible SD card clone.", st.HardwareID, liveHW)
+		log.Printf("license: HARDWARE CHANGE DETECTED — old=%s new=%s — resetting to fresh 7-day trial", st.HardwareID, liveHW)
+		now := time.Now().UTC()
+		st = LicenseState{
+			Status:         "trial",
+			TrialStartedAt: now,
+			TrialExpiresAt: now.Add(7 * 24 * time.Hour),
+			HardwareID:     liveHW,
+		}
 	} else if st.HardwareID == "" {
 		// No hardware ID stored (legacy state) — bind to current hardware
 		st.HardwareID = liveHW
@@ -134,18 +146,12 @@ func (h *LicenseHandler) InitOrLoadLicense() error {
 	h.state = st
 	h.mu.Unlock()
 	h.saveState()
-	log.Printf("license: loaded state status=%s", st.Status)
+	log.Printf("license: loaded state status=%s hardware_id=%s", st.Status, st.HardwareID)
 	return nil
 }
 
 // isLicenseValidLocked must be called with h.mu at least RLocked.
 func (h *LicenseHandler) isLicenseValidLocked() bool {
-	// Hardware identity check — prevents SD card clone bypass
-	liveHW := HardwareFingerprint()
-	if h.state.HardwareID != "" && h.state.HardwareID != liveHW {
-		return false
-	}
-
 	switch h.state.Status {
 	case "trial":
 		if time.Now().After(h.state.TrialExpiresAt) {
@@ -211,16 +217,10 @@ func (h *LicenseHandler) HeartbeatSupabase() error {
 	status := h.state.Status
 	h.mu.RUnlock()
 
-	// Validate hardware identity before heartbeat
+	// Use the live hardware ID for heartbeat (in case it changed since init)
 	liveHW := HardwareFingerprint()
-	if hwID != "" && hwID != liveHW {
-		log.Printf("license: hardware mismatch during heartbeat (stored=%s, live=%s) — skipping heartbeat", hwID, liveHW)
-		h.mu.Lock()
-		h.state.Status = "locked"
-		h.state.LastSupabaseError = fmt.Sprintf("Hardware mismatch during heartbeat (stored=%s, live=%s)", hwID, liveHW)
-		h.mu.Unlock()
-		h.saveState()
-		return fmt.Errorf("hardware mismatch")
+	if liveHW != "" && liveHW != "unknown" {
+		hwID = liveHW
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
@@ -494,6 +494,7 @@ func (h *LicenseHandler) Status(w http.ResponseWriter, r *http.Request) {
 		"license_key":               maskedKey,
 		"owner_email":               st.OwnerEmail,
 		"hardware_id":               st.HardwareID,
+		"live_hardware_id":          HardwareFingerprint(),
 		"valid":                     valid,
 		"last_heartbeat_at":         formatTimePtr(st.LastHeartbeatAt),
 		"last_supabase_response_at": formatTimePtr(st.LastSupabaseResponseAt),

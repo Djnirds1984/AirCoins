@@ -13,7 +13,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$VERSION = "1.10.1"
+$VERSION = "1.10.6"
 $TARBALL_NAME = "aircoins-v$VERSION.tar.gz"
 $CHECKSUM_NAME = "aircoins-v$VERSION.sha256"
 $BUCKET = "aircoins"
@@ -131,17 +131,71 @@ if (-not $changelogContent) {
     $changelogContent = "v$VERSION release"
 }
 
-# Build manifest JSON
+# Read existing manifest to preserve versions array
+$existingManifest = $null
+$localManifestPath = Join-Path $PROJECT_ROOT "manifest.json"
+if (Test-Path $localManifestPath) {
+    try {
+        $existingManifest = Get-Content $localManifestPath -Raw | ConvertFrom-Json
+    } catch {
+        Write-Host "[WARN] Could not parse existing manifest.json" -ForegroundColor Yellow
+    }
+}
+
+# Also try to fetch from Supabase if local doesn't have versions
+if (-not $existingManifest -or -not $existingManifest.versions) {
+    try {
+        $remoteManifestUrl = "$SUPABASE_URL/storage/v1/object/public/$BUCKET/manifest.json"
+        $remoteResp = Invoke-RestMethod -Uri $remoteManifestUrl -Method GET -TimeoutSec 10
+        if ($remoteResp -and $remoteResp.versions) {
+            $existingManifest = $remoteResp
+            Write-Host "[OK] Fetched existing manifest from Supabase ($($remoteResp.versions.Count) versions)" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "[INFO] No remote manifest found, starting fresh" -ForegroundColor Yellow
+    }
+}
+
+# Build the new version entry
+$newEntry = @{
+    version = "v$VERSION"
+    released_at = $releasedAt
+    release_notes = $changelogContent
+    tarball = "releases/$TARBALL_NAME"
+    sha256 = $SHA256
+}
+
+# Build versions array: prepend new version, keep last 5
+$versionsList = @()
+if ($existingManifest -and $existingManifest.versions) {
+    foreach ($v in $existingManifest.versions) {
+        # Skip if this version already exists (avoid duplicates)
+        if ($v.version -ne "v$VERSION") {
+            $versionsList += $v
+        }
+    }
+}
+# Prepend the new version at the top
+$versionsList = @($newEntry) + $versionsList
+# Keep only the last 5 versions
+if ($versionsList.Count -gt 5) {
+    $versionsList = $versionsList[0..4]
+}
+
+Write-Host "[OK] Versions in manifest: $($versionsList.Count)" -ForegroundColor Green
+
+# Build manifest JSON with versions array
 $manifest = @{
     version = "v$VERSION"
     released_at = $releasedAt
     release_notes = $changelogContent
     tarball = "releases/$TARBALL_NAME"
     sha256 = $SHA256
+    versions = $versionsList
 } | ConvertTo-Json -Depth 5
 
 $manifestPath = Join-Path $PROJECT_ROOT "manifest.json"
-$manifest | Set-Content -Path $manifestPath -Encoding UTF8
+[System.IO.File]::WriteAllText($manifestPath, $manifest, [System.Text.Encoding]::UTF8)
 Write-Host "[OK] manifest.json updated" -ForegroundColor Green
 
 # --- Upload to Supabase Storage ---

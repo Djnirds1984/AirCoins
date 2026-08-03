@@ -25,6 +25,15 @@ type UpdaterHandler struct {
 }
 
 type updateManifest struct {
+	Version      string          `json:"version"`
+	ReleasedAt   string          `json:"released_at"`
+	ReleaseNotes string          `json:"release_notes"`
+	Tarball      string          `json:"tarball"`
+	SHA256       string          `json:"sha256"`
+	Versions     []manifestEntry `json:"versions"`
+}
+
+type manifestEntry struct {
 	Version      string `json:"version"`
 	ReleasedAt   string `json:"released_at"`
 	ReleaseNotes string `json:"release_notes"`
@@ -97,6 +106,7 @@ func (h *UpdaterHandler) fetchLatest(force bool) (*updateManifest, error) {
 }
 
 // CheckForUpdate queries the latest Supabase manifest and compares versions.
+// Returns all available versions for the version cards UI.
 func (h *UpdaterHandler) CheckForUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -111,11 +121,25 @@ func (h *UpdaterHandler) CheckForUpdate(w http.ResponseWriter, r *http.Request) 
 			"current_version":  apiVersion,
 			"update_available": false,
 			"error":            fmt.Sprintf("Unable to check for updates: %v", err),
+			"versions":         []manifestEntry{},
 		})
 		return
 	}
 
 	updateAvailable := compareSemver(apiVersion, manifest.Version) < 0
+
+	// Build versions list: prefer the versions array from manifest,
+	// fall back to just the latest entry if versions array is empty.
+	versions := manifest.Versions
+	if len(versions) == 0 && manifest.Version != "" {
+		versions = []manifestEntry{{
+			Version:      manifest.Version,
+			ReleasedAt:   manifest.ReleasedAt,
+			ReleaseNotes: manifest.ReleaseNotes,
+			Tarball:      manifest.Tarball,
+			SHA256:       manifest.SHA256,
+		}}
+	}
 
 	sendJSON(w, 200, map[string]interface{}{
 		"current_version":  apiVersion,
@@ -124,15 +148,26 @@ func (h *UpdaterHandler) CheckForUpdate(w http.ResponseWriter, r *http.Request) 
 		"release_notes":    manifest.ReleaseNotes,
 		"published_at":     manifest.ReleasedAt,
 		"checked_at":       time.Now().UTC().Format(time.RFC3339),
+		"versions":         versions,
 	})
 }
 
 // DownloadUpdate fetches the manifest, downloads the tarball from Supabase
 // Storage, verifies its SHA256, and saves it to /opt/aircoins/updates/.
+// Accepts an optional "version" field in the JSON body to download a specific
+// version. If omitted, downloads the latest version.
 func (h *UpdaterHandler) DownloadUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+
+	// Parse optional version from request body
+	var reqBody struct {
+		Version string `json:"version"`
+	}
+	if r.Body != nil {
+		json.NewDecoder(r.Body).Decode(&reqBody)
 	}
 
 	// Get manifest for tarball URL
@@ -144,11 +179,39 @@ func (h *UpdaterHandler) DownloadUpdate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Find the target version entry
+	var targetEntry *manifestEntry
+	if reqBody.Version != "" {
+		// Look for the specific version in the versions array
+		targetVersion := strings.TrimPrefix(reqBody.Version, "v")
+		for i := range manifest.Versions {
+			v := strings.TrimPrefix(manifest.Versions[i].Version, "v")
+			if v == targetVersion {
+				targetEntry = &manifest.Versions[i]
+				break
+			}
+		}
+		if targetEntry == nil {
+			sendJSON(w, http.StatusOK, map[string]interface{}{
+				"success": false, "message": "Version " + reqBody.Version + " not found in manifest",
+			})
+			return
+		}
+	} else {
+		// Use the latest version
+		targetEntry = &manifestEntry{
+			Version:      manifest.Version,
+			ReleasedAt:   manifest.ReleasedAt,
+			ReleaseNotes: manifest.ReleaseNotes,
+			Tarball:      manifest.Tarball,
+			SHA256:       manifest.SHA256,
+		}
+	}
+
 	// Create download directory
 	os.MkdirAll("/opt/aircoins/updates", 0755)
 
-	// Construct full download URL — trim trailing slash from base and
-	// leading slash from tarball path to avoid double-slash 404s.
+	// Construct full download URL
 	supabaseURL := strings.TrimRight(os.Getenv("SUPABASE_URL"), "/")
 	if supabaseURL == "" {
 		sendJSON(w, http.StatusOK, map[string]interface{}{
@@ -156,9 +219,9 @@ func (h *UpdaterHandler) DownloadUpdate(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
-	tarball := strings.TrimLeft(manifest.Tarball, "/")
+	tarball := strings.TrimLeft(targetEntry.Tarball, "/")
 	downloadURL := fmt.Sprintf("%s/storage/v1/object/public/aircoins/%s", supabaseURL, tarball)
-	log.Printf("[updater] downloading tarball: %s", downloadURL)
+	log.Printf("[updater] downloading tarball: %s (version %s)", downloadURL, targetEntry.Version)
 
 	// Use a separate client with 5-minute timeout for large downloads
 	dlClient := &http.Client{Timeout: 5 * time.Minute}
@@ -180,7 +243,7 @@ func (h *UpdaterHandler) DownloadUpdate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	filename := fmt.Sprintf("aircoins-v%s.tar.gz", strings.TrimPrefix(manifest.Version, "v"))
+	filename := fmt.Sprintf("aircoins-v%s.tar.gz", strings.TrimPrefix(targetEntry.Version, "v"))
 	filePath := "/opt/aircoins/updates/" + filename
 
 	outFile, err := os.Create(filePath)
@@ -211,11 +274,11 @@ func (h *UpdaterHandler) DownloadUpdate(w http.ResponseWriter, r *http.Request) 
 	hash := sha256.Sum256(downloadedFile)
 	actualSHA := hex.EncodeToString(hash[:])
 
-	if manifest.SHA256 != "" && !strings.EqualFold(actualSHA, manifest.SHA256) {
+	if targetEntry.SHA256 != "" && !strings.EqualFold(actualSHA, targetEntry.SHA256) {
 		os.Remove(filePath)
 		sendJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false,
-			"message": fmt.Sprintf("SHA256 mismatch: expected %s, got %s", manifest.SHA256, actualSHA),
+			"message": fmt.Sprintf("SHA256 mismatch: expected %s, got %s", targetEntry.SHA256, actualSHA),
 		})
 		return
 	}
@@ -224,13 +287,13 @@ func (h *UpdaterHandler) DownloadUpdate(w http.ResponseWriter, r *http.Request) 
 	sendJSON(w, http.StatusOK, map[string]interface{}{
 		"success":  true,
 		"message":  "Download complete",
-		"version":  manifest.Version,
+		"version":  targetEntry.Version,
 		"filename": filename,
 	})
 }
 
-// CheckDownloadedFile checks if a downloaded update tarball exists in
-// /opt/aircoins/updates/ and returns its metadata.
+// CheckDownloadedFile checks if downloaded update tarballs exist in
+// /opt/aircoins/updates/ and returns their metadata.
 func (h *UpdaterHandler) CheckDownloadedFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -241,51 +304,79 @@ func (h *UpdaterHandler) CheckDownloadedFile(w http.ResponseWriter, r *http.Requ
 	entries, err := os.ReadDir(updateDir)
 	if err != nil {
 		sendJSON(w, http.StatusOK, map[string]interface{}{
-			"found": false,
+			"found":    false,
+			"versions": []interface{}{},
 		})
 		return
 	}
 
+	var downloaded []map[string]interface{}
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), "aircoins-v") && strings.HasSuffix(e.Name(), ".tar.gz") {
 			info, _ := e.Info()
 			// Extract version from filename: "aircoins-v1.8.0.tar.gz" -> "v1.8.0"
 			version := strings.TrimPrefix(strings.TrimSuffix(e.Name(), ".tar.gz"), "aircoins-")
-			sendJSON(w, http.StatusOK, map[string]interface{}{
-				"found":    true,
+			downloaded = append(downloaded, map[string]interface{}{
 				"filename": e.Name(),
 				"version":  version,
 				"size":     info.Size(),
 			})
-			return
 		}
 	}
 
 	sendJSON(w, http.StatusOK, map[string]interface{}{
-		"found": false,
+		"found":    len(downloaded) > 0,
+		"versions": downloaded,
 	})
 }
 
 // PerformUpdate installs from a previously downloaded local tarball file.
+// Accepts an optional "version" field in the JSON body to install a specific
+// version. If omitted, installs whatever tarball is found in /opt/aircoins/updates/.
 func (h *UpdaterHandler) PerformUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	// Parse optional version from request body
+	var reqBody struct {
+		Version string `json:"version"`
+	}
+	if r.Body != nil {
+		json.NewDecoder(r.Body).Decode(&reqBody)
+	}
+
 	// Find the downloaded tarball in /opt/aircoins/updates/
 	updateDir := "/opt/aircoins/updates"
 	entries, _ := os.ReadDir(updateDir)
 	var tarballPath string
+	targetName := ""
+	if reqBody.Version != "" {
+		// Look for the specific version tarball
+		targetName = fmt.Sprintf("aircoins-v%s.tar.gz", strings.TrimPrefix(reqBody.Version, "v"))
+	}
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "aircoins-v") && strings.HasSuffix(e.Name(), ".tar.gz") {
+		if !strings.HasPrefix(e.Name(), "aircoins-v") || !strings.HasSuffix(e.Name(), ".tar.gz") {
+			continue
+		}
+		if targetName != "" {
+			if e.Name() == targetName {
+				tarballPath = updateDir + "/" + e.Name()
+				break
+			}
+		} else {
 			tarballPath = updateDir + "/" + e.Name()
 			break
 		}
 	}
 	if tarballPath == "" {
+		msg := "No downloaded update file found. Please download first."
+		if targetName != "" {
+			msg = fmt.Sprintf("Version %s tarball not found. Please download it first.", reqBody.Version)
+		}
 		sendJSON(w, http.StatusOK, map[string]interface{}{
-			"success": false, "message": "No downloaded update file found. Please download first.",
+			"success": false, "message": msg,
 		})
 		return
 	}

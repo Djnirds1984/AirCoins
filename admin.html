@@ -1927,6 +1927,59 @@
                         </div>
                     </div>
 
+                    <!-- IP Info (live from ISP) -->
+                    <div id="wan-ip-info" style="display:none;background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.15);border-radius:8px;padding:12px 16px;margin:4px 0 8px 0;">
+                        <div style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">ISP Connection Info</div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;">
+                            <div>
+                                <span style="font-size:12px;color:#888;">IP Address</span>
+                                <div id="wan-ip-addr" style="font-size:14px;color:#00d4ff;font-weight:600;">—</div>
+                            </div>
+                            <div>
+                                <span style="font-size:12px;color:#888;">Subnet</span>
+                                <div id="wan-ip-subnet" style="font-size:14px;color:#ccc;">—</div>
+                            </div>
+                            <div>
+                                <span style="font-size:12px;color:#888;">Gateway</span>
+                                <div id="wan-ip-gateway" style="font-size:14px;color:#ccc;">—</div>
+                            </div>
+                            <div>
+                                <span style="font-size:12px;color:#888;">DNS</span>
+                                <div id="wan-ip-dns" style="font-size:14px;color:#ccc;word-break:break-all;">—</div>
+                            </div>
+                        </div>
+                        <div id="wan-ip-status" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                    </div>
+
+                    <!-- VLAN IP Info (shown only in VLAN DHCP mode) -->
+                    <div id="wan-vlan-ip-info" style="display:none;background:rgba(76,175,80,0.08);border:1px solid rgba(76,175,80,0.2);border-radius:8px;padding:12px 16px;margin:4px 0 8px 0;">
+                        <div style="font-size:12px;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">
+                            VLAN ISP Connection <span id="wan-vlan-ip-label" style="color:#4caf50;font-weight:600;"></span>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;">
+                            <div>
+                                <span style="font-size:12px;color:#888;">VLAN IP Address</span>
+                                <div id="wan-vlan-ip-addr" style="font-size:14px;color:#4caf50;font-weight:600;">—</div>
+                            </div>
+                            <div>
+                                <span style="font-size:12px;color:#888;">Subnet</span>
+                                <div id="wan-vlan-ip-subnet" style="font-size:14px;color:#ccc;">—</div>
+                            </div>
+                            <div>
+                                <span style="font-size:12px;color:#888;">Gateway</span>
+                                <div id="wan-vlan-ip-gateway" style="font-size:14px;color:#ccc;">—</div>
+                            </div>
+                            <div>
+                                <span style="font-size:12px;color:#888;">DNS</span>
+                                <div id="wan-vlan-ip-dns" style="font-size:14px;color:#ccc;word-break:break-all;">—</div>
+                            </div>
+                        </div>
+                        <div id="wan-vlan-ip-status" style="margin-top:6px;font-size:12px;color:#888;"></div>
+                    </div>
+
+                    <!-- Internet connectivity status -->
+                    <div id="wan-internet-status" style="display:none;margin:4px 0 8px 0;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;"></div>
+
                     <!-- Mode selector -->
                     <div class="settings-row">
                         <div class="settings-field">
@@ -2489,26 +2542,27 @@
 
 <!-- Updater Section -->
 <div id="section-updater" class="section" style="display:none;">
-    <div class="card" style="max-width:700px;">
-        <h2 style="margin-bottom:20px;">Software Updates</h2>
-        <div id="updater-content" style="text-align:center; padding:20px; color:#888;">
-            Click "Check for Updates" to scan for new releases.
+    <div class="card" style="max-width:800px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <h2 style="margin:0;">Software Updates</h2>
+            <button id="btn-check-update" onclick="loadUpdater()" style="padding:8px 18px; border-radius:8px; border:none; background:#00bcd4; color:#fff; cursor:pointer; font-size:13px;font-weight:600;">&#x21bb; Check for Updates</button>
         </div>
-        <div style="margin-top:16px; text-align:center;">
-            <button id="btn-check-update" onclick="loadUpdater()" style="padding:10px 24px; border-radius:8px; border:none; background:#00bcd4; color:#fff; cursor:pointer; font-size:14px;">Check for Updates</button>
-            <button id="btn-download" onclick="downloadUpdate()" style="display:none; padding:10px 24px; border-radius:8px; border:none; background:#2196f3; color:#fff; cursor:pointer; font-size:14px; font-weight:600; margin-right:8px;">⬇ Download Update</button>
-            <button id="btn-install" onclick="installUpdate()" disabled style="display:none; padding:10px 24px; border-radius:8px; border:none; background:#4caf50; color:#fff; cursor:pointer; font-size:14px; font-weight:600; opacity:0.5;">⚡ Install Update</button>
+        <!-- Current version + status bar -->
+        <div id="updater-status" style="padding:12px 16px;border-radius:8px;margin-bottom:16px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);">
+            <span style="color:#888;font-size:13px;">Current version:</span>
+            <strong id="current-version-label" style="color:#fff;margin-left:4px;">—</strong>
+            <span id="updater-status-badge" style="float:right;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;"></span>
         </div>
-        <div id="update-progress" style="display:none; margin-top:16px; max-width:500px;">
-            <div style="background:#1a1a2e; border-radius:8px; overflow:hidden; height:24px; position:relative;">
+        <!-- Global progress bar (shown during download/install) -->
+        <div id="update-progress" style="display:none; margin-bottom:16px;">
+            <div style="background:#1a1a2e; border-radius:8px; overflow:hidden; height:20px; position:relative;">
                 <div id="update-progress-bar" style="height:100%; background:linear-gradient(90deg, #2196f3, #00bcd4); width:0%; transition:width 0.3s ease; border-radius:8px;"></div>
             </div>
-            <div id="update-progress-text" style="color:#888; font-size:12px; margin-top:6px; text-align:center;"></div>
+            <div id="update-progress-text" style="color:#888; font-size:12px; margin-top:4px; text-align:center;"></div>
         </div>
-        <div id="downloaded-file-info" style="display:none; margin-top:12px; padding:10px 16px; background:rgba(76,175,80,0.1); border:1px solid rgba(76,175,80,0.3); border-radius:8px;">
-            <span style="color:#4caf50;">✓</span> <span id="downloaded-filename" style="color:#ccc; font-family:monospace; font-size:12px;"></span>
-            <span id="downloaded-version" style="color:#00bcd4; margin-left:8px;"></span>
-            <a href="#" onclick="deleteDownload()" style="color:#f44336; font-size:12px; margin-left:12px; text-decoration:none;">✕ Delete</a>
+        <!-- Version cards container -->
+        <div id="updater-content" style="color:#888;">
+            <div style="text-align:center;padding:30px;">Press "Check for Updates" or wait for auto-check…</div>
         </div>
     </div>
 </div>
@@ -2751,7 +2805,7 @@ function showSection(name) {
     } else if (name === 'zerotier') {
         loadZeroTierStatus();
     } else if (name === 'updater') {
-        loadUpdater();
+        autoCheckUpdater();
     }
 }
 
@@ -4051,6 +4105,9 @@ async function loadSettings() {
             portLabel.style.color = '#ffa500';
         }
 
+        // Update IP info display
+        updateWANIPInfo(wanData.ip_info, wanData.vlan_ip_info, wanData.internet);
+
         // Set mode
         var modeSel = document.getElementById('wan-mode');
         modeSel.value = wanData.mode || 'dhcp';
@@ -4206,6 +4263,64 @@ function populateWANVlanDropdown(vlans) {
     }
 }
 
+function updateWANIPInfo(ipInfo, vlanIPInfo, internet) {
+    // Base WAN IP info
+    var container = document.getElementById('wan-ip-info');
+    if (!ipInfo || !ipInfo.ip) {
+        container.style.display = 'none';
+    } else {
+        container.style.display = 'block';
+        document.getElementById('wan-ip-addr').textContent = ipInfo.ip || '—';
+        document.getElementById('wan-ip-subnet').textContent = ipInfo.subnet || '—';
+        document.getElementById('wan-ip-gateway').textContent = ipInfo.gateway || '—';
+        document.getElementById('wan-ip-dns').textContent = ipInfo.dns || '—';
+        var statusEl = document.getElementById('wan-ip-status');
+        if (ipInfo.status === 'up') {
+            statusEl.innerHTML = '<span style="color:#4caf50;">&#9679;</span> Interface up';
+        } else {
+            statusEl.innerHTML = '<span style="color:#ffa500;">&#9679;</span> Interface down — no link detected';
+        }
+    }
+
+    // VLAN IP info (only shown when in VLAN DHCP mode)
+    var vlanContainer = document.getElementById('wan-vlan-ip-info');
+    if (vlanIPInfo && vlanIPInfo.ip) {
+        vlanContainer.style.display = 'block';
+        var label = document.getElementById('wan-vlan-ip-label');
+        label.textContent = '(' + (vlanIPInfo.interface || '') + ')';
+        document.getElementById('wan-vlan-ip-addr').textContent = vlanIPInfo.ip || '—';
+        document.getElementById('wan-vlan-ip-subnet').textContent = vlanIPInfo.subnet || '—';
+        document.getElementById('wan-vlan-ip-gateway').textContent = vlanIPInfo.gateway || '—';
+        document.getElementById('wan-vlan-ip-dns').textContent = vlanIPInfo.dns || '—';
+        var vlanStatusEl = document.getElementById('wan-vlan-ip-status');
+        if (vlanIPInfo.status === 'up') {
+            vlanStatusEl.innerHTML = '<span style="color:#4caf50;">&#9679;</span> VLAN interface up — ISP link active';
+        } else {
+            vlanStatusEl.innerHTML = '<span style="color:#f44336;">&#9679;</span> VLAN interface down — no ISP link. Make sure the VLAN is configured and the ISP cable is connected to the correct port.';
+        }
+    } else {
+        vlanContainer.style.display = 'none';
+    }
+
+    // Internet connectivity status
+    var inetEl = document.getElementById('wan-internet-status');
+    if (internet === 'yes') {
+        inetEl.style.display = 'block';
+        inetEl.style.background = 'rgba(76,175,80,0.12)';
+        inetEl.style.color = '#4caf50';
+        inetEl.style.border = '1px solid rgba(76,175,80,0.3)';
+        inetEl.innerHTML = '&#10003; Internet connected — device can reach the internet';
+    } else if (internet === 'no') {
+        inetEl.style.display = 'block';
+        inetEl.style.background = 'rgba(244,67,54,0.1)';
+        inetEl.style.color = '#f44336';
+        inetEl.style.border = '1px solid rgba(244,67,54,0.25)';
+        inetEl.innerHTML = '&#10007; No internet — cannot reach 8.8.8.8. Check ISP cable or VLAN config.';
+    } else {
+        inetEl.style.display = 'none';
+    }
+}
+
 async function refreshWANPort() {
     try {
         var res = await apiCall('GET', '/admin/wan');
@@ -4217,6 +4332,7 @@ async function refreshWANPort() {
             portLabel.textContent = 'WAN Port: (none detected)';
             portLabel.style.color = '#ffa500';
         }
+        updateWANIPInfo((res && res.ip_info) || null, (res && res.vlan_ip_info) || null, (res && res.internet) || null);
         populateWANVlanDropdown((res && res.available_vlans) || []);
     } catch (e) {
         showNotification('Failed to refresh WAN port', 'error');
@@ -5721,162 +5837,207 @@ function cleanVersion(v) {
 
 async function loadUpdater() {
     var el = document.getElementById('updater-content');
-    el.innerHTML = '<div style="padding:20px; color:#888;">Checking for updates...</div>';
+    var badge = document.getElementById('updater-status-badge');
+    badge.textContent = 'Checking…';
+    badge.style.background = 'rgba(255,255,255,0.05)';
+    badge.style.color = '#888';
     try {
         var data = await apiCall('GET', '/admin/updater/check');
-        updateUpdaterUI(data);
-        checkDownloadedFile();
+        renderVersionCards(data);
     } catch (e) {
-        el.innerHTML = '<div style="padding:20px; color:#f44336;">Failed to check: ' + escapeHtml(e.message) + '</div>';
+        el.innerHTML = '<div style="padding:20px;text-align:center;color:#f44336;">Failed to check: ' + escapeHtml(e.message) + '</div>';
+        badge.textContent = 'Error';
+        badge.style.color = '#f44336';
     }
 }
 
-function updateUpdaterUI(data) {
+function renderVersionCards(data) {
     var el = document.getElementById('updater-content');
-    if (data.error) {
-        el.innerHTML = '<div style="padding:20px;">'
-            + '<div style="color:#ff9800; font-size:16px; margin-bottom:8px;">⚠ Unable to check for updates</div>'
-            + '<div style="color:#888; font-size:13px;">' + escapeHtml(data.error) + '</div>'
-            + '<div style="color:#666; font-size:12px; margin-top:8px;">Current version: ' + escapeHtml(cleanVersion(data.current_version)) + '</div>'
-            + '</div>';
+    var currentVer = cleanVersion(data.current_version);
+    var curLabel = document.getElementById('current-version-label');
+    var badge = document.getElementById('updater-status-badge');
+    curLabel.textContent = currentVer;
+
+    if (data.error && (!data.versions || data.versions.length === 0)) {
+        badge.textContent = 'Error';
+        badge.style.background = 'rgba(244,67,54,0.12)';
+        badge.style.color = '#f44336';
+        el.innerHTML = '<div style="padding:20px;text-align:center;">'
+            + '<div style="color:#ff9800;font-size:14px;margin-bottom:6px;">Unable to check for updates</div>'
+            + '<div style="color:#888;font-size:12px;">' + escapeHtml(data.error) + '</div></div>';
         return;
     }
-    var statusColor = data.update_available ? '#ff9800' : '#4caf50';
-    var statusText = data.update_available ? 'Update Available' : 'Up to Date';
-    var statusIcon = data.update_available ? '⬆' : '✓';
-    var html = '<div style="padding:16px;">'
-        + '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">'
-        + '<div><span style="color:#888; font-size:13px;">Installed:</span> <strong>' + escapeHtml(cleanVersion(data.current_version)) + '</strong></div>'
-        + '<div style="padding:4px 12px; border-radius:16px; background:' + statusColor + '22; color:' + statusColor + '; font-size:13px; font-weight:600;">' + statusIcon + ' ' + statusText + '</div>'
-        + '</div>';
+
     if (data.update_available) {
-        html += '<div style="margin-bottom:16px;">'
-            + '<span style="color:#888; font-size:13px;">Latest:</span> <strong style="color:#00bcd4;">' + escapeHtml(cleanVersion(data.latest_version)) + '</strong>'
-            + ' <span style="color:#666; font-size:12px;">(released ' + new Date(data.published_at).toLocaleDateString() + ')</span>'
+        badge.textContent = 'Update Available';
+        badge.style.background = 'rgba(255,152,0,0.12)';
+        badge.style.color = '#ff9800';
+    } else {
+        badge.textContent = 'Up to Date';
+        badge.style.background = 'rgba(76,175,80,0.12)';
+        badge.style.color = '#4caf50';
+    }
+
+    var versions = data.versions || [];
+    if (versions.length === 0) {
+        el.innerHTML = '<div style="padding:20px;text-align:center;color:#888;">No versions available.</div>';
+        return;
+    }
+
+    // Build downloaded set for quick lookup
+    var downloadedSet = {};
+    if (window._downloadedVersions) {
+        window._downloadedVersions.forEach(function(v) { downloadedSet[cleanVersion(v.version)] = true; });
+    }
+
+    var html = '';
+    versions.forEach(function(v) {
+        var ver = cleanVersion(v.version);
+        var isCurrent = (ver === currentVer);
+        var isNewer = compareSemverStr(ver, currentVer) > 0;
+        var isDownloaded = downloadedSet[ver] || false;
+
+        // Card border color
+        var borderColor = isCurrent ? 'rgba(76,175,80,0.4)' : isNewer ? 'rgba(0,188,212,0.3)' : 'rgba(255,255,255,0.08)';
+        var bgColor = isCurrent ? 'rgba(76,175,80,0.04)' : 'rgba(255,255,255,0.02)';
+
+        // Badge
+        var badgeHtml = '';
+        if (isCurrent) {
+            badgeHtml = '<span style="padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:rgba(76,175,80,0.15);color:#4caf50;">Installed</span>';
+        } else if (isNewer) {
+            badgeHtml = '<span style="padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:rgba(0,188,212,0.15);color:#00bcd4;">New</span>';
+        } else {
+            badgeHtml = '<span style="padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:rgba(255,255,255,0.06);color:#888;">Older</span>';
+        }
+        if (isDownloaded) {
+            badgeHtml += ' <span style="padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:rgba(33,150,243,0.15);color:#2196f3;">Downloaded</span>';
+        }
+
+        // Release date
+        var dateStr = v.released_at ? new Date(v.released_at).toLocaleDateString() : '';
+
+        // Release notes (truncated for older versions)
+        var notesHtml = '';
+        if (v.release_notes) {
+            var notes = v.release_notes.length > 200 && !isCurrent && !isNewer
+                ? v.release_notes.substring(0, 200) + '…'
+                : v.release_notes;
+            notesHtml = '<pre style="background:rgba(255,255,255,0.02);padding:8px 10px;border-radius:6px;font-size:11px;white-space:pre-wrap;max-height:120px;overflow-y:auto;color:#aaa;margin:8px 0 0 0;line-height:1.5;">' + escapeHtml(notes) + '</pre>';
+        }
+
+        // Buttons
+        var buttonsHtml = '';
+        if (isCurrent) {
+            buttonsHtml = '<span style="font-size:12px;color:#4caf50;">&#10003; This is the current version</span>';
+        } else {
+            var dlBtnId = 'dl-btn-' + ver.replace(/\./g, '-');
+            var instBtnId = 'inst-btn-' + ver.replace(/\./g, '-');
+            if (isDownloaded) {
+                buttonsHtml = '<button id="' + instBtnId + '" class="btn btn-primary" onclick="installVersion(\'' + ver + '\')" style="padding:6px 16px;font-size:12px;">&#9889; Install</button>'
+                    + '<button class="btn btn-ghost" onclick="deleteVersion(\'' + ver + '\')" style="padding:6px 12px;font-size:12px;color:#f44336;" title="Delete downloaded file">&#10005;</button>';
+            } else {
+                buttonsHtml = '<button id="' + dlBtnId + '" class="btn" onclick="downloadVersion(\'' + ver + '\')" style="padding:6px 16px;font-size:12px;background:#2196f3;color:#fff;border:none;border-radius:6px;cursor:pointer;">&#11015; Download</button>';
+            }
+        }
+
+        html += '<div id="card-' + ver.replace(/\./g, '-') + '" style="background:' + bgColor + ';border:1px solid ' + borderColor + ';border-radius:10px;padding:14px 18px;margin-bottom:10px;">'
+            + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
+            + '<div style="display:flex;align-items:center;gap:8px;">'
+            + '<strong style="font-size:15px;color:#fff;">v' + escapeHtml(ver) + '</strong>'
+            + badgeHtml
+            + '</div>'
+            + '<span style="font-size:12px;color:#666;">' + escapeHtml(dateStr) + '</span>'
+            + '</div>'
+            + notesHtml
+            + '<div style="margin-top:10px;display:flex;align-items:center;gap:8px;">'
+            + buttonsHtml
+            + '<span id="card-status-' + ver.replace(/\./g, '-') + '" style="font-size:12px;color:#888;"></span>'
+            + '</div>'
             + '</div>';
-        if (data.release_notes) {
-            html += '<div style="margin-bottom:16px;">'
-                + '<div style="color:#888; font-size:13px; margin-bottom:6px;">Release Notes:</div>'
-                + '<pre style="background:rgba(255,255,255,0.03); padding:12px; border-radius:8px; font-size:12px; white-space:pre-wrap; max-height:300px; overflow-y:auto; color:#ccc; margin:0;">' + escapeHtml(data.release_notes) + '</pre>'
-                + '</div>';
-        }
-    } else {
-        // Up to date — show release notes for the current version
-        var notesVersion = data.latest_version || data.current_version;
-        if (data.release_notes) {
-            html += '<div style="margin-top:16px;">'
-                + '<h4 style="color:#4caf50; margin-bottom:8px; font-size:14px;">Release Notes — ' + escapeHtml(cleanVersion(notesVersion)) + '</h4>'
-                + '<pre style="background:rgba(255,255,255,0.03); padding:12px; border-radius:8px; font-size:12px; white-space:pre-wrap; max-height:400px; overflow-y:auto; color:#ccc; margin:0; line-height:1.6;">' + escapeHtml(data.release_notes) + '</pre>'
-                + '</div>';
-        }
-    }
-    html += '</div>';
+    });
+
     el.innerHTML = html;
-    // Show/hide Download and Install buttons
-    var dlBtn = document.getElementById('btn-download');
-    var installBtn = document.getElementById('btn-install');
-    if (data.update_available) {
-        if (dlBtn) dlBtn.style.display = 'inline-block';
-        if (installBtn) installBtn.style.display = 'inline-block';
-    } else {
-        if (dlBtn) dlBtn.style.display = 'none';
-        if (installBtn) installBtn.style.display = 'none';
-    }
-    checkDownloadedFile();
 }
 
-async function downloadUpdate() {
-    var btn = document.getElementById('btn-download');
+async function downloadVersion(ver) {
+    var cardId = 'card-' + ver.replace(/\./g, '-');
+    var statusId = 'card-status-' + ver.replace(/\./g, '-');
+    var statusEl = document.getElementById(statusId);
+    var card = document.getElementById(cardId);
+    var progress = document.getElementById('update-progress');
     var progressBar = document.getElementById('update-progress-bar');
     var progressText = document.getElementById('update-progress-text');
-    var progress = document.getElementById('update-progress');
 
-    if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Downloading...'; btn.style.background = '#666'; }
+    if (statusEl) statusEl.textContent = 'Downloading…';
     if (progress) progress.style.display = 'block';
-    if (progressBar) progressBar.style.width = '50%';
-    if (progressText) progressText.textContent = 'Downloading update...';
+    if (progressBar) { progressBar.style.width = '50%'; progressBar.style.background = 'linear-gradient(90deg, #2196f3, #00bcd4)'; }
+    if (progressText) progressText.textContent = 'Downloading v' + ver + '…';
 
     try {
-        var data = await apiCall('POST', '/admin/updater/download');
+        var data = await apiCall('POST', '/admin/updater/download', { version: ver });
         if (data.success) {
             if (progressBar) progressBar.style.width = '100%';
-            if (progressText) progressText.textContent = '✓ Download complete — ready to install';
-            showNotification('Download complete: ' + (data.version || ''), 'success');
-            // Enable install button
-            var installBtn = document.getElementById('btn-install');
-            if (installBtn) { installBtn.disabled = false; installBtn.style.opacity = '1'; installBtn.style.display = 'inline-block'; }
-            // Show file info
-            var fileInfo = document.getElementById('downloaded-file-info');
-            if (fileInfo) { fileInfo.style.display = 'block'; }
-            var fn = document.getElementById('downloaded-filename');
-            if (fn) fn.textContent = data.filename || '';
-            var ver = document.getElementById('downloaded-version');
-            if (ver) ver.textContent = data.version || '';
-            // Disable download button
-            if (btn) { btn.disabled = true; btn.innerHTML = '✓ Downloaded'; }
+            if (progressText) progressText.textContent = 'Download complete — ready to install';
+            showNotification('Downloaded v' + ver, 'success');
+            // Refresh cards to show updated state
+            await checkDownloadedFile();
+            // Re-render with fresh data
+            var checkData = await apiCall('GET', '/admin/updater/check');
+            renderVersionCards(checkData);
         } else {
-            showNotification('Download failed: ' + (data.message || 'Unknown error'), 'error');
-            if (btn) { btn.disabled = false; btn.innerHTML = '⬇ Download Update'; btn.style.background = '#2196f3'; }
-            if (progressBar) progressBar.style.width = '0%';
-            if (progressText) progressText.textContent = 'Download failed';
+            showNotification('Download failed: ' + (data.message || ''), 'error');
+            if (statusEl) statusEl.textContent = 'Download failed';
+            if (progress) progress.style.display = 'none';
         }
     } catch (e) {
         showNotification('Download failed: ' + e.message, 'error');
-        if (btn) { btn.disabled = false; btn.innerHTML = '⬇ Download Update'; btn.style.background = '#2196f3'; }
+        if (statusEl) statusEl.textContent = 'Download failed';
         if (progress) progress.style.display = 'none';
     }
 }
 
-async function installUpdate() {
-    if (!confirm('This will install the downloaded update. The system will restart. Continue?')) return;
+async function installVersion(ver) {
+    if (!confirm('Install v' + ver + '? The system will restart. Continue?')) return;
 
-    var btn = document.getElementById('btn-install');
+    var statusId = 'card-status-' + ver.replace(/\./g, '-');
+    var statusEl = document.getElementById(statusId);
+    var progress = document.getElementById('update-progress');
     var progressBar = document.getElementById('update-progress-bar');
     var progressText = document.getElementById('update-progress-text');
-    var progress = document.getElementById('update-progress');
 
-    if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Installing...'; btn.style.background = '#666'; }
+    if (statusEl) statusEl.textContent = 'Installing…';
     if (progress) progress.style.display = 'block';
-    if (progressBar) progressBar.style.width = '75%';
-    if (progressText) progressText.textContent = 'Installing update...';
+    if (progressBar) { progressBar.style.width = '75%'; progressBar.style.background = 'linear-gradient(90deg, #ff9800, #f44336)'; }
+    if (progressText) progressText.textContent = 'Installing v' + ver + '…';
 
     try {
-        var data = await apiCall('POST', '/admin/updater/update');
+        var data = await apiCall('POST', '/admin/updater/update', { version: ver });
         if (data.success) {
             if (progressBar) { progressBar.style.width = '100%'; progressBar.style.background = 'linear-gradient(90deg, #4caf50, #8bc34a)'; }
-            if (progressText) progressText.textContent = '✓ Update complete — restarting services...';
-            showNotification('Update installed! Service is restarting. Page will reload in 30 seconds.', 'success');
+            if (progressText) progressText.textContent = 'Update complete — restarting services…';
+            showNotification('v' + ver + ' installed! Restarting…', 'success');
             setTimeout(function() { location.reload(); }, 30000);
         } else {
-            showNotification('Install failed: ' + (data.message || 'Unknown error'), 'error');
-            if (btn) { btn.disabled = false; btn.innerHTML = '⚡ Install Update'; btn.style.background = '#4caf50'; }
-            if (progressText) progressText.textContent = 'Install failed';
+            showNotification('Install failed: ' + (data.message || ''), 'error');
+            if (statusEl) statusEl.textContent = 'Install failed';
+            if (progress) progress.style.display = 'none';
         }
     } catch (e) {
         showNotification('Install failed: ' + e.message, 'error');
-        if (btn) { btn.disabled = false; btn.innerHTML = '⚡ Install Update'; btn.style.background = '#4caf50'; }
+        if (statusEl) statusEl.textContent = 'Install failed';
+        if (progress) progress.style.display = 'none';
     }
 }
 
-async function deleteDownload() {
-    if (!confirm('Delete the downloaded update file?')) return;
+async function deleteVersion(ver) {
+    if (!confirm('Delete downloaded v' + ver + '?')) return;
     try {
-        var data = await apiCall('DELETE', '/admin/updater/download');
-        if (data.success) {
-            showNotification('Downloaded file deleted', 'success');
-            // Hide file info
-            var fileInfo = document.getElementById('downloaded-file-info');
-            if (fileInfo) fileInfo.style.display = 'none';
-            // Disable install button
-            var installBtn = document.getElementById('btn-install');
-            if (installBtn) { installBtn.disabled = true; installBtn.style.opacity = '0.5'; }
-            // Re-enable download button
-            var dlBtn = document.getElementById('btn-download');
-            if (dlBtn) { dlBtn.disabled = false; dlBtn.innerHTML = '⬇ Download Update'; dlBtn.style.background = '#2196f3'; }
-            // Hide progress
-            var progress = document.getElementById('update-progress');
-            if (progress) progress.style.display = 'none';
-        }
+        await apiCall('DELETE', '/admin/updater/download');
+        showNotification('Deleted v' + ver, 'success');
+        await checkDownloadedFile();
+        var checkData = await apiCall('GET', '/admin/updater/check');
+        renderVersionCards(checkData);
     } catch (e) {
         showNotification('Delete failed: ' + e.message, 'error');
     }
@@ -5885,30 +6046,30 @@ async function deleteDownload() {
 async function checkDownloadedFile() {
     try {
         var data = await apiCall('GET', '/admin/updater/downloaded');
-        if (data.found) {
-            // Show file info
-            var fileInfo = document.getElementById('downloaded-file-info');
-            if (fileInfo) fileInfo.style.display = 'block';
-            var fn = document.getElementById('downloaded-filename');
-            if (fn) fn.textContent = data.filename;
-            var ver = document.getElementById('downloaded-version');
-            if (ver) ver.textContent = data.version;
-            // Enable install button
-            var installBtn = document.getElementById('btn-install');
-            if (installBtn) { installBtn.style.display = 'inline-block'; installBtn.disabled = false; installBtn.style.opacity = '1'; }
-            // Disable download button (already downloaded)
-            var dlBtn = document.getElementById('btn-download');
-            if (dlBtn) { dlBtn.disabled = true; dlBtn.innerHTML = '✓ Downloaded'; }
-            // Show progress as complete
-            var progress = document.getElementById('update-progress');
-            if (progress) progress.style.display = 'block';
-            var bar = document.getElementById('update-progress-bar');
-            if (bar) bar.style.width = '100%';
-            var text = document.getElementById('update-progress-text');
-            if (text) text.textContent = '✓ Downloaded — ready to install';
-        }
+        window._downloadedVersions = data.versions || [];
     } catch (e) {
-        // Silently fail — file check is not critical
+        window._downloadedVersions = [];
+    }
+}
+
+// compareSemverStr: returns -1 if a < b, 0 if equal, +1 if a > b
+function compareSemverStr(a, b) {
+    a = a.replace(/^v/, ''); b = b.replace(/^v/, '');
+    var ap = a.split('.'), bp = b.split('.');
+    for (var i = 0; i < 3; i++) {
+        var ai = parseInt(ap[i]) || 0, bi = parseInt(bp[i]) || 0;
+        if (ai < bi) return -1;
+        if (ai > bi) return 1;
+    }
+    return 0;
+}
+
+// Auto-check for updates when the updater section is shown
+var _updaterAutoChecked = false;
+function autoCheckUpdater() {
+    if (!_updaterAutoChecked) {
+        _updaterAutoChecked = true;
+        checkDownloadedFile().then(function() { loadUpdater(); });
     }
 }
 

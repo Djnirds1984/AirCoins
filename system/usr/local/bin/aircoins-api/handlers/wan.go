@@ -26,17 +26,54 @@ import (
 // parsing `ip -o route show default`. Returns "" when no default route
 // exists (e.g. no uplink connected).
 func detectWANIface() string {
+	// 1. Try default route
 	out, err := exec.Command("ip", "-o", "route", "show", "default").Output()
-	if err != nil || len(out) == 0 {
-		return ""
+	if err == nil && len(out) > 0 {
+		// Typical output: "default via 192.168.1.1 dev end0 proto dhcp metric 100"
+		re := regexp.MustCompile(`dev\s+(\S+)`)
+		m := re.FindStringSubmatch(string(out))
+		if len(m) >= 2 {
+			return m[1]
+		}
 	}
-	// Typical output: "default via 192.168.1.1 dev eth0 proto dhcp metric 100"
-	re := regexp.MustCompile(`dev\s+(\S+)`)
-	m := re.FindStringSubmatch(string(out))
-	if len(m) < 2 {
-		return ""
+
+	// 2. Scan /sys/class/net for the first Ethernet-like interface
+	//    that is UP and is NOT a loopback, bridge, VLAN, or wireless.
+	entries, err := os.ReadDir("/sys/class/net")
+	if err == nil {
+		for _, e := range entries {
+			name := e.Name()
+			// Skip known non-WAN interfaces
+			if name == "lo" || strings.HasPrefix(name, "br") || strings.HasPrefix(name, "docker") ||
+				strings.HasPrefix(name, "veth") || strings.HasPrefix(name, "wlan") ||
+				strings.HasPrefix(name, "wifi") || strings.Contains(name, ".") {
+				continue
+			}
+			// Accept end0, eth0, enp*, ens*, enx* (Ethernet-like)
+			if strings.HasPrefix(name, "end") || strings.HasPrefix(name, "eth") ||
+				strings.HasPrefix(name, "enp") || strings.HasPrefix(name, "ens") ||
+				strings.HasPrefix(name, "enx") || strings.HasPrefix(name, "en") {
+				// Verify it's UP
+				if data, err := os.ReadFile("/sys/class/net/" + name + "/operstate"); err == nil {
+					state := strings.TrimSpace(string(data))
+					if state == "up" || state == "unknown" {
+						return name
+					}
+				}
+			}
+		}
 	}
-	return m[1]
+
+	// 3. Last resort: try stored eth_interface setting
+	var eth string
+	if err := models.DB.QueryRow("SELECT value FROM system_settings WHERE key='eth_interface'").Scan(&eth); err == nil && eth != "" {
+		// Verify it actually exists
+		if _, err := os.Stat("/sys/class/net/" + eth); err == nil {
+			return eth
+		}
+	}
+
+	return ""
 }
 
 // ============================================
@@ -441,16 +478,9 @@ func subnetToCIDR(subnet string) string {
 func applyWANToOS(cfg models.WANConfig) map[string]interface{} {
 	wanIface := detectWANIface()
 	if wanIface == "" {
-		// Fallback: try the saved eth_interface setting
-		var eth string
-		if err := models.DB.QueryRow("SELECT value FROM system_settings WHERE key='eth_interface'").Scan(&eth); err == nil && eth != "" {
-			wanIface = eth
-		}
-	}
-	if wanIface == "" {
 		return map[string]interface{}{
 			"success": false,
-			"error":   "no WAN interface detected and no eth_interface setting found",
+			"error":   "no WAN interface detected (tried default route, /sys/class/net scan, and stored eth_interface)",
 		}
 	}
 

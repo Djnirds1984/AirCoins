@@ -4,6 +4,17 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.10.10 — WAN: Fix "Cannot find device eth0" on end0 Systems
+
+**Release date:** August 2026
+
+### Fixed
+- **WAN interface detection now scans for end0, eth0, enp*, ens*, enx*** — Previously only used `ip route show default` which fails when there's no default route. Now falls back to scanning `/sys/class/net` for the first Ethernet-like interface that is UP.
+- **Hardware fingerprint MAC detection** — Now scans for any Ethernet interface (end0, eth0, etc.) instead of hardcoded `eth0`.
+- **Stored eth_interface fallback** — Only used as last resort, and now verifies the interface actually exists before returning it.
+
+---
+
 ## v1.10.9 — WAN: Fix dhclient/dhcpcd Service Error
 
 **Release date:** August 2026

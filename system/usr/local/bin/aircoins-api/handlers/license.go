@@ -84,8 +84,7 @@ func HardwareFingerprint() string {
 	}
 
 	// 3. Ethernet MAC address (usually unique per board)
-	if mac := readFirstLine("/sys/class/net/eth0/address"); mac != "" {
-		mac = strings.ToLower(strings.TrimSpace(mac))
+	if mac := readEthMAC(); mac != "" {
 		// Reject common dummy/universal MACs
 		if mac != "00:00:00:00:00:00" && mac != "02:00:00:00:00:00" && !strings.HasPrefix(mac, "02:00:00") {
 			return "mac-" + strings.ReplaceAll(mac, ":", "")
@@ -132,6 +131,26 @@ func readFirstLine(path string) string {
 	return strings.SplitN(strings.TrimSpace(string(data)), "\n", 2)[0]
 }
 
+// readEthMAC returns the MAC address of the first Ethernet-like interface
+// found in /sys/class/net (end0, eth0, enp*, ens*, enx*). Returns "" if none.
+func readEthMAC() string {
+	entries, err := os.ReadDir("/sys/class/net")
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, "end") || strings.HasPrefix(name, "eth") ||
+			strings.HasPrefix(name, "enp") || strings.HasPrefix(name, "ens") ||
+			strings.HasPrefix(name, "enx") {
+			if mac := readFirstLine("/sys/class/net/" + name + "/address"); mac != "" {
+				return strings.ToLower(strings.TrimSpace(mac))
+			}
+		}
+	}
+	return ""
+}
+
 // buildHardwareStamp creates a fingerprint of the current hardware by
 // combining all available hardware identifiers. This is used to detect
 // when the SD card has been moved to a different board.
@@ -165,8 +184,7 @@ func buildHardwareStamp() string {
 	}
 
 	// Ethernet MAC
-	if mac := readFirstLine("/sys/class/net/eth0/address"); mac != "" {
-		mac = strings.ToLower(strings.TrimSpace(mac))
+	if mac := readEthMAC(); mac != "" {
 		if mac != "00:00:00:00:00:00" {
 			parts = append(parts, "mac:"+mac)
 		}

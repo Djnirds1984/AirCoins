@@ -213,6 +213,12 @@ extend_armed_window() {
 }
 
 # handle_coin_pulse: log, post event to API, extend window, debounce
+#
+# IMPORTANT: Do NOT block here waiting for the pulse to end or the pin
+# to go HIGH again.  Multi-peso coins fire a rapid train of pulses
+# (typically 50-100 ms apart).  If we block after the first pulse we
+# miss every subsequent one — a 10-peso coin looks like a 1-peso coin.
+# Debouncing is handled by the caller (edge-detect loops) instead.
 handle_coin_pulse() {
     COIN_COUNT=$((COIN_COUNT + 1))
 
@@ -229,15 +235,10 @@ handle_coin_pulse() {
     # Keep the slot armed for follow-up coins
     extend_armed_window
 
-    # Debounce - wait for pulse to end (coin mechanism takes ~50-100ms)
-    sleep 0.15
-
-    # Wait for pin to go HIGH again (pulse ended)
-    local timeout=0
-    while [ "$(gpio_read "$COIN_PULSE_PIN")" = "0" ] && [ $timeout -lt 100 ]; do
-        sleep 0.01
-        timeout=$((timeout + 1))
-    done
+    # Brief debounce to suppress electrical bounce (~30-50 ms typical)
+    # Do NOT wait for the pin to return HIGH here — the caller handles
+    # edge tracking so rapid multi-pulse trains are not missed.
+    sleep 0.05
 }
 
 # ============================================
@@ -245,6 +246,11 @@ handle_coin_pulse() {
 # ============================================
 # Edge-triggered wait via libgpiod gpiomon: blocks (zero CPU) until a
 # falling edge or until the remaining armed window elapses.
+#
+# After each pulse we wait for the pin to return HIGH before re-arming
+# the edge monitor.  This is essential for multi-pulse coins: without
+# the wait, gpiomon could re-fire on the same LOW level or miss the
+# next HIGH→LOW transition in a rapid pulse train.
 armed_loop_gpiomon() {
     local expires now remaining rc
     while coinslot_armed; do
@@ -257,6 +263,17 @@ armed_loop_gpiomon() {
         rc=$?
         if [ $rc -eq 0 ]; then
             handle_coin_pulse
+
+            # Wait for the pin to return HIGH before re-arming the edge
+            # trigger.  Without this, a multi-pulse coin (10 pulses in
+            # rapid succession) would only register the first pulse
+            # because gpiomon would be re-entered while the line is
+            # still LOW and miss subsequent HIGH→LOW transitions.
+            local wait_hi=0
+            while [ "$(gpio_read "$COIN_PULSE_PIN")" = "0" ] && [ $wait_hi -lt 100 ]; do
+                sleep 0.01
+                wait_hi=$((wait_hi + 1))
+            done
         elif [ $rc -eq 2 ]; then
             # gpiomon unusable (missing tool or line grab refused) — fall
             # back to polling for the rest of this armed window
@@ -269,6 +286,12 @@ armed_loop_gpiomon() {
 }
 
 # Fallback: fast polling for coin pulses while armed (10ms interval)
+#
+# Edge tracking: we detect a coin when the pin transitions HIGH→LOW.
+# After handling the pulse we wait for the pin to return HIGH before
+# looking for the next falling edge.  This prevents the same LOW level
+# from being counted as multiple coins, while still catching rapid
+# multi-pulse trains (each new pulse is a new HIGH→LOW transition).
 armed_loop_poll() {
     local prev_state=1 current_state
     while coinslot_armed; do
@@ -278,7 +301,18 @@ armed_loop_poll() {
         # Detect falling edge (HIGH -> LOW = coin inserted)
         if [ "$prev_state" = "1" ] && [ "$current_state" = "0" ]; then
             handle_coin_pulse
-            current_state=1  # handle_coin_pulse waited for pin to return HIGH
+
+            # Wait for the pin to return HIGH before watching for the
+            # next falling edge.  This is the per-pulse "pulse ended"
+            # check that handle_coin_pulse deliberately skips so that
+            # it does not block the caller.  A 1-second timeout guards
+            # against a stuck-low line freezing the loop forever.
+            local wait_hi=0
+            while [ "$(gpio_read "$COIN_PULSE_PIN")" = "0" ] && [ $wait_hi -lt 100 ]; do
+                sleep 0.01
+                wait_hi=$((wait_hi + 1))
+            done
+            current_state=1  # pin is HIGH again (or timed out)
         fi
 
         prev_state=$current_state

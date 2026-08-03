@@ -4,6 +4,16 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.10.1 — GPIO Multi-Pulse Coin Counting Fix
+
+**Release date:** August 2026
+
+### Fixed
+- **Multi-peso coins only counted as 1 pulse** — The `handle_coin_pulse()` function in `gpio-coin-listener` was blocking for 150ms+ and then waiting for the pin to go HIGH after each pulse. This caused all subsequent pulses in a rapid train to be missed. A 10-peso coin (10 pulses) was read as a single 1-peso coin.
+- **Debounce moved to callers** — The pin-wait logic is now handled by the polling loop and gpiomon loop (which need it for edge tracking), while `handle_coin_pulse()` returns immediately after a short 50ms electrical debounce. This allows every pulse in a multi-pulse coin to be detected.
+
+---
+
 ## v1.10.0 — Bridge/VLAN Portal Management
 
 **Release date:** August 2026

@@ -72,13 +72,22 @@ for f in install.sh aircoins-recover.sh .env.example index.html admin.html DEPLO
 done
 
 # Copy system/ directory (excluding .env, .git, dev artifacts)
-rsync -a \
-    --exclude='.env' \
-    --exclude='__diff_tmp.txt' \
-    --exclude='.git' \
-    --exclude='.gitattributes' \
-    --exclude='.gitignore' \
-    "$SCRIPT_DIR/system/" "$TARBALL_DIR/system/"
+if command -v rsync &>/dev/null; then
+    rsync -a \
+        --exclude='.env' \
+        --exclude='__diff_tmp.txt' \
+        --exclude='.git' \
+        --exclude='.gitattributes' \
+        --exclude='.gitignore' \
+        "$SCRIPT_DIR/system/" "$TARBALL_DIR/system/"
+else
+    cp -r "$SCRIPT_DIR/system" "$TARBALL_DIR/system"
+    rm -rf "$TARBALL_DIR/system/.env" \
+           "$TARBALL_DIR/system/__diff_tmp.txt" \
+           "$TARBALL_DIR/system/.git" \
+           "$TARBALL_DIR/system/.gitattributes" \
+           "$TARBALL_DIR/system/.gitignore"
+fi
 
 # --- Security check ---
 echo ""

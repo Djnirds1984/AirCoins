@@ -2241,6 +2241,17 @@
                         </div>
                     </div>
 
+                    <!-- Timezone / Country -->
+                    <div class="settings-row">
+                        <div class="settings-field" style="flex:1;">
+                            <label for="ntp-timezone">Country / Timezone</label>
+                            <div style="font-size:12px;color:#888;margin-bottom:6px;">Select your country or region to set the system clock timezone</div>
+                            <select id="ntp-timezone" style="width:100%;padding:8px 10px;border-radius:6px;border:1px solid #333;background:#1a1a2e;color:#eaeaea;font-size:13px;">
+                                <option value="">Loading timezones...</option>
+                            </select>
+                        </div>
+                    </div>
+
                     <!-- NTP Enable Toggle -->
                     <div class="settings-row" style="align-items:center;">
                         <div class="settings-field" style="flex:1;">
@@ -4415,6 +4426,9 @@ async function loadNTPSettings() {
             }
         }
 
+        // Update timezone dropdown
+        await loadTimezoneOptions(data.current_timezone);
+
         // Update NTP enabled toggle
         var toggle = document.getElementById('ntp-enabled');
         if (toggle) toggle.checked = data.ntp_enabled !== false;
@@ -4433,6 +4447,26 @@ async function loadNTPSettings() {
     }
 }
 
+async function loadTimezoneOptions(currentTZ) {
+    var select = document.getElementById('ntp-timezone');
+    if (!select) return;
+
+    try {
+        var data = await apiCall('GET', '/admin/ntp/timezones');
+        var zones = data.timezones || [];
+        select.innerHTML = '';
+        for (var i = 0; i < zones.length; i++) {
+            var opt = document.createElement('option');
+            opt.value = zones[i].tz;
+            opt.textContent = zones[i].label;
+            if (currentTZ && zones[i].tz === currentTZ) opt.selected = true;
+            select.appendChild(opt);
+        }
+    } catch (e) {
+        select.innerHTML = '<option value="">Failed to load timezones</option>';
+    }
+}
+
 function toggleNTPEnabled() {
     var toggle = document.getElementById('ntp-enabled');
     var serversSection = document.getElementById('ntp-servers-section');
@@ -4444,6 +4478,7 @@ async function saveNTPSettings() {
     var enabled = document.getElementById('ntp-enabled').checked;
     var serversText = document.getElementById('ntp-servers').value;
     var servers = serversText.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+    var timezone = document.getElementById('ntp-timezone').value;
 
     statusEl.textContent = 'Saving...';
     statusEl.style.color = '#aaa';
@@ -4451,7 +4486,8 @@ async function saveNTPSettings() {
     try {
         await apiCall('POST', '/admin/ntp/set', {
             enabled: enabled,
-            servers: servers
+            servers: servers,
+            timezone: timezone
         });
         statusEl.textContent = 'NTP settings saved successfully';
         statusEl.style.color = '#4caf50';

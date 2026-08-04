@@ -563,15 +563,58 @@ func checkServiceRunning(service string) bool {
 // NTP TIME MANAGEMENT
 // ============================================
 
-// NTPGet returns the current time, NTP sync status, and configured NTP servers.
+// countryTimezones maps user-friendly country/region labels to IANA timezone IDs.
+var countryTimezones = []map[string]string{
+	{"label": "UTC (Coordinated Universal Time)", "tz": "UTC"},
+	{"label": "Philippines (Manila)", "tz": "Asia/Manila"},
+	{"label": "Thailand (Bangkok)", "tz": "Asia/Bangkok"},
+	{"label": "Vietnam (Ho Chi Minh)", "tz": "Asia/Ho_Chi_Minh"},
+	{"label": "Indonesia (Jakarta)", "tz": "Asia/Jakarta"},
+	{"label": "Singapore", "tz": "Asia/Singapore"},
+	{"label": "Malaysia (Kuala Lumpur)", "tz": "Asia/Kuala_Lumpur"},
+	{"label": "India (Kolkata)", "tz": "Asia/Kolkata"},
+	{"label": "China (Shanghai)", "tz": "Asia/Shanghai"},
+	{"label": "Hong Kong", "tz": "Asia/Hong_Kong"},
+	{"label": "Taiwan (Taipei)", "tz": "Asia/Taipei"},
+	{"label": "Japan (Tokyo)", "tz": "Asia/Tokyo"},
+	{"label": "South Korea (Seoul)", "tz": "Asia/Seoul"},
+	{"label": "Australia (Sydney)", "tz": "Australia/Sydney"},
+	{"label": "Australia (Perth)", "tz": "Australia/Perth"},
+	{"label": "New Zealand (Auckland)", "tz": "Pacific/Auckland"},
+	{"label": "United Arab Emirates (Dubai)", "tz": "Asia/Dubai"},
+	{"label": "Saudi Arabia (Riyadh)", "tz": "Asia/Riyadh"},
+	{"label": "Turkey (Istanbul)", "tz": "Europe/Istanbul"},
+	{"label": "United Kingdom (London)", "tz": "Europe/London"},
+	{"label": "Germany (Berlin)", "tz": "Europe/Berlin"},
+	{"label": "France (Paris)", "tz": "Europe/Paris"},
+	{"label": "Russia (Moscow)", "tz": "Europe/Moscow"},
+	{"label": "Egypt (Cairo)", "tz": "Africa/Cairo"},
+	{"label": "Nigeria (Lagos)", "tz": "Africa/Lagos"},
+	{"label": "South Africa (Johannesburg)", "tz": "Africa/Johannesburg"},
+	{"label": "United States (New York)", "tz": "America/New_York"},
+	{"label": "United States (Chicago)", "tz": "America/Chicago"},
+	{"label": "United States (Denver)", "tz": "America/Denver"},
+	{"label": "United States (Los Angeles)", "tz": "America/Los_Angeles"},
+	{"label": "Canada (Toronto)", "tz": "America/Toronto"},
+	{"label": "Mexico (Mexico City)", "tz": "America/Mexico_City"},
+	{"label": "Brazil (Sao Paulo)", "tz": "America/Sao_Paulo"},
+	{"label": "Argentina (Buenos Aires)", "tz": "America/Argentina/Buenos_Aires"},
+}
+
+// NTPGet returns the current time, NTP sync status, timezone, and configured NTP servers.
 func (h *SystemHandler) NTPGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Get current system time
-	now := time.Now()
+	// Get current timezone
+	currentTZ := "UTC"
+	if out, err := exec.Command("timedatectl", "show", "-p", "Timezone", "--value").Output(); err == nil {
+		if tz := strings.TrimSpace(string(out)); tz != "" {
+			currentTZ = tz
+		}
+	}
 
 	// Check if NTP is enabled via timedatectl
 	ntpEnabled := false
@@ -599,19 +642,23 @@ func (h *SystemHandler) NTPGet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Current time in the configured timezone
+	now := time.Now()
+
 	sendJSON(w, http.StatusOK, map[string]interface{}{
-		"success":        true,
-		"current_time":   now.Format("2006-01-02 15:04:05"),
-		"timezone":       now.Location().String(),
-		"unix_timestamp": now.Unix(),
-		"ntp_enabled":    ntpEnabled,
-		"ntp_synced":     ntpSynced,
-		"ntp_servers":    ntpServers,
-		"last_sync":      lastSync,
+		"success":          true,
+		"current_time":     now.Format("2006-01-02 15:04:05"),
+		"current_timezone": currentTZ,
+		"timezone":         now.Location().String(),
+		"unix_timestamp":   now.Unix(),
+		"ntp_enabled":      ntpEnabled,
+		"ntp_synced":       ntpSynced,
+		"ntp_servers":      ntpServers,
+		"last_sync":        lastSync,
 	})
 }
 
-// NTPSet configures the NTP servers and enables/disables NTP sync.
+// NTPSet configures the timezone, NTP servers, and enables/disables NTP sync.
 func (h *SystemHandler) NTPSet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -619,8 +666,9 @@ func (h *SystemHandler) NTPSet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Servers []string `json:"servers"`
-		Enabled *bool    `json:"enabled"`
+		Servers  []string `json:"servers"`
+		Enabled  *bool    `json:"enabled"`
+		Timezone string   `json:"timezone"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -628,6 +676,25 @@ func (h *SystemHandler) NTPSet(w http.ResponseWriter, r *http.Request) {
 			"error":   "Invalid request body",
 		})
 		return
+	}
+
+	// Set timezone if provided
+	if req.Timezone != "" {
+		if !isValidTimezone(req.Timezone) {
+			sendJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"success": false,
+				"error":   "Invalid timezone: " + req.Timezone,
+			})
+			return
+		}
+		if out, err := exec.Command("sudo", "timedatectl", "set-timezone", req.Timezone).CombinedOutput(); err != nil {
+			log.Printf("set-timezone failed: %s", string(out))
+			sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"success": false,
+				"error":   "Failed to set timezone: " + string(out),
+			})
+			return
+		}
 	}
 
 	// Enable/disable NTP
@@ -655,19 +722,44 @@ func (h *SystemHandler) NTPSet(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-
-		// Restart timesyncd to apply changes
-		exec.Command("sudo", "systemctl", "restart", "systemd-timesyncd").Run()
 	}
 
-	// Force immediate time sync
-	exec.Command("sudo", "systemctl", "restart", "systemd-timesyncd").Run()
-	time.Sleep(2 * time.Second) // Wait for sync
+	// Restart timesyncd to apply all changes
+	if req.Enabled != nil || len(req.Servers) > 0 {
+		exec.Command("sudo", "systemctl", "restart", "systemd-timesyncd").Run()
+		time.Sleep(2 * time.Second)
+	}
 
 	sendJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"message": "NTP settings updated",
 	})
+}
+
+// NTPTimezones returns the curated list of country/region → timezone mappings.
+func (h *SystemHandler) NTPTimezones(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"success":   true,
+		"timezones": countryTimezones,
+	})
+}
+
+// isValidTimezone checks if the timezone exists in the curated list.
+func isValidTimezone(tz string) bool {
+	for _, entry := range countryTimezones {
+		if entry["tz"] == tz {
+			return true
+		}
+	}
+	// Also allow UTC
+	if tz == "UTC" {
+		return true
+	}
+	return false
 }
 
 // NTPSync forces an immediate NTP time synchronization.

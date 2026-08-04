@@ -177,12 +177,6 @@ func main() {
 	mux.Handle("/api/system/services/", adminProtected(systemHandler.ControlService))
 	mux.Handle("/api/admin/system/reboot", adminProtected(systemHandler.Reboot))
 
-	// NTP time management routes
-	mux.Handle("/api/admin/ntp", adminProtected(systemHandler.NTPGet))
-	mux.Handle("/api/admin/ntp/set", adminProtected(systemHandler.NTPSet))
-	mux.Handle("/api/admin/ntp/sync", adminProtected(systemHandler.NTPSync))
-	mux.Handle("/api/admin/ntp/timezones", adminProtected(systemHandler.NTPTimezones))
-
 	// VLAN routes (network identity only — create/delete the 802.1Q iface)
 	mux.Handle("/api/vlan/list", adminProtected(handlers.VLANList))
 	mux.Handle("/api/vlan/create", adminProtected(handlers.VLANCreate))

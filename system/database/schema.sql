@@ -263,7 +263,6 @@ CREATE TABLE IF NOT EXISTS portal_servers (
     dhcp_start VARCHAR(15) NOT NULL DEFAULT '',
     dhcp_end VARCHAR(15) NOT NULL DEFAULT '',
     dhcp_lease VARCHAR(20) NOT NULL DEFAULT '12h',
-    session_ttl INTEGER NOT NULL DEFAULT 0,
     enabled BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()

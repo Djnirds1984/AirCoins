@@ -4,47 +4,6 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
-## v1.12.0 — Portal Session TTL + NTP Timezone Support
-
-**Release date:** August 2026
-
-### Added
-- **Per-portal Session TTL** — Each portal server (VLAN) now has a configurable session time-to-live in minutes. 0 = no limit (use global max_session). Allows different portals/VLANs to have different session durations.
-- **Portal Server CRUD** — Full Create, Read, Update, Delete for portal servers. Edit button on each portal row populates the form for updates. Interface dropdown locked during edit to prevent accidental changes.
-- **Country / Timezone selector** — New dropdown in Date & Time (NTP) settings with 34 country/region presets (Philippines, Thailand, Vietnam, Singapore, Japan, US zones, EU, Africa, etc.). Sets the system timezone via `timedatectl set-timezone`.
-- **NTP Timezones API** — `GET /api/admin/ntp/timezones` returns curated timezone list. `NTPSet` now accepts `timezone` field.
-
-### Changed
-- **Database migration** — Added `session_ttl INTEGER NOT NULL DEFAULT 0` column to `portal_servers` table.
-- **Portal config format** — `portals.conf` now uses 7-field format: `interface ip/cidr dhcp_start dhcp_end lease ttl enabled|disabled`. Backward-compatible with old 6-field format on read.
-- **NTPGet** — Now returns `current_timezone` from `timedatectl`.
-- **NTPSet refactored** — Handles timezone, NTP enable/disable, and server config in a single call. Only restarts timesyncd when NTP settings actually change.
-
----
-
-## v1.11.0 — NTP Time Settings & Storage Cleanup
-
-**Release date:** August 2026
-
-### Added
-- **NTP Time Settings in Settings page** — Configure NTP servers, enable/disable time sync, view current system time and sync status, force manual time sync. Fixes clock drift issues on devices without RTC.
-- **NTP API endpoints** — `GET /api/admin/ntp`, `POST /api/admin/ntp/set`, `POST /api/admin/ntp/sync` for full time management.
-
-### Changed
-- **Storage cleanup** — Removed all 50 local tarball files (25 .tar.gz + 25 .sha256) to free up disk space. All releases are stored in Supabase Storage.
-
----
-
-## v1.10.12 — Fix: Insert Coin Modal Closes Immediately
-
-**Release date:** August 2026
-
-### Fixed
-- **Clock sync issue causing immediate timeout** — The Insert Coin modal was closing immediately with "COINSLOT TIMED OUT" because the device's clock was out of sync with the backend. Now calculates remaining time using the device's local clock + server's duration, avoiding clock sync issues.
-- **Polling also fixed** — The status polling now also uses local clock calculations to avoid the same issue during coin detection.
-
----
-
 ## v1.10.11 — Allow Admin Access When Locked
 
 **Release date:** August 2026

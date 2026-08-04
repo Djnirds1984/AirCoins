@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -38,14 +39,15 @@ const defaultDHCPLease = "12h"
 // for the admin UI and reporting, same pattern as vlans.conf.
 
 // portalConfigEntry represents one line in /etc/pisowifi/portals.conf.
-// Format: interface ip/cidr dhcp_start dhcp_end lease enabled|disabled
+// Format: interface ip/cidr dhcp_start dhcp_end lease ttl enabled|disabled
 type portalConfigEntry struct {
-	Interface string
-	IPCIDR    string
-	DHCPStart string
-	DHCPEnd   string
-	Lease     string
-	Enabled   bool
+	Interface  string
+	IPCIDR     string
+	DHCPStart  string
+	DHCPEnd    string
+	Lease      string
+	SessionTTL int
+	Enabled    bool
 }
 
 // readPortalConfig reads all entries from /etc/pisowifi/portals.conf.
@@ -69,13 +71,26 @@ func readPortalConfig() []portalConfigEntry {
 			continue
 		}
 
+		// Support both old format (6 fields) and new format (7 fields with TTL)
+		var ttl int
+		var enabled bool
+		if len(parts) >= 7 {
+			// New format: interface ip/cidr dhcp_start dhcp_end lease ttl enabled
+			ttl, _ = strconv.Atoi(parts[5])
+			enabled = parts[6] == "enabled"
+		} else {
+			// Old format: interface ip/cidr dhcp_start dhcp_end lease enabled
+			enabled = parts[5] == "enabled"
+		}
+
 		entries = append(entries, portalConfigEntry{
-			Interface: parts[0],
-			IPCIDR:    parts[1],
-			DHCPStart: parts[2],
-			DHCPEnd:   parts[3],
-			Lease:     parts[4],
-			Enabled:   parts[5] == "enabled",
+			Interface:  parts[0],
+			IPCIDR:     parts[1],
+			DHCPStart:  parts[2],
+			DHCPEnd:    parts[3],
+			Lease:      parts[4],
+			SessionTTL: ttl,
+			Enabled:    enabled,
 		})
 	}
 
@@ -101,8 +116,8 @@ func writePortalConfig(entries []portalConfigEntry) {
 		if e.Enabled {
 			state = "enabled"
 		}
-		fmt.Fprintf(f, "%s %s %s %s %s %s\n",
-			e.Interface, e.IPCIDR, e.DHCPStart, e.DHCPEnd, e.Lease, state)
+		fmt.Fprintf(f, "%s %s %s %s %s %d %s\n",
+			e.Interface, e.IPCIDR, e.DHCPStart, e.DHCPEnd, e.Lease, e.SessionTTL, state)
 	}
 }
 
@@ -493,12 +508,13 @@ func healPortal(e portalConfigEntry) {
 // portalStatus builds the live status view of a portal entry.
 func portalStatus(e portalConfigEntry) models.PortalInfo {
 	info := models.PortalInfo{
-		Interface: e.Interface,
-		IPCIDR:    e.IPCIDR,
-		DHCPStart: e.DHCPStart,
-		DHCPEnd:   e.DHCPEnd,
-		DHCPLease: e.Lease,
-		Enabled:   e.Enabled,
+		Interface:  e.Interface,
+		IPCIDR:     e.IPCIDR,
+		DHCPStart:  e.DHCPStart,
+		DHCPEnd:    e.DHCPEnd,
+		DHCPLease:  e.Lease,
+		SessionTTL: e.SessionTTL,
+		Enabled:    e.Enabled,
 	}
 
 	if _, err := os.Stat("/sys/class/net/" + e.Interface); err != nil {
@@ -518,16 +534,17 @@ func portalStatus(e portalConfigEntry) models.PortalInfo {
 
 func upsertPortalDB(e portalConfigEntry) {
 	_, err := models.DB.Exec(`
-		INSERT INTO portal_servers (interface, portal_ip_cidr, dhcp_start, dhcp_end, dhcp_lease, enabled)
-		VALUES ($1,$2,$3,$4,$5,$6)
+		INSERT INTO portal_servers (interface, portal_ip_cidr, dhcp_start, dhcp_end, dhcp_lease, session_ttl, enabled)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
 		ON CONFLICT (interface) DO UPDATE SET
 			portal_ip_cidr = EXCLUDED.portal_ip_cidr,
 			dhcp_start = EXCLUDED.dhcp_start,
 			dhcp_end = EXCLUDED.dhcp_end,
 			dhcp_lease = EXCLUDED.dhcp_lease,
+			session_ttl = EXCLUDED.session_ttl,
 			enabled = EXCLUDED.enabled,
 			updated_at = NOW()`,
-		e.Interface, e.IPCIDR, e.DHCPStart, e.DHCPEnd, e.Lease, e.Enabled)
+		e.Interface, e.IPCIDR, e.DHCPStart, e.DHCPEnd, e.Lease, e.SessionTTL, e.Enabled)
 	if err != nil {
 		log.Printf("Warning: failed to persist portal server to DB: %v", err)
 	}
@@ -652,13 +669,20 @@ func PortalCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Session TTL: 0 means no limit (use global max_session)
+	sessionTTL := req.SessionTTL
+	if sessionTTL < 0 {
+		sessionTTL = 0
+	}
+
 	entry := portalConfigEntry{
-		Interface: req.Interface,
-		IPCIDR:    req.IPCIDR,
-		DHCPStart: start,
-		DHCPEnd:   end,
-		Lease:     lease,
-		Enabled:   true,
+		Interface:  req.Interface,
+		IPCIDR:     req.IPCIDR,
+		DHCPStart:  start,
+		DHCPEnd:    end,
+		Lease:      lease,
+		SessionTTL: sessionTTL,
+		Enabled:    true,
 	}
 
 	if err := provisionPortal(entry); err != nil {

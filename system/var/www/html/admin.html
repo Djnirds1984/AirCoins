@@ -2149,12 +2149,21 @@
                             <input type="text" id="portal-lease" value="12h" placeholder="12h">
                         </div>
                     </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Session TTL (minutes)</label>
+                            <input type="number" id="portal-ttl" value="0" min="0" placeholder="0 = no limit">
+                            <div style="font-size:11px;color:#888;margin-top:4px;">0 = use global max_session, or set custom limit per portal</div>
+                        </div>
+                    </div>
                     <div class="form-hint">
                         Provisions the full hotspot stack on the chosen interface: portal IP,
                         DHCP server, captive DNS hijack and firewall capture rules.
                         The DHCP range is suggested from the CIDR &mdash; edit it if needed.
+                        <br><strong>Session TTL:</strong> Maximum session duration in minutes for clients on this portal. 0 = no limit.
                     </div>
-                    <button class="btn-primary" onclick="savePortalServer()">Save Portal Server</button>
+                    <button class="btn-primary" id="portal-save-btn" onclick="savePortalServer()">Save Portal Server</button>
+                    <button class="btn btn-ghost" id="portal-cancel-btn" style="display:none;margin-left:8px;" onclick="cancelEditPortalServer()">Cancel Edit</button>
                 </div>
 
                 <div class="vlan-table">
@@ -2166,6 +2175,7 @@
                                 <th>Portal IP</th>
                                 <th>DHCP Range</th>
                                 <th>Lease</th>
+                                <th>TTL</th>
                                 <th>State</th>
                                 <th>IP</th>
                                 <th>DHCP</th>
@@ -5181,6 +5191,8 @@ async function deleteVLAN(iface, vlanId) {
 }
 
 // === Portal Servers (hotspot stack: IP + DHCP + captive) ===
+let editingPortalIface = null;
+
 async function loadPortalServers() {
     try {
         const res = await apiCall('GET', '/portal/list');
@@ -5195,24 +5207,29 @@ async function loadPortalServers() {
         }
 
         empty.style.display = 'none';
-        tbody.innerHTML = portals.map(p => `
+        tbody.innerHTML = portals.map(p => {
+            const ttlLabel = p.session_ttl > 0 ? p.session_ttl + ' min' : '<span style="color:#888;">No limit</span>';
+            return `
             <tr>
                 <td>${escapeHtml(p.interface)}</td>
                 <td>${escapeHtml(p.ip_cidr)}</td>
                 <td>${escapeHtml(p.dhcp_start)} – ${escapeHtml(p.dhcp_end)}</td>
                 <td>${escapeHtml(p.dhcp_lease)}</td>
+                <td>${ttlLabel}</td>
                 <td>${p.enabled ? '<span class="badge online">Enabled</span>' : '<span class="badge neutral">Disabled</span>'}</td>
                 <td>${statusDot(p.ip_ok, p.enabled)}</td>
                 <td>${statusDot(p.dhcp_active, p.enabled)}</td>
                 <td>${statusDot(p.captive_active, p.enabled)}</td>
                 <td>
+                    <button class="btn btn-ghost btn-sm" onclick="editPortalServer('${escapeHtml(p.interface)}', '${escapeHtml(p.ip_cidr)}', '${escapeHtml(p.dhcp_start)}', '${escapeHtml(p.dhcp_end)}', '${escapeHtml(p.dhcp_lease)}', ${p.session_ttl || 0})">Edit</button>
                     ${p.enabled
                         ? `<button class="btn btn-ghost btn-sm" onclick="setPortalEnabled('${p.interface}', false)">Disable</button>`
                         : `<button class="btn btn-ghost btn-sm" onclick="setPortalEnabled('${p.interface}', true)">Enable</button>`}
                     <button class="btn btn-danger btn-sm" onclick="deletePortalServer('${p.interface}')">Delete</button>
                 </td>
             </tr>
-        `).join('');
+            `;
+        }).join('');
     } catch (e) {
         showNotification('Failed to load portal servers: ' + e.message, 'error');
     }
@@ -5255,6 +5272,7 @@ async function savePortalServer() {
     const start = document.getElementById('portal-dhcp-start').value.trim();
     const end = document.getElementById('portal-dhcp-end').value.trim();
     const lease = document.getElementById('portal-lease').value.trim();
+    const sessionTTL = parseInt(document.getElementById('portal-ttl').value) || 0;
 
     if (!iface || !ipCIDR) {
         showNotification('Please select an interface and enter the portal IP/CIDR', 'error');
@@ -5271,14 +5289,47 @@ async function savePortalServer() {
             ip_cidr: ipCIDR,
             dhcp_start: start,
             dhcp_end: end,
-            dhcp_lease: lease || '12h'
+            dhcp_lease: lease || '12h',
+            session_ttl: sessionTTL
         });
-        showNotification(`Portal server provisioned on ${iface}`, 'success');
+        const action = editingPortalIface ? 'updated' : 'provisioned';
+        showNotification(`Portal server ${action} on ${iface}`, 'success');
+        cancelEditPortalServer();
         loadPortalServers();
         loadVLANs();
     } catch (e) {
         showNotification('Failed to save portal server: ' + e.message, 'error');
     }
+}
+
+function editPortalServer(iface, ipCidr, dhcpStart, dhcpEnd, lease, sessionTTL) {
+    editingPortalIface = iface;
+    const ifaceSelect = document.getElementById('portal-interface');
+    ifaceSelect.value = iface;
+    ifaceSelect.disabled = true;
+    document.getElementById('portal-ip').value = ipCidr;
+    document.getElementById('portal-dhcp-start').value = dhcpStart;
+    document.getElementById('portal-dhcp-end').value = dhcpEnd;
+    document.getElementById('portal-lease').value = lease;
+    document.getElementById('portal-ttl').value = sessionTTL || 0;
+    document.getElementById('portal-save-btn').textContent = 'Update Portal Server';
+    document.getElementById('portal-cancel-btn').style.display = 'inline-block';
+    // Scroll to form
+    ifaceSelect.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function cancelEditPortalServer() {
+    editingPortalIface = null;
+    const ifaceSelect = document.getElementById('portal-interface');
+    ifaceSelect.disabled = false;
+    ifaceSelect.value = '';
+    document.getElementById('portal-ip').value = '';
+    document.getElementById('portal-dhcp-start').value = '';
+    document.getElementById('portal-dhcp-end').value = '';
+    document.getElementById('portal-lease').value = '12h';
+    document.getElementById('portal-ttl').value = '0';
+    document.getElementById('portal-save-btn').textContent = 'Save Portal Server';
+    document.getElementById('portal-cancel-btn').style.display = 'none';
 }
 
 async function setPortalEnabled(iface, enable) {
@@ -5299,6 +5350,7 @@ async function deletePortalServer(iface) {
 
     try {
         await apiCall('DELETE', '/portal/delete', { interface: iface });
+        if (editingPortalIface === iface) cancelEditPortalServer();
         showNotification(`Portal server on ${iface} deleted`, 'success');
         loadPortalServers();
         loadVLANs();

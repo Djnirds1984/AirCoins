@@ -554,6 +554,14 @@ CREATE TABLE IF NOT EXISTS bridge_members (
 );
 
 -- ============================================
+-- MIGRATION: Add session_ttl to portal_servers
+-- ============================================
+-- Per-portal session time-to-live in minutes. 0 means no limit (use
+-- the global max_session setting). Allows different portals/VLANs to
+-- have different session durations.
+ALTER TABLE portal_servers ADD COLUMN IF NOT EXISTS session_ttl INTEGER NOT NULL DEFAULT 0;
+
+-- ============================================
 -- COMPLETION
 -- ============================================
 \echo 'Migrations applied.'

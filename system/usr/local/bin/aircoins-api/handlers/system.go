@@ -600,14 +600,14 @@ func (h *SystemHandler) NTPGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendJSON(w, http.StatusOK, map[string]interface{}{
-		"success":       true,
-		"current_time":  now.Format("2006-01-02 15:04:05"),
-		"timezone":      now.Location().String(),
+		"success":        true,
+		"current_time":   now.Format("2006-01-02 15:04:05"),
+		"timezone":       now.Location().String(),
 		"unix_timestamp": now.Unix(),
-		"ntp_enabled":   ntpEnabled,
-		"ntp_synced":    ntpSynced,
-		"ntp_servers":   ntpServers,
-		"last_sync":     lastSync,
+		"ntp_enabled":    ntpEnabled,
+		"ntp_synced":     ntpSynced,
+		"ntp_servers":    ntpServers,
+		"last_sync":      lastSync,
 	})
 }
 
@@ -619,8 +619,8 @@ func (h *SystemHandler) NTPSet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Servers  []string `json:"servers"`
-		Enabled  *bool    `json:"enabled"`
+		Servers []string `json:"servers"`
+		Enabled *bool    `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -693,9 +693,9 @@ func (h *SystemHandler) NTPSync(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 
 	sendJSON(w, http.StatusOK, map[string]interface{}{
-		"success":      true,
-		"message":      "Time synchronized",
-		"current_time": now.Format("2006-01-02 15:04:05"),
+		"success":        true,
+		"message":        "Time synchronized",
+		"current_time":   now.Format("2006-01-02 15:04:05"),
 		"unix_timestamp": now.Unix(),
 	})
 }

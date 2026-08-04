@@ -206,12 +206,12 @@ type BridgeMemberRequest struct {
 // ============================================
 
 type PortalRequest struct {
-	Interface   string `json:"interface"`
-	IPCIDR      string `json:"ip_cidr"`
-	DHCPStart   string `json:"dhcp_start"`
-	DHCPEnd     string `json:"dhcp_end"`
-	DHCPLease   string `json:"dhcp_lease"`
-	SessionTTL  int    `json:"session_ttl"`
+	Interface  string `json:"interface"`
+	IPCIDR     string `json:"ip_cidr"`
+	DHCPStart  string `json:"dhcp_start"`
+	DHCPEnd    string `json:"dhcp_end"`
+	DHCPLease  string `json:"dhcp_lease"`
+	SessionTTL int    `json:"session_ttl"`
 }
 
 type PortalInfo struct {

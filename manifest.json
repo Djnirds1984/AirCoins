@@ -1,9 +1,16 @@
 ﻿{
-    "version":  "v1.11.0",
-    "release_notes":  "**Release date:** August 2026\n\n### Added\n- **NTP Time Settings in Settings page** â€” Configure NTP servers, enable/disable time sync, view current system time and sync status, force manual time sync. Fixes clock drift issues on devices without RTC.\n- **NTP API endpoints** â€” `GET /api/admin/ntp`, `POST /api/admin/ntp/set`, `POST /api/admin/ntp/sync` for full time management.\n\n### Changed\n- **Storage cleanup** â€” Removed all 50 local tarball files (25 .tar.gz + 25 .sha256) to free up disk space. All releases are stored in Supabase Storage.\n\n---",
-    "sha256":  "ffeba8ababe9145e1c0ea9823e4e560514a92a6cf500fa2cfc01b67a1589ed8b",
-    "tarball":  "releases/aircoins-v1.11.0.tar.gz",
+    "version":  "v1.12.0",
+    "release_notes":  "**Release date:** August 2026\n\n### Added\n- **Per-portal Session TTL** â€” Each portal server (VLAN) now has a configurable session time-to-live in minutes. 0 = no limit (use global max_session). Allows different portals/VLANs to have different session durations.\n- **Portal Server CRUD** â€” Full Create, Read, Update, Delete for portal servers. Edit button on each portal row populates the form for updates. Interface dropdown locked during edit to prevent accidental changes.\n- **Country / Timezone selector** â€” New dropdown in Date \u0026 Time (NTP) settings with 34 country/region presets (Philippines, Thailand, Vietnam, Singapore, Japan, US zones, EU, Africa, etc.). Sets the system timezone via `timedatectl set-timezone`.\n- **NTP Timezones API** â€” `GET /api/admin/ntp/timezones` returns curated timezone list. `NTPSet` now accepts `timezone` field.\n\n### Changed\n- **Database migration** â€” Added `session_ttl INTEGER NOT NULL DEFAULT 0` column to `portal_servers` table.\n- **Portal config format** â€” `portals.conf` now uses 7-field format: `interface ip/cidr dhcp_start dhcp_end lease ttl enabled|disabled`. Backward-compatible with old 6-field format on read.\n- **NTPGet** â€” Now returns `current_timezone` from `timedatectl`.\n- **NTPSet refactored** â€” Handles timezone, NTP enable/disable, and server config in a single call. Only restarts timesyncd when NTP settings actually change.\n\n---",
+    "sha256":  "94bf8fe3c1a979562f43ea7731a0ff451ba56b616091387337ec3d9d8ea319ea",
+    "tarball":  "releases/aircoins-v1.12.0.tar.gz",
     "versions":  [
+                     {
+                         "released_at":  "2026-08-04T05:19:11Z",
+                         "sha256":  "94bf8fe3c1a979562f43ea7731a0ff451ba56b616091387337ec3d9d8ea319ea",
+                         "version":  "v1.12.0",
+                         "release_notes":  "**Release date:** August 2026\n\n### Added\n- **Per-portal Session TTL** â€” Each portal server (VLAN) now has a configurable session time-to-live in minutes. 0 = no limit (use global max_session). Allows different portals/VLANs to have different session durations.\n- **Portal Server CRUD** â€” Full Create, Read, Update, Delete for portal servers. Edit button on each portal row populates the form for updates. Interface dropdown locked during edit to prevent accidental changes.\n- **Country / Timezone selector** â€” New dropdown in Date \u0026 Time (NTP) settings with 34 country/region presets (Philippines, Thailand, Vietnam, Singapore, Japan, US zones, EU, Africa, etc.). Sets the system timezone via `timedatectl set-timezone`.\n- **NTP Timezones API** â€” `GET /api/admin/ntp/timezones` returns curated timezone list. `NTPSet` now accepts `timezone` field.\n\n### Changed\n- **Database migration** â€” Added `session_ttl INTEGER NOT NULL DEFAULT 0` column to `portal_servers` table.\n- **Portal config format** â€” `portals.conf` now uses 7-field format: `interface ip/cidr dhcp_start dhcp_end lease ttl enabled|disabled`. Backward-compatible with old 6-field format on read.\n- **NTPGet** â€” Now returns `current_timezone` from `timedatectl`.\n- **NTPSet refactored** â€” Handles timezone, NTP enable/disable, and server config in a single call. Only restarts timesyncd when NTP settings actually change.\n\n---",
+                         "tarball":  "releases/aircoins-v1.12.0.tar.gz"
+                     },
                      {
                          "released_at":  "2026-08-04T04:32:10Z",
                          "sha256":  "ffeba8ababe9145e1c0ea9823e4e560514a92a6cf500fa2cfc01b67a1589ed8b",
@@ -31,14 +38,7 @@
                          "version":  "v1.10.10",
                          "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **WAN interface detection now scans for end0, eth0, enp*, ens*, enx*** â€” Previously only used `ip route show default` which fails when there\u0027s no default route. Now falls back to scanning `/sys/class/net` for the first Ethernet-like interface that is UP.\n- **Hardware fingerprint MAC detection** â€” Now scans for any Ethernet interface (end0, eth0, etc.) instead of hardcoded `eth0`.\n- **Stored eth_interface fallback** â€” Only used as last resort, and now verifies the interface actually exists before returning it.\n\n---",
                          "tarball":  "releases/aircoins-v1.10.10.tar.gz"
-                     },
-                     {
-                         "released_at":  "2026-08-03T04:07:33Z",
-                         "sha256":  "da6994c411fa2efbcbd2956492d8503d44f068c05baf618ccd13a03a8c3da710",
-                         "version":  "v1.10.9",
-                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **No more \"dhclient.service not found\" error** â€” `applyDHCP()` now falls back to running the DHCP binary directly (`dhclient -v eth0`) when `systemctl restart` fails. No dummy service needed.\n- **Static IP no longer depends on dhcpcd** â€” `applyStatic()` now uses `iproute2` commands directly (`ip addr add`, `ip route add`) instead of writing to `/etc/dhcpcd.conf` and restarting dhcpcd. Works on all modern Linux.\n- **VLAN DHCP already uses direct request** â€” `applyVLANDHCP()` was already fixed in v1.10.2.\n\n---",
-                         "tarball":  "releases/aircoins-v1.10.9.tar.gz"
                      }
                  ],
-    "released_at":  "2026-08-04T04:32:10Z"
+    "released_at":  "2026-08-04T05:19:11Z"
 }

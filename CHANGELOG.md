@@ -4,6 +4,24 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.12.0 — Portal Session TTL + NTP Timezone Support
+
+**Release date:** August 2026
+
+### Added
+- **Per-portal Session TTL** — Each portal server (VLAN) now has a configurable session time-to-live in minutes. 0 = no limit (use global max_session). Allows different portals/VLANs to have different session durations.
+- **Portal Server CRUD** — Full Create, Read, Update, Delete for portal servers. Edit button on each portal row populates the form for updates. Interface dropdown locked during edit to prevent accidental changes.
+- **Country / Timezone selector** — New dropdown in Date & Time (NTP) settings with 34 country/region presets (Philippines, Thailand, Vietnam, Singapore, Japan, US zones, EU, Africa, etc.). Sets the system timezone via `timedatectl set-timezone`.
+- **NTP Timezones API** — `GET /api/admin/ntp/timezones` returns curated timezone list. `NTPSet` now accepts `timezone` field.
+
+### Changed
+- **Database migration** — Added `session_ttl INTEGER NOT NULL DEFAULT 0` column to `portal_servers` table.
+- **Portal config format** — `portals.conf` now uses 7-field format: `interface ip/cidr dhcp_start dhcp_end lease ttl enabled|disabled`. Backward-compatible with old 6-field format on read.
+- **NTPGet** — Now returns `current_timezone` from `timedatectl`.
+- **NTPSet refactored** — Handles timezone, NTP enable/disable, and server config in a single call. Only restarts timesyncd when NTP settings actually change.
+
+---
+
 ## v1.11.0 — NTP Time Settings & Storage Cleanup
 
 **Release date:** August 2026

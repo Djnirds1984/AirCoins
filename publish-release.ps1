@@ -13,7 +13,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$VERSION = "1.14.9"
+$VERSION = "1.15.0"
 $TARBALL_NAME = "aircoins-v$VERSION.tar.gz"
 $CHECKSUM_NAME = "aircoins-v$VERSION.sha256"
 $BUCKET = "aircoins"

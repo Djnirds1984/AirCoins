@@ -4,6 +4,28 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.15.0 — Stable Base Release
+
+**Release date:** August 2026
+
+### Includes
+- VLAN ISP switching restored to stable approach (dhcpcd with dhclient fallback)
+- VLAN config persists to vlans.conf + wan_vlan.conf (survives reboots)
+- WAN save always applies to OS (no checkbox)
+- Anti-Hotspot (IP TTL=1) per-portal toggle
+- Factory Reset (full data wipe + admin password reset)
+- Updater shows all available versions with release notes
+- Session TTL per portal
+- NTP timezone management
+
+### Fixed
+- Login hanging after service restart (startup no longer blocks on DHCP)
+- WAN VLAN ISP settings survive reboots
+- VLAN switching works correctly (panel becomes inaccessible when WAN switches)
+- DHCP client fallback: tries dhcpcd first, falls back to dhclient
+
+---
+
 ## v1.10.11 — Allow Admin Access When Locked
 
 **Release date:** August 2026

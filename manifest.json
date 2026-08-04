@@ -1,9 +1,16 @@
 ﻿{
-    "version":  "v1.14.9",
-    "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **DHCP client fallback** â€” Tries `dhcpcd` first (stable v1.10.0 approach), falls back to `dhclient` if dhcpcd not available. Fixes \"dhcpcd end0.500 failed\" error on systems without dhcpcd.\n\n---",
-    "sha256":  "7340ec9d7a1e250ee9d353b52a7d0fbd8298a7ccc839b9018b4dec8e96c96928",
-    "tarball":  "releases/aircoins-v1.14.9.tar.gz",
+    "version":  "v1.15.0",
+    "release_notes":  "**Release date:** August 2026\n\n### Includes\n- VLAN ISP switching restored to stable approach (dhcpcd with dhclient fallback)\n- VLAN config persists to vlans.conf + wan_vlan.conf (survives reboots)\n- WAN save always applies to OS (no checkbox)\n- Anti-Hotspot (IP TTL=1) per-portal toggle\n- Factory Reset (full data wipe + admin password reset)\n- Updater shows all available versions with release notes\n- Session TTL per portal\n- NTP timezone management\n\n### Fixed\n- Login hanging after service restart (startup no longer blocks on DHCP)\n- WAN VLAN ISP settings survive reboots\n- VLAN switching works correctly (panel becomes inaccessible when WAN switches)\n- DHCP client fallback: tries dhcpcd first, falls back to dhclient\n\n---",
+    "sha256":  "f8e07d256ffca3508333ecbecbefb7f9ba275b3f7044def3c95bcb6f60f8f778",
+    "tarball":  "releases/aircoins-v1.15.0.tar.gz",
     "versions":  [
+                     {
+                         "released_at":  "2026-08-04T08:57:07Z",
+                         "sha256":  "f8e07d256ffca3508333ecbecbefb7f9ba275b3f7044def3c95bcb6f60f8f778",
+                         "version":  "v1.15.0",
+                         "release_notes":  "**Release date:** August 2026\n\n### Includes\n- VLAN ISP switching restored to stable approach (dhcpcd with dhclient fallback)\n- VLAN config persists to vlans.conf + wan_vlan.conf (survives reboots)\n- WAN save always applies to OS (no checkbox)\n- Anti-Hotspot (IP TTL=1) per-portal toggle\n- Factory Reset (full data wipe + admin password reset)\n- Updater shows all available versions with release notes\n- Session TTL per portal\n- NTP timezone management\n\n### Fixed\n- Login hanging after service restart (startup no longer blocks on DHCP)\n- WAN VLAN ISP settings survive reboots\n- VLAN switching works correctly (panel becomes inaccessible when WAN switches)\n- DHCP client fallback: tries dhcpcd first, falls back to dhclient\n\n---",
+                         "tarball":  "releases/aircoins-v1.15.0.tar.gz"
+                     },
                      {
                          "released_at":  "2026-08-04T08:25:53Z",
                          "sha256":  "7340ec9d7a1e250ee9d353b52a7d0fbd8298a7ccc839b9018b4dec8e96c96928",
@@ -31,14 +38,7 @@
                          "version":  "v1.14.6",
                          "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **WAN VLAN DHCP no longer destroys working lease** â€” If the VLAN interface already has an IP address, DHCP is skipped entirely. Previously `dhclient -r` released the existing lease before requesting a new one, and if the new request failed the VLAN was left with no IP at all.\n- **Accurate status message** â€” Shows \"VLAN end0.500 already exists with IP. Skipping DHCP.\" when the VLAN is already working.\n\n---",
                          "tarball":  "releases/aircoins-v1.14.6.tar.gz"
-                     },
-                     {
-                         "released_at":  "2026-08-04T08:06:51Z",
-                         "sha256":  "2ebf3db6659f2c75795276dc2e1c566a71562146f24686386847bd2984c345c9",
-                         "version":  "v1.14.5",
-                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Accurate VLAN status message** â€” WAN save now shows \"VLAN end0.500 already exists\" if the VLAN was already created (e.g., from Portal page), instead of always saying \"created\".\n\n---",
-                         "tarball":  "releases/aircoins-v1.14.5.tar.gz"
                      }
                  ],
-    "released_at":  "2026-08-04T08:25:53Z"
+    "released_at":  "2026-08-04T08:57:07Z"
 }

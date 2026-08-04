@@ -1164,8 +1164,16 @@
                 .then(data => {
                     if (!gpio.active || !data) return;
 
-                    if (data.armed && data.expires_at > gpio.expiresAt) {
-                        gpio.expiresAt = data.expires_at;
+                    if (data.armed && data.expires_at && data.armed_at) {
+                        // Calculate remaining time from server, but apply to device's local clock
+                        // to avoid clock sync issues. Only extend if server says more time left.
+                        const serverDuration = data.expires_at - data.armed_at;
+                        const localExpiresAt = Math.floor(Date.now() / 1000) + serverDuration;
+                        // Only update if server's remaining time is greater than what we have
+                        // (this handles the +30s per coin extension from GPIO listener)
+                        if (localExpiresAt > gpio.expiresAt) {
+                            gpio.expiresAt = localExpiresAt;
+                        }
                     }
 
                     applyCoinslotCoins(data.coins_inserted);
@@ -1245,7 +1253,8 @@
             // Arm the coin slot on the backend (GPIO listener wakes up).
             // Local fallback expiry keeps the countdown working if the
             // API is not reachable (dev/demo mode).
-            gpio.expiresAt = Math.floor(Date.now() / 1000) + COINSLOT_ARM_SEC;
+            const armStartTime = Math.floor(Date.now() / 1000);
+            gpio.expiresAt = armStartTime + COINSLOT_ARM_SEC;
             coinslotArm(COINSLOT_ARM_SEC).then(data => {
                 if (!data) return;
                 // 423 or code:"paying" → another device is mid-payment.
@@ -1255,7 +1264,13 @@
                     return;
                 }
                 if (data.body && data.body.armed && data.body.expires_at) {
-                    gpio.expiresAt = data.body.expires_at;
+                    // Calculate remaining time from backend, but use device's local clock
+                    // to avoid clock sync issues between device and backend
+                    const serverExpiresAt = data.body.expires_at;
+                    const serverArmedAt = data.body.armed_at || armStartTime;
+                    const serverDuration = serverExpiresAt - serverArmedAt;
+                    // Use the server's duration but apply it to the device's local time
+                    gpio.expiresAt = armStartTime + serverDuration;
                 }
                 // Stash the pay_ticket for the session Start call.
                 if (data.body && data.body.pay_ticket) {

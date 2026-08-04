@@ -2214,6 +2214,53 @@
                     <div id="pw-save-status" style="font-size:13px;min-height:18px;margin-top:4px;"></div>
                 </div>
             </div>
+
+            <!-- NTP Time Settings Card -->
+            <div class="settings-card" style="max-width:640px;margin-top:24px;">
+                <div class="card-title" style="display:flex;align-items:center;gap:8px;">&#128337; Date &amp; Time (NTP)</div>
+                <div class="settings-form">
+                    <!-- Current Time Display -->
+                    <div class="settings-row" style="background:#1a1a2e;padding:12px;border-radius:8px;margin-bottom:12px;">
+                        <div style="flex:1;">
+                            <div style="font-size:12px;color:#888;">Current System Time</div>
+                            <div id="ntp-current-time" style="font-size:20px;font-weight:600;color:#00d4ff;font-family:monospace;">Loading...</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="font-size:12px;color:#888;">NTP Status</div>
+                            <div id="ntp-status-badge" style="padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;background:#333;color:#888;">Unknown</div>
+                        </div>
+                    </div>
+
+                    <!-- NTP Enable Toggle -->
+                    <div class="settings-row" style="align-items:center;">
+                        <div class="settings-field" style="flex:1;">
+                            <label>Enable NTP Time Sync</label>
+                            <div style="font-size:12px;color:#888;">Automatically sync time from NTP servers</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="ntp-enabled" checked onchange="toggleNTPEnabled()">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+
+                    <!-- NTP Servers -->
+                    <div id="ntp-servers-section">
+                        <div class="settings-row">
+                            <div class="settings-field" style="flex:1;">
+                                <label>NTP Servers</label>
+                                <div style="font-size:12px;color:#888;margin-bottom:6px;">One server per line. Default: pool.ntp.org</div>
+                                <textarea id="ntp-servers" rows="4" style="font-family:monospace;font-size:13px;" placeholder="pool.ntp.org&#10;time.google.com&#10;time.cloudflare.com"></textarea>
+                            </div>
+                        </div>
+                        <div class="settings-row" style="gap:10px;margin-top:10px;">
+                            <button class="btn btn-primary" onclick="saveNTPSettings()">Save NTP Settings</button>
+                            <button class="btn btn-ghost" onclick="forceNTPSync()">Sync Time Now</button>
+                        </div>
+                    </div>
+
+                    <div id="ntp-save-status" style="font-size:13px;min-height:18px;margin-top:8px;"></div>
+                </div>
+            </div>
         </div>
 
         <!-- System Section -->
@@ -4109,6 +4156,9 @@ async function loadSettings() {
     // Load VLANs, then the portal servers layered on top of them
     loadVLANs();
     loadPortalServers();
+
+    // Load NTP settings
+    loadNTPSettings();
 }
 
 async function autoDetectBoard() {
@@ -4322,6 +4372,103 @@ async function changeAdminPassword() {
         showNotification('Password changed successfully', 'success');
     } catch (e) {
         fail('Error: ' + e.message);
+    }
+}
+
+// ============================================================
+// NTP TIME SETTINGS
+// ============================================================
+async function loadNTPSettings() {
+    try {
+        var data = await apiCall('GET', '/admin/ntp');
+        if (!data) return;
+
+        // Update current time display
+        var timeEl = document.getElementById('ntp-current-time');
+        if (timeEl) timeEl.textContent = data.current_time || 'Unknown';
+
+        // Update NTP status badge
+        var badge = document.getElementById('ntp-status-badge');
+        if (badge) {
+            if (data.ntp_enabled && data.ntp_synced) {
+                badge.textContent = 'Synced';
+                badge.style.background = '#4caf50';
+                badge.style.color = '#fff';
+            } else if (data.ntp_enabled) {
+                badge.textContent = 'Not Synced';
+                badge.style.background = '#ff9800';
+                badge.style.color = '#000';
+            } else {
+                badge.textContent = 'Disabled';
+                badge.style.background = '#f44336';
+                badge.style.color = '#fff';
+            }
+        }
+
+        // Update NTP enabled toggle
+        var toggle = document.getElementById('ntp-enabled');
+        if (toggle) toggle.checked = data.ntp_enabled !== false;
+
+        // Update NTP servers textarea
+        var serversEl = document.getElementById('ntp-servers');
+        if (serversEl && data.ntp_servers && Array.isArray(data.ntp_servers)) {
+            serversEl.value = data.ntp_servers.join('\n');
+        }
+
+        // Show/hide servers section based on NTP enabled
+        var serversSection = document.getElementById('ntp-servers-section');
+        if (serversSection) serversSection.style.display = data.ntp_enabled !== false ? 'block' : 'none';
+    } catch (e) {
+        console.warn('Failed to load NTP settings:', e);
+    }
+}
+
+function toggleNTPEnabled() {
+    var toggle = document.getElementById('ntp-enabled');
+    var serversSection = document.getElementById('ntp-servers-section');
+    if (serversSection) serversSection.style.display = toggle.checked ? 'block' : 'none';
+}
+
+async function saveNTPSettings() {
+    var statusEl = document.getElementById('ntp-save-status');
+    var enabled = document.getElementById('ntp-enabled').checked;
+    var serversText = document.getElementById('ntp-servers').value;
+    var servers = serversText.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+
+    statusEl.textContent = 'Saving...';
+    statusEl.style.color = '#aaa';
+
+    try {
+        await apiCall('POST', '/admin/ntp/set', {
+            enabled: enabled,
+            servers: servers
+        });
+        statusEl.textContent = 'NTP settings saved successfully';
+        statusEl.style.color = '#4caf50';
+        showNotification('NTP settings saved', 'success');
+        await loadNTPSettings();
+    } catch (e) {
+        statusEl.textContent = 'Error: ' + e.message;
+        statusEl.style.color = '#f44336';
+        showNotification('Failed to save NTP settings: ' + e.message, 'error');
+    }
+}
+
+async function forceNTPSync() {
+    var statusEl = document.getElementById('ntp-save-status');
+    statusEl.textContent = 'Syncing time...';
+    statusEl.style.color = '#aaa';
+
+    try {
+        var data = await apiCall('POST', '/admin/ntp/sync');
+        statusEl.textContent = 'Time synced: ' + (data.current_time || 'Unknown');
+        statusEl.style.color = '#4caf50';
+        showNotification('Time synchronized successfully', 'success');
+        await loadNTPSettings();
+    } catch (e) {
+        statusEl.textContent = 'Sync failed: ' + e.message;
+        statusEl.style.color = '#f44336';
+        showNotification('Failed to sync time: ' + e.message, 'error');
     }
 }
 

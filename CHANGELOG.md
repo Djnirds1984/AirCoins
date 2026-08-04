@@ -4,6 +4,29 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.11.0 — NTP Time Settings & Storage Cleanup
+
+**Release date:** August 2026
+
+### Added
+- **NTP Time Settings in Settings page** — Configure NTP servers, enable/disable time sync, view current system time and sync status, force manual time sync. Fixes clock drift issues on devices without RTC.
+- **NTP API endpoints** — `GET /api/admin/ntp`, `POST /api/admin/ntp/set`, `POST /api/admin/ntp/sync` for full time management.
+
+### Changed
+- **Storage cleanup** — Removed all 50 local tarball files (25 .tar.gz + 25 .sha256) to free up disk space. All releases are stored in Supabase Storage.
+
+---
+
+## v1.10.12 — Fix: Insert Coin Modal Closes Immediately
+
+**Release date:** August 2026
+
+### Fixed
+- **Clock sync issue causing immediate timeout** — The Insert Coin modal was closing immediately with "COINSLOT TIMED OUT" because the device's clock was out of sync with the backend. Now calculates remaining time using the device's local clock + server's duration, avoiding clock sync issues.
+- **Polling also fixed** — The status polling now also uses local clock calculations to avoid the same issue during coin detection.
+
+---
+
 ## v1.10.11 — Allow Admin Access When Locked
 
 **Release date:** August 2026

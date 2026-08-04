@@ -1,9 +1,23 @@
 ﻿{
-    "version":  "v1.10.11",
-    "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Locked devices can now access License and Updater pages** â€” Previously, locked devices were completely blocked from the admin panel. Now users can access the License page (to purchase/activate) and the Updater page (to update software) even when locked.\n- **Backend middleware** â€” Added `/api/admin/update/*` to the list of routes that bypass the license gate.\n- **Frontend lockdown** â€” Updated `lockDownForLicense()` and `showSection()` to keep License and Updater nav items visible.\n\n---",
-    "sha256":  "6e62586cebcf1d1ef452e21d25e7ab4c86f325b540bc7d002ee2728748995411",
-    "tarball":  "releases/aircoins-v1.10.11.tar.gz",
+    "version":  "v1.11.0",
+    "release_notes":  "**Release date:** August 2026\n\n### Added\n- **NTP Time Settings in Settings page** â€” Configure NTP servers, enable/disable time sync, view current system time and sync status, force manual time sync. Fixes clock drift issues on devices without RTC.\n- **NTP API endpoints** â€” `GET /api/admin/ntp`, `POST /api/admin/ntp/set`, `POST /api/admin/ntp/sync` for full time management.\n\n### Changed\n- **Storage cleanup** â€” Removed all 50 local tarball files (25 .tar.gz + 25 .sha256) to free up disk space. All releases are stored in Supabase Storage.\n\n---",
+    "sha256":  "ffeba8ababe9145e1c0ea9823e4e560514a92a6cf500fa2cfc01b67a1589ed8b",
+    "tarball":  "releases/aircoins-v1.11.0.tar.gz",
     "versions":  [
+                     {
+                         "released_at":  "2026-08-04T04:32:10Z",
+                         "sha256":  "ffeba8ababe9145e1c0ea9823e4e560514a92a6cf500fa2cfc01b67a1589ed8b",
+                         "version":  "v1.11.0",
+                         "release_notes":  "**Release date:** August 2026\n\n### Added\n- **NTP Time Settings in Settings page** â€” Configure NTP servers, enable/disable time sync, view current system time and sync status, force manual time sync. Fixes clock drift issues on devices without RTC.\n- **NTP API endpoints** â€” `GET /api/admin/ntp`, `POST /api/admin/ntp/set`, `POST /api/admin/ntp/sync` for full time management.\n\n### Changed\n- **Storage cleanup** â€” Removed all 50 local tarball files (25 .tar.gz + 25 .sha256) to free up disk space. All releases are stored in Supabase Storage.\n\n---",
+                         "tarball":  "releases/aircoins-v1.11.0.tar.gz"
+                     },
+                     {
+                         "released_at":  "2026-08-04T04:18:25Z",
+                         "sha256":  "ccef95b2b86ddd80b4bd613ec2f3c4ab16d1493052a43da1c849e3aefa40f573",
+                         "version":  "v1.10.12",
+                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Clock sync issue causing immediate timeout** â€” The Insert Coin modal was closing immediately with \"COINSLOT TIMED OUT\" because the device\u0027s clock was out of sync with the backend. Now calculates remaining time using the device\u0027s local clock + server\u0027s duration, avoiding clock sync issues.\n- **Polling also fixed** â€” The status polling now also uses local clock calculations to avoid the same issue during coin detection.\n\n---",
+                         "tarball":  "releases/aircoins-v1.10.12.tar.gz"
+                     },
                      {
                          "released_at":  "2026-08-03T04:42:59Z",
                          "sha256":  "6e62586cebcf1d1ef452e21d25e7ab4c86f325b540bc7d002ee2728748995411",
@@ -24,21 +38,7 @@
                          "version":  "v1.10.9",
                          "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **No more \"dhclient.service not found\" error** â€” `applyDHCP()` now falls back to running the DHCP binary directly (`dhclient -v eth0`) when `systemctl restart` fails. No dummy service needed.\n- **Static IP no longer depends on dhcpcd** â€” `applyStatic()` now uses `iproute2` commands directly (`ip addr add`, `ip route add`) instead of writing to `/etc/dhcpcd.conf` and restarting dhcpcd. Works on all modern Linux.\n- **VLAN DHCP already uses direct request** â€” `applyVLANDHCP()` was already fixed in v1.10.2.\n\n---",
                          "tarball":  "releases/aircoins-v1.10.9.tar.gz"
-                     },
-                     {
-                         "released_at":  "2026-08-03T03:37:28Z",
-                         "sha256":  "fcb3d4b9d611085057992f203aa6d70aadb53e631d083e00df129054c70e8a6b",
-                         "version":  "v1.10.8",
-                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Hardware fingerprint now detects cloned SD cards** â€” Added 3 new hardware ID sources: device tree serial (Allwinner SID), Ethernet MAC address, and auto-regeneration of `/etc/machine-id`. Previously, cloned SD cards had the same machine-id, so the system couldn\u0027t tell they were on a different board.\n- **Auto-regenerate machine-id** â€” When the SD card is moved to a new board, the system detects the hardware change (via MAC address or SoC serial) and regenerates `/etc/machine-id` with a new unique ID. This triggers a fresh 7-day trial automatically.\n- **Hardware stamp file** â€” New `/etc/machine-id.hardware-stamp` tracks which hardware the machine-id belongs to, so cloned cards are detected on first boot.\n\n---",
-                         "tarball":  "releases/aircoins-v1.10.8.tar.gz"
-                     },
-                     {
-                         "released_at":  "2026-08-03T03:28:04Z",
-                         "sha256":  "e7eb8b7f32cb6239b9b17e9125edd5361cd4a3213eb812c2953d6bf8bb9250f0",
-                         "version":  "v1.10.7",
-                         "release_notes":  "**Release date:** August 2026\n\n### Added\n- **Reset Sales Reports button** â€” New section at the bottom of the Reports page with a \"Reset All Sales Data\" button. Deletes all daily stats, coin events, and session records. Includes double confirmation to prevent accidental resets.\n\n---",
-                         "tarball":  "releases/aircoins-v1.10.7.tar.gz"
                      }
                  ],
-    "released_at":  "2026-08-03T04:42:59Z"
+    "released_at":  "2026-08-04T04:32:10Z"
 }

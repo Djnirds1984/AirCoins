@@ -3,6 +3,7 @@ package handlers
 import (
 	"aircoins-api/models"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -556,4 +557,210 @@ func checkServiceRunning(service string) bool {
 	cmd := exec.Command("systemctl", "is-active", "--quiet", service)
 	err := cmd.Run()
 	return err == nil
+}
+
+// ============================================
+// NTP TIME MANAGEMENT
+// ============================================
+
+// NTPGet returns the current time, NTP sync status, and configured NTP servers.
+func (h *SystemHandler) NTPGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get current system time
+	now := time.Now()
+
+	// Check if NTP is enabled via timedatectl
+	ntpEnabled := false
+	ntpSynced := false
+	if out, err := exec.Command("timedatectl", "show").Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.HasPrefix(line, "NTP=") {
+				ntpEnabled = strings.TrimSpace(strings.TrimPrefix(line, "NTP=")) == "yes"
+			}
+			if strings.HasPrefix(line, "NTPSynchronized=") {
+				ntpSynced = strings.TrimSpace(strings.TrimPrefix(line, "NTPSynchronized=")) == "yes"
+			}
+		}
+	}
+
+	// Get configured NTP servers from /etc/systemd/timesyncd.conf
+	ntpServers := getNTPServers()
+
+	// Get last sync time if available
+	lastSync := ""
+	if out, err := exec.Command("timedatectl", "show", "-p", "TimeSyncTimestamp", "--value").Output(); err == nil {
+		ts := strings.TrimSpace(string(out))
+		if ts != "" && ts != "n/a" {
+			lastSync = ts
+		}
+	}
+
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"success":       true,
+		"current_time":  now.Format("2006-01-02 15:04:05"),
+		"timezone":      now.Location().String(),
+		"unix_timestamp": now.Unix(),
+		"ntp_enabled":   ntpEnabled,
+		"ntp_synced":    ntpSynced,
+		"ntp_servers":   ntpServers,
+		"last_sync":     lastSync,
+	})
+}
+
+// NTPSet configures the NTP servers and enables/disables NTP sync.
+func (h *SystemHandler) NTPSet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Servers  []string `json:"servers"`
+		Enabled  *bool    `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+		return
+	}
+
+	// Enable/disable NTP
+	if req.Enabled != nil {
+		val := "yes"
+		if !*req.Enabled {
+			val = "no"
+		}
+		if out, err := exec.Command("sudo", "timedatectl", "set-ntp", val).CombinedOutput(); err != nil {
+			log.Printf("NTP set-ntp failed: %s", string(out))
+			sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"success": false,
+				"error":   "Failed to set NTP: " + string(out),
+			})
+			return
+		}
+	}
+
+	// Set NTP servers if provided
+	if len(req.Servers) > 0 {
+		if err := setNTPServers(req.Servers); err != nil {
+			sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"success": false,
+				"error":   "Failed to set NTP servers: " + err.Error(),
+			})
+			return
+		}
+
+		// Restart timesyncd to apply changes
+		exec.Command("sudo", "systemctl", "restart", "systemd-timesyncd").Run()
+	}
+
+	// Force immediate time sync
+	exec.Command("sudo", "systemctl", "restart", "systemd-timesyncd").Run()
+	time.Sleep(2 * time.Second) // Wait for sync
+
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "NTP settings updated",
+	})
+}
+
+// NTPSync forces an immediate NTP time synchronization.
+func (h *SystemHandler) NTPSync(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Restart timesyncd to force sync
+	if out, err := exec.Command("sudo", "systemctl", "restart", "systemd-timesyncd").CombinedOutput(); err != nil {
+		sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to sync time: " + string(out),
+		})
+		return
+	}
+
+	// Wait a moment for sync
+	time.Sleep(3 * time.Second)
+
+	// Get updated time
+	now := time.Now()
+
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"success":      true,
+		"message":      "Time synchronized",
+		"current_time": now.Format("2006-01-02 15:04:05"),
+		"unix_timestamp": now.Unix(),
+	})
+}
+
+// getNTPServers reads the configured NTP servers from timesyncd.conf
+func getNTPServers() []string {
+	data, err := os.ReadFile("/etc/systemd/timesyncd.conf")
+	if err != nil {
+		return []string{}
+	}
+
+	var servers []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "NTP=") {
+			// NTP=pool.ntp.org time.google.com
+			val := strings.TrimPrefix(line, "NTP=")
+			for _, s := range strings.Fields(val) {
+				if s != "" {
+					servers = append(servers, s)
+				}
+			}
+		}
+	}
+	return servers
+}
+
+// setNTPServers writes the NTP servers to timesyncd.conf
+func setNTPServers(servers []string) error {
+	confPath := "/etc/systemd/timesyncd.conf"
+
+	// Read existing config
+	data, err := os.ReadFile(confPath)
+	if err != nil {
+		data = []byte("[Time]\n#NTP=\n#FallbackNTP=\n")
+	}
+
+	content := string(data)
+	lines := strings.Split(content, "\n")
+	var newLines []string
+	ntpWritten := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Skip existing NTP= lines (commented or not)
+		if strings.HasPrefix(trimmed, "NTP=") || strings.HasPrefix(trimmed, "#NTP=") {
+			if !ntpWritten && len(servers) > 0 {
+				newLines = append(newLines, "NTP="+strings.Join(servers, " "))
+				ntpWritten = true
+			}
+			continue
+		}
+		newLines = append(newLines, line)
+	}
+
+	// If no NTP line was written yet, add it after [Time]
+	if !ntpWritten && len(servers) > 0 {
+		for i, line := range newLines {
+			if strings.TrimSpace(line) == "[Time]" {
+				// Insert after [Time]
+				newLines = append(newLines[:i+1], append([]string{"NTP=" + strings.Join(servers, " ")}, newLines[i+1:]...)...)
+				break
+			}
+		}
+	}
+
+	return os.WriteFile(confPath, []byte(strings.Join(newLines, "\n")), 0644)
 }

@@ -4,6 +4,17 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.16.3 — Anti-Hotspot: Per-MAC Filtering (MikroTik-style 1:1)
+
+**Release date:** August 2026
+
+### Changed
+- **Anti-hotspot now uses per-MAC filtering** instead of unreliable TTL-based detection. Only the authorized client's MAC address can forward traffic. Friends' devices (different MACs) are blocked — regardless of whether the phone decrements TTL or not.
+- This is the same approach MikroTik uses for 1:1 hotspot connections.
+- **How it works:** When anti-hotspot is ON, the catch-all ACCEPT is replaced with catch-all DROP. Only authorized clients (per-MAC ACCEPT rules added during auth) can forward. Tethered devices with different MACs are dropped.
+
+---
+
 ## v1.16.2 — Fix: Anti-Hotspot No Longer Blocks Client
 
 **Release date:** August 2026

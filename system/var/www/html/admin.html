@@ -2157,9 +2157,9 @@
                                 Anti-Hotspot (TTL=1 Hop Limit)
                             </label>
                             <div class="form-hint" style="margin-top:4px;">
-                                Blocks tethered/hotspot devices. When your client enables hotspot, their phone
-                                decrements TTL by 1 on friends' packets (64→63). Friends (TTL≤63) are dropped.
-                                Your client (TTL=64) keeps full internet access.
+                                Per-MAC filtering (like MikroTik 1:1 hotspot). Only the paying client's
+                                device MAC is allowed to forward traffic. If they enable hotspot, their
+                                friends' devices (different MACs) are blocked. Client keeps full internet.
                             </div>
                         </div>
                     </div>

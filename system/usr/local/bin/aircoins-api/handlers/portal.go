@@ -247,12 +247,9 @@ func dhcpRangeFor(ipCIDR string, startIP string) (string, string) {
 // applyCaptiveRules runs aircoins-captive-rules for an interface. action
 // is "add" or "del". Failures are logged but never fatal: a portal
 // without captive rules is still usable, it just won't auto-pop.
-// antiHotspot, when true, forces TTL=1 on forwarded client packets to
-// prevent tethering/hotspotting to other devices.
-//
-// The shell script is always called with 3 args (action, iface, gateway)
-// for backward compatibility. Anti-hotspot TTL rules are applied directly
-// via iptables so they work regardless of the script version on disk.
+// antiHotspot, when true, enables per-MAC filtering (like MikroTik 1:1
+// hotspot): only the authorized client's MAC can forward, blocking
+// tethered/hotspot devices with different MACs.
 func applyCaptiveRules(action, iface, ipCIDR string, antiHotspot bool) {
 	gateway := strings.Split(ipCIDR, "/")[0]
 	if gateway == "" {
@@ -265,76 +262,18 @@ func applyCaptiveRules(action, iface, ipCIDR string, antiHotspot bool) {
 		return
 	}
 
-	// Call the shell script with the standard 3 args only.
-	// This is backward-compatible with all script versions.
-	if out, err := exec.Command(captiveRulesPath, action, iface, gateway).CombinedOutput(); err != nil {
+	// Build args: action, iface, gateway, [anti_hotspot]
+	args := []string{action, iface, gateway}
+	if antiHotspot {
+		args = append(args, "anti_hotspot")
+	}
+
+	if out, err := exec.Command(captiveRulesPath, args...).CombinedOutput(); err != nil {
 		log.Printf("applyCaptiveRules: %s %s %s failed: %v — %s", action, iface, gateway, err, string(out))
 		return
 	}
 
-	// Handle anti-hotspot TTL rules directly in Go (no script dependency).
-	// This ensures captive rules work even if the script doesn't support
-	// the anti_hotspot parameter.
-	if antiHotspot {
-		applyAntiHotspotRules(action, iface)
-	} else if action == "del" {
-		// Always attempt cleanup of TTL rules when disabling, in case
-		// they were previously enabled.
-		removeAntiHotspotRules(iface)
-	}
-
 	log.Printf("applyCaptiveRules: %s captive rules for %s (%s, anti_hotspot=%v)", action, iface, gateway, antiHotspot)
-}
-
-// applyAntiHotspotRules adds iptables rules to block tethered/hotspot
-// devices while keeping the paying client's own connection intact.
-//
-// How it works:
-//   - Most devices (Android/iOS/Linux/Windows) send packets with TTL=64.
-//   - When a client enables hotspot on their phone, the phone acts as a
-//     router and DECREMENTS TTL by 1 on forwarded packets (64 → 63).
-//   - We DROP packets arriving from the portal interface with TTL ≤ 63.
-//   - The client's OWN packets arrive at TTL=64 → NOT dropped → internet works.
-//   - Friends' packets arrive at TTL=63 (decremented by client's phone) → DROPPED.
-//
-// This is the correct anti-hotspot approach: it only blocks the tethered
-// devices, never the paying client.
-func applyAntiHotspotRules(action, iface string) {
-	// Ensure the AIRCOINS_TTL chain exists in the filter table
-	if _, err := exec.Command("iptables", "-t", "filter", "-S", "AIRCOINS_TTL").CombinedOutput(); err != nil {
-		if err := exec.Command("iptables", "-t", "filter", "-N", "AIRCOINS_TTL").Run(); err != nil {
-			log.Printf("applyAntiHotspotRules: failed to create AIRCOINS_TTL chain: %v", err)
-			return
-		}
-	}
-
-	// Hook AIRCOINS_TTL into the FORWARD chain (idempotent)
-	if _, err := exec.Command("iptables", "-t", "filter", "-C", "FORWARD", "-j", "AIRCOINS_TTL").CombinedOutput(); err != nil {
-		if out2, err2 := exec.Command("iptables", "-t", "filter", "-I", "FORWARD", "1", "-j", "AIRCOINS_TTL").CombinedOutput(); err2 != nil {
-			log.Printf("applyAntiHotspotRules: failed to hook AIRCOINS_TTL into FORWARD: %v — %s", err2, string(out2))
-			return
-		}
-	}
-
-	// DROP packets with TTL ≤ 63 from this portal interface.
-	// These are packets from tethered devices (their TTL was decremented
-	// by the client's phone from 64 to 63). The client's own packets
-	// arrive at TTL=64 and are NOT matched → they pass through fine.
-	if _, err := exec.Command("iptables", "-t", "filter", "-C", "AIRCOINS_TTL", "-i", iface, "-m", "ttl", "--ttl-eq", "0-63", "-j", "DROP").CombinedOutput(); err != nil {
-		if out2, err2 := exec.Command("iptables", "-t", "filter", "-A", "AIRCOINS_TTL", "-i", iface, "-m", "ttl", "--ttl-eq", "0-63", "-j", "DROP").CombinedOutput(); err2 != nil {
-			log.Printf("applyAntiHotspotRules: failed to add DROP rule for %s: %v — %s", iface, err2, string(out2))
-			return
-		}
-	}
-
-	log.Printf("applyAntiHotspotRules: anti-hotspot DROP TTL≤63 %s for %s", action, iface)
-}
-
-// removeAntiHotspotRules removes the iptables filter rules for an interface.
-func removeAntiHotspotRules(iface string) {
-	// Remove the per-interface DROP rule (idempotent — ignore errors)
-	exec.Command("iptables", "-t", "filter", "-D", "AIRCOINS_TTL", "-i", iface, "-m", "ttl", "--ttl-eq", "0-63", "-j", "DROP").Run()
-	log.Printf("removeAntiHotspotRules: removed anti-hotspot rules for %s", iface)
 }
 
 // writeNetworkdConfig writes a per-interface systemd-networkd .network file

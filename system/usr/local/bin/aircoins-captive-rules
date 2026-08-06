@@ -48,6 +48,8 @@ CAPTIVE_CONF="/etc/pisowifi/captive.conf"
 NAT_CHAIN="AIRCOINS_CAPTIVE"
 FWD_CHAIN="AIRCOINS_FORWARD"
 STATE_DIR="/var/lib/pisowifi/captive"
+ANTI_HOTSPOT_STATE="$STATE_DIR/anti_hotspot_ifaces"
+AUTH_MACS_DIR="$STATE_DIR/auth_macs"
 
 # ============================================
 # LOGGING
@@ -196,6 +198,83 @@ enable_forwarding() {
 }
 
 # ============================================
+# ANTI-HOTSPOT (Per-MAC Filtering)
+# ============================================
+# Instead of unreliable TTL-based detection, anti-hotspot uses
+# per-MAC filtering: only the authorized client's MAC can forward.
+# Friends' devices have different MACs → blocked. This is the same
+# approach MikroTik uses for 1:1 hotspot connections.
+#
+# When anti-hotspot is ON for a portal:
+#   - The catch-all ACCEPT is replaced with catch-all DROP
+#   - Only authorized clients (per-MAC ACCEPT) can forward
+#   - Tethered/hotspot devices (different MACs) are blocked
+
+# Track authorized MACs per portal for anti-hotspot toggle
+record_auth_mac() {
+    local iface="$1" mac="$2"
+    mkdir -p "$AUTH_MACS_DIR" 2>/dev/null
+    local f="$AUTH_MACS_DIR/$iface"
+    grep -qxF "$mac" "$f" 2>/dev/null || echo "$mac" >> "$f"
+}
+
+remove_auth_mac() {
+    local iface="$1" mac="$2"
+    local f="$AUTH_MACS_DIR/$iface"
+    [ -f "$f" ] || return 0
+    local tmp
+    tmp=$(grep -vxF "$mac" "$f" 2>/dev/null) || true
+    echo "$tmp" > "$f"
+}
+
+# Get all authorized MACs for a portal
+get_auth_macs() {
+    local iface="$1"
+    local f="$AUTH_MACS_DIR/$iface"
+    [ -f "$f" ] || return 0
+    grep -v '^$' "$f" 2>/dev/null || true
+}
+
+# Add per-MAC ACCEPT rules for all authorized clients on a portal
+add_per_mac_rules() {
+    local iface="$1"
+    local mac
+    get_auth_macs "$iface" | while read -r mac; do
+        [ -n "$mac" ] || continue
+        insert_rule filter "$FWD_CHAIN" -i "$iface" -m mac --mac-source "$mac" -j ACCEPT
+    done
+}
+
+# Remove per-MAC ACCEPT rules for all authorized clients on a portal
+remove_per_mac_rules() {
+    local iface="$1"
+    local mac
+    get_auth_macs "$iface" | while read -r mac; do
+        [ -n "$mac" ] || continue
+        delete_rule filter "$FWD_CHAIN" -i "$iface" -m mac --mac-source "$mac" -j ACCEPT
+    done
+}
+
+# Rebuild the catch-all rule based on anti-hotspot state.
+# When any portal has anti-hotspot ON: catch-all becomes DROP
+# (authorized clients use per-MAC ACCEPT rules instead).
+# When no portals have anti-hotspot: catch-all is ACCEPT.
+rebuild_catch_all() {
+    # Remove old catch-all
+    delete_rule filter "$FWD_CHAIN" -j ACCEPT
+    delete_rule filter "$FWD_CHAIN" -j DROP
+
+    if [ ! -s "$ANTI_HOTSPOT_STATE" ]; then
+        # No anti-hotspot portals → allow all forwarding
+        append_rule filter "$FWD_CHAIN" -j ACCEPT
+    else
+        # Anti-hotspot active → catch-all DROP
+        # Authorized clients use per-MAC ACCEPT rules above
+        append_rule filter "$FWD_CHAIN" -j DROP
+    fi
+}
+
+# ============================================
 # CAPTIVE RULES - ADD
 # ============================================
 cmd_add() {
@@ -234,16 +313,20 @@ cmd_add() {
         -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     append_rule filter "$FWD_CHAIN" -i "$iface" -j DROP
 
-    # --- Anti-Hotspot: DROP packets with TTL ≤ 63 from this portal.
-    # Most devices send packets with TTL=64. When a client enables
-    # hotspot/tethering, their phone decrements TTL by 1 (64→63) on
-    # friends' packets. We DROP TTL≤63 so only the client's own
-    # packets (TTL=64) pass through — friends are blocked.
+    # --- Anti-Hotspot: per-MAC filtering (like MikroTik 1:1 hotspot).
+    # Only the authorized client's MAC can forward. Friends' devices
+    # (different MACs) are blocked by the catch-all DROP.
     if [ "$anti_hotspot" = "anti_hotspot" ]; then
-        ensure_chain filter AIRCOINS_TTL
-        ensure_hook filter FORWARD "AIRCOINS_TTL"
-        append_rule filter AIRCOINS_TTL -i "$iface" -m ttl --ttl-eq 0-63 -j DROP
-        log "anti-hotspot enabled for $iface (DROP TTL≤63, client TTL=64 passes)"
+        mkdir -p "$STATE_DIR" 2>/dev/null
+        grep -qxF "$iface" "$ANTI_HOTSPOT_STATE" 2>/dev/null || \
+            echo "$iface" >> "$ANTI_HOTSPOT_STATE"
+
+        # Add per-MAC ACCEPT for existing authorized clients
+        add_per_mac_rules "$iface"
+
+        # Rebuild catch-all (ACCEPT → DROP)
+        rebuild_catch_all
+        log "anti-hotspot enabled for $iface (per-MAC filtering, like MikroTik)"
     fi
 
     # --- NAT for authorized clients reaching the internet.
@@ -285,19 +368,25 @@ cmd_del() {
     delete_rule filter INPUT -i "$iface" -p tcp --dport 53 -j ACCEPT
     delete_rule filter INPUT -i "$iface" -p tcp --dport 80 -j ACCEPT
 
+    # Remove per-MAC rules if anti-hotspot was enabled
+    if [ -s "$ANTI_HOTSPOT_STATE" ] && grep -qxF "$iface" "$ANTI_HOTSPOT_STATE" 2>/dev/null; then
+        remove_per_mac_rules "$iface"
+    fi
+
     delete_rule filter "$FWD_CHAIN" -o "$iface" \
         -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     delete_rule filter "$FWD_CHAIN" -i "$iface" -j DROP
 
-    # --- Remove anti-hotspot DROP rules if they were enabled
-    # Always attempt removal (idempotent) — also remove if anti_hotspot
-    # flag is passed or if rules exist for this interface (cleanup).
-    if [ "$anti_hotspot" = "anti_hotspot" ] || \
-       iptables -t filter -C AIRCOINS_TTL -i "$iface" -m ttl --ttl-eq 0-63 -j DROP 2>/dev/null; then
-        delete_rule filter AIRCOINS_TTL -i "$iface" -m ttl --ttl-eq 0-63 -j DROP
-        log "anti-hotspot removed for $iface"
+    # --- Remove anti-hotspot state
+    if [ -s "$ANTI_HOTSPOT_STATE" ] && grep -qxF "$iface" "$ANTI_HOTSPOT_STATE" 2>/dev/null; then
+        grep -vxF "$iface" "$ANTI_HOTSPOT_STATE" > "$ANTI_HOTSPOT_STATE.tmp" 2>/dev/null || true
+        mv "$ANTI_HOTSPOT_STATE.tmp" "$ANTI_HOTSPOT_STATE"
+        rebuild_catch_all
+        log "anti-hotspot disabled for $iface"
     fi
 
+    # Clean up auth MAC tracking for this portal
+    rm -f "$AUTH_MACS_DIR/$iface" 2>/dev/null
     rm -f "$STATE_DIR/${iface}.subnet" 2>/dev/null
 
     log "captive rules removed for $iface"
@@ -358,6 +447,18 @@ cmd_auth() {
 
     insert_rule filter "$FWD_CHAIN" -m mac --mac-source "$mac" -j ACCEPT
 
+    # Record MAC for anti-hotspot per-portal tracking.
+    # We don't know which portal yet, so record for all anti-hotspot portals.
+    # The Go API also calls record_auth_mac_for_portal when it knows the portal.
+    if [ -s "$ANTI_HOTSPOT_STATE" ]; then
+        while read -r ah_iface; do
+            [ -n "$ah_iface" ] || continue
+            record_auth_mac "$ah_iface" "$mac"
+            # Add per-interface per-MAC ACCEPT for anti-hotspot portals
+            insert_rule filter "$FWD_CHAIN" -i "$ah_iface" -m mac --mac-source "$mac" -j ACCEPT
+        done < "$ANTI_HOTSPOT_STATE"
+    fi
+
     # Existing connections were DNAT'ed to the portal; clear them so the
     # client gets real internet right away.
     flush_client_conntrack "$mac"
@@ -370,6 +471,15 @@ cmd_unauth() {
     valid_mac "$mac" || die "invalid MAC address: $mac"
 
     remove_auth_rules "$mac"
+
+    # Remove per-interface per-MAC rules for anti-hotspot portals
+    if [ -s "$ANTI_HOTSPOT_STATE" ]; then
+        while read -r ah_iface; do
+            [ -n "$ah_iface" ] || continue
+            remove_auth_mac "$ah_iface" "$mac"
+            delete_rule filter "$FWD_CHAIN" -i "$ah_iface" -m mac --mac-source "$mac" -j ACCEPT
+        done < "$ANTI_HOTSPOT_STATE"
+    fi
 
     # Clear the client's established connections so it is captured by the
     # portal again immediately.
@@ -408,9 +518,9 @@ Usage:
   aircoins-captive-rules status                                   Show current rules
 
 Options:
-  anti_hotspot    DROP packets with TTL≤63 from this portal. Most devices
-                  send TTL=64; when a client hotspots, their phone decrements
-                  to 63. Client (TTL=64) passes, friends (TTL=63) are blocked.
+  anti_hotspot    Enable per-MAC filtering for this portal (like MikroTik 1:1).
+                  Only the authorized client's MAC can forward. Friends'
+                  devices (different MACs) are blocked. Client keeps internet.
 
 Examples:
   aircoins-captive-rules add end0.22 10.0.22.1

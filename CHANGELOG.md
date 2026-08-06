@@ -4,25 +4,47 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
-## v1.15.0 — Stable Base Release
+## v1.16.2 — Fix: Anti-Hotspot No Longer Blocks Client
 
 **Release date:** August 2026
 
-### Includes
-- VLAN ISP switching restored to stable approach (dhcpcd with dhclient fallback)
-- VLAN config persists to vlans.conf + wan_vlan.conf (survives reboots)
-- WAN save always applies to OS (no checkbox)
-- Anti-Hotspot (IP TTL=1) per-portal toggle
-- Factory Reset (full data wipe + admin password reset)
-- Updater shows all available versions with release notes
-- Session TTL per portal
-- NTP timezone management
+### Fixed
+- **Anti-hotspot now correctly blocks ONLY tethered devices** — Previous approach (TTL=1) blocked ALL packets from the portal including the paying client's own device. New approach DROPs packets with TTL≤63, which are the friends' packets (decremented by client's phone from 64→63). The client's own packets (TTL=64) pass through untouched.
+- **How it works:** Most devices send TTL=64. When client enables hotspot, their phone acts as a router and decrements TTL by 1 on friends' packets (64→63). We DROP TTL≤63 at the portal — client (64) passes, friends (63) blocked.
+
+---
+
+## v1.16.1 — Fix: Captive Rules Fail When Anti-Hotspot Enabled
+
+**Release date:** August 2026
 
 ### Fixed
-- Login hanging after service restart (startup no longer blocks on DHCP)
-- WAN VLAN ISP settings survive reboots
-- VLAN switching works correctly (panel becomes inaccessible when WAN switches)
-- DHCP client fallback: tries dhcpcd first, falls back to dhclient
+- **Captive rules now work with anti-hotspot enabled** — Anti-hotspot TTL=1 rules are now applied directly by the Go API via iptables, instead of relying on the shell script. This fixes the issue where enabling anti-hotspot caused the Captive status to show "Fail" on devices with older script versions.
+- **Backward compatibility** — The shell script is now always called with 3 args (action, iface, gateway), ensuring it works on all devices regardless of script version.
+
+---
+
+## v1.16.0 — Portal Servers CRUD + Anti-Hotspot (TTL=1)
+
+**Release date:** August 2026
+
+### Added
+- **Anti-Hotspot (TTL=1 Hop Limit)** — New per-portal setting that forces IP TTL=1 on client packets, preventing tethering/hotspotting. When enabled, only the paying client's device gets internet access — their friends' devices cannot connect through them.
+- **Portal Servers CRUD (Edit)** — Portal servers can now be edited after creation. Click the ✏️ button to modify IP, DHCP range, lease time, or anti-hotspot settings. Changes apply immediately to running portals.
+- **Database migration 014** — Adds `anti_hotspot` column to `portal_servers` table
+
+### Changed
+- Portal config file format extended to 7 columns (backward compatible with 6-column format)
+- Captive rules script (`aircoins-captive-rules`) accepts optional `anti_hotspot` parameter for TTL mangling via iptables mangle table
+
+---
+
+## v1.15.3 — Build Update
+
+**Release date:** August 2026
+
+### Changed
+- **Version bump** — Build release v1.15.3
 
 ---
 

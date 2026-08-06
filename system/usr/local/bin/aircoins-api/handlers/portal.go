@@ -38,14 +38,15 @@ const defaultDHCPLease = "12h"
 // for the admin UI and reporting, same pattern as vlans.conf.
 
 // portalConfigEntry represents one line in /etc/pisowifi/portals.conf.
-// Format: interface ip/cidr dhcp_start dhcp_end lease enabled|disabled
+// Format: interface ip/cidr dhcp_start dhcp_end lease enabled|disabled anti_hotspot_on|anti_hotspot_off
 type portalConfigEntry struct {
-	Interface string
-	IPCIDR    string
-	DHCPStart string
-	DHCPEnd   string
-	Lease     string
-	Enabled   bool
+	Interface   string
+	IPCIDR      string
+	DHCPStart   string
+	DHCPEnd     string
+	Lease       string
+	Enabled     bool
+	AntiHotspot bool
 }
 
 // readPortalConfig reads all entries from /etc/pisowifi/portals.conf.
@@ -69,14 +70,19 @@ func readPortalConfig() []portalConfigEntry {
 			continue
 		}
 
-		entries = append(entries, portalConfigEntry{
+		entry := portalConfigEntry{
 			Interface: parts[0],
 			IPCIDR:    parts[1],
 			DHCPStart: parts[2],
 			DHCPEnd:   parts[3],
 			Lease:     parts[4],
 			Enabled:   parts[5] == "enabled",
-		})
+		}
+		// 7th column (anti_hotspot) is optional for backward compatibility
+		if len(parts) >= 7 {
+			entry.AntiHotspot = parts[6] == "anti_hotspot_on"
+		}
+		entries = append(entries, entry)
 	}
 
 	return entries
@@ -101,8 +107,12 @@ func writePortalConfig(entries []portalConfigEntry) {
 		if e.Enabled {
 			state = "enabled"
 		}
-		fmt.Fprintf(f, "%s %s %s %s %s %s\n",
-			e.Interface, e.IPCIDR, e.DHCPStart, e.DHCPEnd, e.Lease, state)
+		antiHotspot := "anti_hotspot_off"
+		if e.AntiHotspot {
+			antiHotspot = "anti_hotspot_on"
+		}
+		fmt.Fprintf(f, "%s %s %s %s %s %s %s\n",
+			e.Interface, e.IPCIDR, e.DHCPStart, e.DHCPEnd, e.Lease, state, antiHotspot)
 	}
 }
 
@@ -237,7 +247,13 @@ func dhcpRangeFor(ipCIDR string, startIP string) (string, string) {
 // applyCaptiveRules runs aircoins-captive-rules for an interface. action
 // is "add" or "del". Failures are logged but never fatal: a portal
 // without captive rules is still usable, it just won't auto-pop.
-func applyCaptiveRules(action, iface, ipCIDR string) {
+// antiHotspot, when true, forces TTL=1 on forwarded client packets to
+// prevent tethering/hotspotting to other devices.
+//
+// The shell script is always called with 3 args (action, iface, gateway)
+// for backward compatibility. Anti-hotspot TTL rules are applied directly
+// via iptables so they work regardless of the script version on disk.
+func applyCaptiveRules(action, iface, ipCIDR string, antiHotspot bool) {
 	gateway := strings.Split(ipCIDR, "/")[0]
 	if gateway == "" {
 		log.Printf("applyCaptiveRules: skipping %s for %s: no gateway IP", action, iface)
@@ -249,12 +265,76 @@ func applyCaptiveRules(action, iface, ipCIDR string) {
 		return
 	}
 
+	// Call the shell script with the standard 3 args only.
+	// This is backward-compatible with all script versions.
 	if out, err := exec.Command(captiveRulesPath, action, iface, gateway).CombinedOutput(); err != nil {
 		log.Printf("applyCaptiveRules: %s %s %s failed: %v — %s", action, iface, gateway, err, string(out))
 		return
 	}
 
-	log.Printf("applyCaptiveRules: %s captive rules for %s (%s)", action, iface, gateway)
+	// Handle anti-hotspot TTL rules directly in Go (no script dependency).
+	// This ensures captive rules work even if the script doesn't support
+	// the anti_hotspot parameter.
+	if antiHotspot {
+		applyAntiHotspotRules(action, iface)
+	} else if action == "del" {
+		// Always attempt cleanup of TTL rules when disabling, in case
+		// they were previously enabled.
+		removeAntiHotspotRules(iface)
+	}
+
+	log.Printf("applyCaptiveRules: %s captive rules for %s (%s, anti_hotspot=%v)", action, iface, gateway, antiHotspot)
+}
+
+// applyAntiHotspotRules adds iptables rules to block tethered/hotspot
+// devices while keeping the paying client's own connection intact.
+//
+// How it works:
+//   - Most devices (Android/iOS/Linux/Windows) send packets with TTL=64.
+//   - When a client enables hotspot on their phone, the phone acts as a
+//     router and DECREMENTS TTL by 1 on forwarded packets (64 → 63).
+//   - We DROP packets arriving from the portal interface with TTL ≤ 63.
+//   - The client's OWN packets arrive at TTL=64 → NOT dropped → internet works.
+//   - Friends' packets arrive at TTL=63 (decremented by client's phone) → DROPPED.
+//
+// This is the correct anti-hotspot approach: it only blocks the tethered
+// devices, never the paying client.
+func applyAntiHotspotRules(action, iface string) {
+	// Ensure the AIRCOINS_TTL chain exists in the filter table
+	if _, err := exec.Command("iptables", "-t", "filter", "-S", "AIRCOINS_TTL").CombinedOutput(); err != nil {
+		if err := exec.Command("iptables", "-t", "filter", "-N", "AIRCOINS_TTL").Run(); err != nil {
+			log.Printf("applyAntiHotspotRules: failed to create AIRCOINS_TTL chain: %v", err)
+			return
+		}
+	}
+
+	// Hook AIRCOINS_TTL into the FORWARD chain (idempotent)
+	if _, err := exec.Command("iptables", "-t", "filter", "-C", "FORWARD", "-j", "AIRCOINS_TTL").CombinedOutput(); err != nil {
+		if out2, err2 := exec.Command("iptables", "-t", "filter", "-I", "FORWARD", "1", "-j", "AIRCOINS_TTL").CombinedOutput(); err2 != nil {
+			log.Printf("applyAntiHotspotRules: failed to hook AIRCOINS_TTL into FORWARD: %v — %s", err2, string(out2))
+			return
+		}
+	}
+
+	// DROP packets with TTL ≤ 63 from this portal interface.
+	// These are packets from tethered devices (their TTL was decremented
+	// by the client's phone from 64 to 63). The client's own packets
+	// arrive at TTL=64 and are NOT matched → they pass through fine.
+	if _, err := exec.Command("iptables", "-t", "filter", "-C", "AIRCOINS_TTL", "-i", iface, "-m", "ttl", "--ttl-eq", "0-63", "-j", "DROP").CombinedOutput(); err != nil {
+		if out2, err2 := exec.Command("iptables", "-t", "filter", "-A", "AIRCOINS_TTL", "-i", iface, "-m", "ttl", "--ttl-eq", "0-63", "-j", "DROP").CombinedOutput(); err2 != nil {
+			log.Printf("applyAntiHotspotRules: failed to add DROP rule for %s: %v — %s", iface, err2, string(out2))
+			return
+		}
+	}
+
+	log.Printf("applyAntiHotspotRules: anti-hotspot DROP TTL≤63 %s for %s", action, iface)
+}
+
+// removeAntiHotspotRules removes the iptables filter rules for an interface.
+func removeAntiHotspotRules(iface string) {
+	// Remove the per-interface DROP rule (idempotent — ignore errors)
+	exec.Command("iptables", "-t", "filter", "-D", "AIRCOINS_TTL", "-i", iface, "-m", "ttl", "--ttl-eq", "0-63", "-j", "DROP").Run()
+	log.Printf("removeAntiHotspotRules: removed anti-hotspot rules for %s", iface)
 }
 
 // writeNetworkdConfig writes a per-interface systemd-networkd .network file
@@ -410,7 +490,7 @@ func provisionPortal(e portalConfigEntry) error {
 		log.Printf("provisionPortal: DHCP failed for %s: %v", e.Interface, err)
 	}
 
-	applyCaptiveRules("add", e.Interface, e.IPCIDR)
+	applyCaptiveRules("add", e.Interface, e.IPCIDR, e.AntiHotspot)
 	return nil
 }
 
@@ -419,7 +499,7 @@ func provisionPortal(e portalConfigEntry) error {
 // (VLAN or physical) is left untouched.
 func teardownPortal(e portalConfigEntry) {
 	// Remove captive rules while the subnet is still resolvable
-	applyCaptiveRules("del", e.Interface, e.IPCIDR)
+	applyCaptiveRules("del", e.Interface, e.IPCIDR, e.AntiHotspot)
 	stopDHCP(e.Interface)
 	removeNetworkdConfig(e.Interface)
 	exec.Command("ip", "addr", "flush", "dev", e.Interface, "scope", "global").Run()
@@ -487,18 +567,19 @@ func healPortal(e portalConfigEntry) {
 	}
 
 	// Captive rules are idempotent — always (re)apply
-	applyCaptiveRules("add", e.Interface, e.IPCIDR)
+	applyCaptiveRules("add", e.Interface, e.IPCIDR, e.AntiHotspot)
 }
 
 // portalStatus builds the live status view of a portal entry.
 func portalStatus(e portalConfigEntry) models.PortalInfo {
 	info := models.PortalInfo{
-		Interface: e.Interface,
-		IPCIDR:    e.IPCIDR,
-		DHCPStart: e.DHCPStart,
-		DHCPEnd:   e.DHCPEnd,
-		DHCPLease: e.Lease,
-		Enabled:   e.Enabled,
+		Interface:   e.Interface,
+		IPCIDR:      e.IPCIDR,
+		DHCPStart:   e.DHCPStart,
+		DHCPEnd:     e.DHCPEnd,
+		DHCPLease:   e.Lease,
+		Enabled:     e.Enabled,
+		AntiHotspot: e.AntiHotspot,
 	}
 
 	if _, err := os.Stat("/sys/class/net/" + e.Interface); err != nil {
@@ -518,16 +599,17 @@ func portalStatus(e portalConfigEntry) models.PortalInfo {
 
 func upsertPortalDB(e portalConfigEntry) {
 	_, err := models.DB.Exec(`
-		INSERT INTO portal_servers (interface, portal_ip_cidr, dhcp_start, dhcp_end, dhcp_lease, enabled)
-		VALUES ($1,$2,$3,$4,$5,$6)
+		INSERT INTO portal_servers (interface, portal_ip_cidr, dhcp_start, dhcp_end, dhcp_lease, enabled, anti_hotspot)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
 		ON CONFLICT (interface) DO UPDATE SET
 			portal_ip_cidr = EXCLUDED.portal_ip_cidr,
 			dhcp_start = EXCLUDED.dhcp_start,
 			dhcp_end = EXCLUDED.dhcp_end,
 			dhcp_lease = EXCLUDED.dhcp_lease,
 			enabled = EXCLUDED.enabled,
+			anti_hotspot = EXCLUDED.anti_hotspot,
 			updated_at = NOW()`,
-		e.Interface, e.IPCIDR, e.DHCPStart, e.DHCPEnd, e.Lease, e.Enabled)
+		e.Interface, e.IPCIDR, e.DHCPStart, e.DHCPEnd, e.Lease, e.Enabled, e.AntiHotspot)
 	if err != nil {
 		log.Printf("Warning: failed to persist portal server to DB: %v", err)
 	}
@@ -653,12 +735,13 @@ func PortalCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entry := portalConfigEntry{
-		Interface: req.Interface,
-		IPCIDR:    req.IPCIDR,
-		DHCPStart: start,
-		DHCPEnd:   end,
-		Lease:     lease,
-		Enabled:   true,
+		Interface:   req.Interface,
+		IPCIDR:      req.IPCIDR,
+		DHCPStart:   start,
+		DHCPEnd:     end,
+		Lease:       lease,
+		Enabled:     true,
+		AntiHotspot: req.AntiHotspot,
 	}
 
 	if err := provisionPortal(entry); err != nil {
@@ -780,6 +863,114 @@ func PortalDelete(w http.ResponseWriter, r *http.Request) {
 	deletePortalDB(iface)
 
 	sendJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}
+
+// ============================================
+// PORTAL UPDATE (EDIT)
+// ============================================
+
+// PortalUpdate edits an existing portal server's settings (IP, DHCP range,
+// lease, anti-hotspot). It tears down the old stack and re-provisions with
+// the new settings. The interface cannot be changed (use create+delete instead).
+func PortalUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req models.PortalRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid JSON: " + err.Error()})
+		return
+	}
+
+	if !validateIfaceName(req.Interface) {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid interface name"})
+		return
+	}
+
+	// Find the existing entry
+	oldEntry, found := findPortalEntry(req.Interface)
+	if !found {
+		sendJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "No portal server configured on " + req.Interface})
+		return
+	}
+
+	// Validate the new IP/CIDR
+	ip, ipNet, err := net.ParseCIDR(req.IPCIDR)
+	if err != nil || ip.To4() == nil {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid portal IP/CIDR (expected e.g. 10.0.22.1/24)"})
+		return
+	}
+	if ip.Equal(ipNet.IP) {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Portal IP must be a host address, not the network address"})
+		return
+	}
+
+	// Default / validate the DHCP range
+	start, end := req.DHCPStart, req.DHCPEnd
+	if start == "" || end == "" {
+		defStart, defEnd := dhcpRangeFor(req.IPCIDR, start)
+		if start == "" {
+			start = defStart
+		}
+		if end == "" {
+			end = defEnd
+		}
+	}
+	if start == "" || end == "" {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Could not derive a DHCP range from " + req.IPCIDR})
+		return
+	}
+	var bounds [2]uint32
+	for i, addr := range []string{start, end} {
+		parsed := net.ParseIP(addr)
+		if parsed == nil || !ipNet.Contains(parsed) {
+			sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "DHCP address outside portal subnet: " + addr})
+			return
+		}
+		bounds[i] = ipToU32(parsed)
+	}
+	if bounds[0] > bounds[1] {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "DHCP start must be before DHCP end"})
+		return
+	}
+
+	lease := strings.TrimSpace(req.DHCPLease)
+	if lease == "" {
+		lease = defaultDHCPLease
+	}
+	if strings.ContainsAny(lease, " \t\n,") {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid DHCP lease: " + lease})
+		return
+	}
+
+	// Build the new entry (keep the same interface)
+	newEntry := portalConfigEntry{
+		Interface:   req.Interface,
+		IPCIDR:      req.IPCIDR,
+		DHCPStart:   start,
+		DHCPEnd:     end,
+		Lease:       lease,
+		Enabled:     oldEntry.Enabled,
+		AntiHotspot: req.AntiHotspot,
+	}
+
+	// Tear down old stack, provision with new settings
+	teardownPortal(oldEntry)
+	if newEntry.Enabled {
+		if err := provisionPortal(newEntry); err != nil {
+			// Revert to old entry on failure
+			provisionPortal(oldEntry)
+			sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: err.Error()})
+			return
+		}
+	}
+
+	writePortalConfigEntry(newEntry)
+	upsertPortalDB(newEntry)
+
+	sendJSON(w, http.StatusOK, map[string]interface{}{"success": true, "portal": portalStatus(newEntry)})
 }
 
 // ============================================

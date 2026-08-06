@@ -1,44 +1,44 @@
 ﻿{
-    "version":  "v1.15.0",
-    "release_notes":  "**Release date:** August 2026\n\n### Includes\n- VLAN ISP switching restored to stable approach (dhcpcd with dhclient fallback)\n- VLAN config persists to vlans.conf + wan_vlan.conf (survives reboots)\n- WAN save always applies to OS (no checkbox)\n- Anti-Hotspot (IP TTL=1) per-portal toggle\n- Factory Reset (full data wipe + admin password reset)\n- Updater shows all available versions with release notes\n- Session TTL per portal\n- NTP timezone management\n\n### Fixed\n- Login hanging after service restart (startup no longer blocks on DHCP)\n- WAN VLAN ISP settings survive reboots\n- VLAN switching works correctly (panel becomes inaccessible when WAN switches)\n- DHCP client fallback: tries dhcpcd first, falls back to dhclient\n\n---",
-    "sha256":  "f8e07d256ffca3508333ecbecbefb7f9ba275b3f7044def3c95bcb6f60f8f778",
-    "tarball":  "releases/aircoins-v1.15.0.tar.gz",
+    "version":  "v1.16.2",
+    "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Anti-hotspot now correctly blocks ONLY tethered devices** â€” Previous approach (TTL=1) blocked ALL packets from the portal including the paying client\u0027s own device. New approach DROPs packets with TTLâ‰¤63, which are the friends\u0027 packets (decremented by client\u0027s phone from 64â†’63). The client\u0027s own packets (TTL=64) pass through untouched.\n- **How it works:** Most devices send TTL=64. When client enables hotspot, their phone acts as a router and decrements TTL by 1 on friends\u0027 packets (64â†’63). We DROP TTLâ‰¤63 at the portal â€” client (64) passes, friends (63) blocked.\n\n---",
+    "sha256":  "f333a9711c99fb03bd341f021c20a386fb58290c2129a9e3af0853c4bdb9a0ab",
+    "tarball":  "releases/aircoins-v1.16.2.tar.gz",
     "versions":  [
                      {
-                         "released_at":  "2026-08-04T08:57:07Z",
-                         "sha256":  "f8e07d256ffca3508333ecbecbefb7f9ba275b3f7044def3c95bcb6f60f8f778",
-                         "version":  "v1.15.0",
-                         "release_notes":  "**Release date:** August 2026\n\n### Includes\n- VLAN ISP switching restored to stable approach (dhcpcd with dhclient fallback)\n- VLAN config persists to vlans.conf + wan_vlan.conf (survives reboots)\n- WAN save always applies to OS (no checkbox)\n- Anti-Hotspot (IP TTL=1) per-portal toggle\n- Factory Reset (full data wipe + admin password reset)\n- Updater shows all available versions with release notes\n- Session TTL per portal\n- NTP timezone management\n\n### Fixed\n- Login hanging after service restart (startup no longer blocks on DHCP)\n- WAN VLAN ISP settings survive reboots\n- VLAN switching works correctly (panel becomes inaccessible when WAN switches)\n- DHCP client fallback: tries dhcpcd first, falls back to dhclient\n\n---",
-                         "tarball":  "releases/aircoins-v1.15.0.tar.gz"
+                         "released_at":  "2026-08-05T02:07:08Z",
+                         "sha256":  "f333a9711c99fb03bd341f021c20a386fb58290c2129a9e3af0853c4bdb9a0ab",
+                         "version":  "v1.16.2",
+                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Anti-hotspot now correctly blocks ONLY tethered devices** â€” Previous approach (TTL=1) blocked ALL packets from the portal including the paying client\u0027s own device. New approach DROPs packets with TTLâ‰¤63, which are the friends\u0027 packets (decremented by client\u0027s phone from 64â†’63). The client\u0027s own packets (TTL=64) pass through untouched.\n- **How it works:** Most devices send TTL=64. When client enables hotspot, their phone acts as a router and decrements TTL by 1 on friends\u0027 packets (64â†’63). We DROP TTLâ‰¤63 at the portal â€” client (64) passes, friends (63) blocked.\n\n---",
+                         "tarball":  "releases/aircoins-v1.16.2.tar.gz"
                      },
                      {
-                         "released_at":  "2026-08-04T08:25:53Z",
-                         "sha256":  "7340ec9d7a1e250ee9d353b52a7d0fbd8298a7ccc839b9018b4dec8e96c96928",
-                         "version":  "v1.14.9",
-                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **DHCP client fallback** â€” Tries `dhcpcd` first (stable v1.10.0 approach), falls back to `dhclient` if dhcpcd not available. Fixes \"dhcpcd end0.500 failed\" error on systems without dhcpcd.\n\n---",
-                         "tarball":  "releases/aircoins-v1.14.9.tar.gz"
+                         "released_at":  "2026-08-04T09:44:28Z",
+                         "sha256":  "59f10a2c60ed22c14d83ea5535308b62b463db07df7221f5997bd6561fff58ef",
+                         "version":  "v1.16.1",
+                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Captive rules now work with anti-hotspot enabled** â€” Anti-hotspot TTL=1 rules are now applied directly by the Go API via iptables, instead of relying on the shell script. This fixes the issue where enabling anti-hotspot caused the Captive status to show \"Fail\" on devices with older script versions.\n- **Backward compatibility** â€” The shell script is now always called with 3 args (action, iface, gateway), ensuring it works on all devices regardless of script version.\n\n---",
+                         "tarball":  "releases/aircoins-v1.16.1.tar.gz"
                      },
                      {
-                         "released_at":  "2026-08-04T08:22:28Z",
-                         "sha256":  "8318f7706d82d89ed12ba990ff76d365262d69fdfeecce514aa9eef2f8713066",
-                         "version":  "v1.14.8",
-                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Restored stable VLAN switching** â€” Reverted to v1.10.0 approach: uses `dhcpcd` (not `dhclient`) synchronously without releasing leases. This is the stable method that correctly switches WAN to VLAN ISP.\n- **Kept reboot survival** â€” VLAN config is still persisted to vlans.conf + wan_vlan.conf so settings survive reboots (the v1.10.0 bug that was fixed).\n- **Synchronous DHCP** â€” DHCP runs synchronously so the response includes the result. Panel becomes inaccessible when WAN switches to VLAN (correct behavior).\n\n---",
-                         "tarball":  "releases/aircoins-v1.14.8.tar.gz"
+                         "released_at":  "2026-08-04T09:37:04Z",
+                         "sha256":  "8c0ee1941d74b2e74069ccbc841bc73fffba682c2d95330e41d445a3dec6a6d8",
+                         "version":  "v1.16.0",
+                         "release_notes":  "**Release date:** August 2026\n\n### Added\n- **Anti-Hotspot (TTL=1 Hop Limit)** â€” New per-portal setting that forces IP TTL=1 on client packets, preventing tethering/hotspotting. When enabled, only the paying client\u0027s device gets internet access â€” their friends\u0027 devices cannot connect through them.\n- **Portal Servers CRUD (Edit)** â€” Portal servers can now be edited after creation. Click the âœï¸ button to modify IP, DHCP range, lease time, or anti-hotspot settings. Changes apply immediately to running portals.\n- **Database migration 014** â€” Adds `anti_hotspot` column to `portal_servers` table\n\n### Changed\n- Portal config file format extended to 7 columns (backward compatible with 6-column format)\n- Captive rules script (`aircoins-captive-rules`) accepts optional `anti_hotspot` parameter for TTL mangling via iptables mangle table\n\n---",
+                         "tarball":  "releases/aircoins-v1.16.0.tar.gz"
                      },
                      {
-                         "released_at":  "2026-08-04T08:17:33Z",
-                         "sha256":  "42321350daed6b629f2456c6377cfe7734e241100ca83a7e5301b718bd65bb8b",
-                         "version":  "v1.14.7",
-                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **WAN now actually switches to VLAN ISP** â€” When the VLAN already has an IP, DHCP is renewed (without releasing the lease) to update the default route. Previously the lease was skipped entirely, so the default route never switched to the VLAN interface and the panel remained accessible on the old WAN.\n- **No more destroyed leases** â€” `dhclient -r` (release) is only called when the VLAN has no existing IP. If the VLAN already has a working lease, it\u0027s preserved and the route is updated.\n\n---",
-                         "tarball":  "releases/aircoins-v1.14.7.tar.gz"
+                         "released_at":  "2026-08-04T09:24:39Z",
+                         "sha256":  "85db31781c82a51928f27a25dea27fe28229554c5de8780d222afd17d9e7d3c3",
+                         "version":  "v1.15.3",
+                         "release_notes":  "**Release date:** August 2026\n\n### Changed\n- **Version bump** â€” Build release v1.15.3\n\n---",
+                         "tarball":  "releases/aircoins-v1.15.3.tar.gz"
                      },
                      {
-                         "released_at":  "2026-08-04T08:11:09Z",
-                         "sha256":  "611a31dca3cf175942e383d3abddc77468f33d33d915ace7ff2c3d61eb6a85a2",
-                         "version":  "v1.14.6",
-                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **WAN VLAN DHCP no longer destroys working lease** â€” If the VLAN interface already has an IP address, DHCP is skipped entirely. Previously `dhclient -r` released the existing lease before requesting a new one, and if the new request failed the VLAN was left with no IP at all.\n- **Accurate status message** â€” Shows \"VLAN end0.500 already exists with IP. Skipping DHCP.\" when the VLAN is already working.\n\n---",
-                         "tarball":  "releases/aircoins-v1.14.6.tar.gz"
+                         "released_at":  "2026-08-04T09:16:53Z",
+                         "sha256":  "f7424137bcfe796c1762a933cb975467f3ad4af8ddc1daa6c516338c0a2d9143",
+                         "version":  "v1.15.2",
+                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Restored version selector UI** â€” Updater now shows ALL available versions (not just latest) with Install button per version and release notes for each\n- Added `selectVersionForInstall()` function for installing any version (including downgrades)\n\n---",
+                         "tarball":  "releases/aircoins-v1.15.2.tar.gz"
                      }
                  ],
-    "released_at":  "2026-08-04T08:57:07Z"
+    "released_at":  "2026-08-05T02:07:08Z"
 }

@@ -207,6 +207,7 @@ func main() {
 	// + captive rules on a chosen interface)
 	mux.Handle("/api/portal/list", adminProtected(handlers.PortalList))
 	mux.Handle("/api/portal/create", adminProtected(handlers.PortalCreate))
+	mux.Handle("/api/portal/update", adminProtected(handlers.PortalUpdate))
 	mux.Handle("/api/portal/enable", adminProtected(handlers.PortalEnable))
 	mux.Handle("/api/portal/disable", adminProtected(handlers.PortalDisable))
 	mux.Handle("/api/portal/delete", adminProtected(handlers.PortalDelete))

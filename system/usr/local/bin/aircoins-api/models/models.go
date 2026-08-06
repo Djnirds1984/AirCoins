@@ -206,11 +206,12 @@ type BridgeMemberRequest struct {
 // ============================================
 
 type PortalRequest struct {
-	Interface string `json:"interface"`
-	IPCIDR    string `json:"ip_cidr"`
-	DHCPStart string `json:"dhcp_start"`
-	DHCPEnd   string `json:"dhcp_end"`
-	DHCPLease string `json:"dhcp_lease"`
+	Interface   string `json:"interface"`
+	IPCIDR      string `json:"ip_cidr"`
+	DHCPStart   string `json:"dhcp_start"`
+	DHCPEnd     string `json:"dhcp_end"`
+	DHCPLease   string `json:"dhcp_lease"`
+	AntiHotspot bool   `json:"anti_hotspot"`
 }
 
 type PortalInfo struct {
@@ -220,6 +221,7 @@ type PortalInfo struct {
 	DHCPEnd       string `json:"dhcp_end"`
 	DHCPLease     string `json:"dhcp_lease"`
 	Enabled       bool   `json:"enabled"`
+	AntiHotspot   bool   `json:"anti_hotspot"`
 	IfaceExists   bool   `json:"iface_exists"`
 	IfaceUp       bool   `json:"iface_up"`
 	IPOK          bool   `json:"ip_ok"`

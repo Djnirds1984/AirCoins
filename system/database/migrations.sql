@@ -554,6 +554,35 @@ CREATE TABLE IF NOT EXISTS bridge_members (
 );
 
 -- ============================================
+-- 014 - PORTAL SERVERS: anti-hotspot (TTL=1 hop limit)
+-- ============================================
+-- When anti_hotspot is enabled on a portal server, outgoing packets from
+-- that portal's subnet have their IP TTL forced to 1. This prevents
+-- clients from tethering/hotspotting their connection to share internet
+-- with other devices (TTL=1 means the packet dies at the first hop).
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'portal_servers'
+    ) THEN
+        RETURN;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'portal_servers' AND column_name = 'anti_hotspot'
+    ) THEN
+        RETURN;
+    END IF;
+
+    ALTER TABLE portal_servers ADD COLUMN anti_hotspot BOOLEAN DEFAULT false;
+    RAISE NOTICE 'Migration 014: anti_hotspot column added to portal_servers';
+END
+$$;
+
+-- ============================================
 -- COMPLETION
 -- ============================================
 \echo 'Migrations applied.'

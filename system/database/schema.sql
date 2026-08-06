@@ -264,6 +264,7 @@ CREATE TABLE IF NOT EXISTS portal_servers (
     dhcp_end VARCHAR(15) NOT NULL DEFAULT '',
     dhcp_lease VARCHAR(20) NOT NULL DEFAULT '12h',
     enabled BOOLEAN DEFAULT true,
+    anti_hotspot BOOLEAN DEFAULT false,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );

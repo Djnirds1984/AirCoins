@@ -15,7 +15,7 @@ set -e
 # ============================================
 # CONFIGURATION
 # ============================================
-VERSION="1.15.0"
+VERSION="1.16.2"
 INSTALL_DIR="/opt/aircoins"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYSTEM_DIR="$SCRIPT_DIR/system"

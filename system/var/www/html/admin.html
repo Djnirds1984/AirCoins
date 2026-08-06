@@ -2124,7 +2124,8 @@
                 <h3>📶 Portal Servers</h3>
 
                 <div class="vlan-form">
-                    <h4>Add / Update Portal Server</h4>
+                    <h4 id="portal-form-title">Add / Update Portal Server</h4>
+                    <input type="hidden" id="portal-edit-mode" value="">
                     <div class="form-row">
                         <div class="form-group">
                             <label>Interface</label>
@@ -2149,12 +2150,28 @@
                             <input type="text" id="portal-lease" value="12h" placeholder="12h">
                         </div>
                     </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="portal-anti-hotspot" style="margin-right:6px;">
+                                Anti-Hotspot (TTL=1 Hop Limit)
+                            </label>
+                            <div class="form-hint" style="margin-top:4px;">
+                                Blocks tethered/hotspot devices. When your client enables hotspot, their phone
+                                decrements TTL by 1 on friends' packets (64→63). Friends (TTL≤63) are dropped.
+                                Your client (TTL=64) keeps full internet access.
+                            </div>
+                        </div>
+                    </div>
                     <div class="form-hint">
                         Provisions the full hotspot stack on the chosen interface: portal IP,
                         DHCP server, captive DNS hijack and firewall capture rules.
                         The DHCP range is suggested from the CIDR &mdash; edit it if needed.
                     </div>
-                    <button class="btn-primary" onclick="savePortalServer()">Save Portal Server</button>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <button class="btn-primary" onclick="savePortalServer()">Save Portal Server</button>
+                        <button class="btn btn-ghost" id="portal-cancel-edit" style="display:none;" onclick="cancelPortalEdit()">Cancel Edit</button>
+                    </div>
                 </div>
 
                 <div class="vlan-table">
@@ -2166,6 +2183,7 @@
                                 <th>Portal IP</th>
                                 <th>DHCP Range</th>
                                 <th>Lease</th>
+                                <th>Anti-Hotspot</th>
                                 <th>State</th>
                                 <th>IP</th>
                                 <th>DHCP</th>
@@ -5054,11 +5072,15 @@ async function loadPortalServers() {
                 <td>${escapeHtml(p.ip_cidr)}</td>
                 <td>${escapeHtml(p.dhcp_start)} – ${escapeHtml(p.dhcp_end)}</td>
                 <td>${escapeHtml(p.dhcp_lease)}</td>
+                <td>${p.anti_hotspot
+                    ? '<span class="badge online" title="TTL=1 hop limit active">ON</span>'
+                    : '<span class="badge neutral" title="Tethering allowed">OFF</span>'}</td>
                 <td>${p.enabled ? '<span class="badge online">Enabled</span>' : '<span class="badge neutral">Disabled</span>'}</td>
                 <td>${statusDot(p.ip_ok, p.enabled)}</td>
                 <td>${statusDot(p.dhcp_active, p.enabled)}</td>
                 <td>${statusDot(p.captive_active, p.enabled)}</td>
-                <td>
+                <td style="white-space:nowrap;">
+                    <button class="btn btn-ghost btn-sm" onclick="editPortalServer('${p.interface}')" title="Edit">✏️</button>
                     ${p.enabled
                         ? `<button class="btn btn-ghost btn-sm" onclick="setPortalEnabled('${p.interface}', false)">Disable</button>`
                         : `<button class="btn btn-ghost btn-sm" onclick="setPortalEnabled('${p.interface}', true)">Enable</button>`}
@@ -5103,11 +5125,13 @@ function suggestDHCPRange() {
 }
 
 async function savePortalServer() {
+    const editMode = document.getElementById('portal-edit-mode').value;
     const iface = document.getElementById('portal-interface').value;
     const ipCIDR = document.getElementById('portal-ip').value.trim();
     const start = document.getElementById('portal-dhcp-start').value.trim();
     const end = document.getElementById('portal-dhcp-end').value.trim();
     const lease = document.getElementById('portal-lease').value.trim();
+    const antiHotspot = document.getElementById('portal-anti-hotspot').checked;
 
     if (!iface || !ipCIDR) {
         showNotification('Please select an interface and enter the portal IP/CIDR', 'error');
@@ -5118,20 +5142,76 @@ async function savePortalServer() {
         return;
     }
 
+    const payload = {
+        interface: editMode || iface,
+        ip_cidr: ipCIDR,
+        dhcp_start: start,
+        dhcp_end: end,
+        dhcp_lease: lease || '12h',
+        anti_hotspot: antiHotspot
+    };
+
     try {
-        await apiCall('POST', '/portal/create', {
-            interface: iface,
-            ip_cidr: ipCIDR,
-            dhcp_start: start,
-            dhcp_end: end,
-            dhcp_lease: lease || '12h'
-        });
-        showNotification(`Portal server provisioned on ${iface}`, 'success');
+        if (editMode) {
+            // Update existing portal
+            await apiCall('POST', '/portal/update', payload);
+            showNotification(`Portal server on ${editMode} updated`, 'success');
+            cancelPortalEdit();
+        } else {
+            // Create new portal
+            await apiCall('POST', '/portal/create', payload);
+            showNotification(`Portal server provisioned on ${iface}`, 'success');
+        }
         loadPortalServers();
         loadVLANs();
     } catch (e) {
         showNotification('Failed to save portal server: ' + e.message, 'error');
     }
+}
+
+async function editPortalServer(iface) {
+    try {
+        const res = await apiCall('GET', '/portal/list');
+        const portals = res.portals || [];
+        const portal = portals.find(p => p.interface === iface);
+        if (!portal) {
+            showNotification('Portal server not found: ' + iface, 'error');
+            return;
+        }
+
+        // Populate form with existing values
+        document.getElementById('portal-edit-mode').value = iface;
+        document.getElementById('portal-interface').value = portal.interface;
+        document.getElementById('portal-interface').disabled = true;
+        document.getElementById('portal-ip').value = portal.ip_cidr;
+        document.getElementById('portal-dhcp-start').value = portal.dhcp_start;
+        document.getElementById('portal-dhcp-end').value = portal.dhcp_end;
+        document.getElementById('portal-lease').value = portal.dhcp_lease;
+        document.getElementById('portal-anti-hotspot').checked = portal.anti_hotspot || false;
+
+        // Show edit mode UI
+        document.getElementById('portal-form-title').textContent = 'Edit Portal Server: ' + iface;
+        document.getElementById('portal-cancel-edit').style.display = 'inline-block';
+
+        // Scroll to form
+        document.getElementById('portal-form-title').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } catch (e) {
+        showNotification('Failed to load portal for editing: ' + e.message, 'error');
+    }
+}
+
+function cancelPortalEdit() {
+    document.getElementById('portal-edit-mode').value = '';
+    document.getElementById('portal-interface').disabled = false;
+    document.getElementById('portal-form-title').textContent = 'Add / Update Portal Server';
+    document.getElementById('portal-cancel-edit').style.display = 'none';
+
+    // Reset form
+    document.getElementById('portal-ip').value = '';
+    document.getElementById('portal-dhcp-start').value = '';
+    document.getElementById('portal-dhcp-end').value = '';
+    document.getElementById('portal-lease').value = '12h';
+    document.getElementById('portal-anti-hotspot').checked = false;
 }
 
 async function setPortalEnabled(iface, enable) {

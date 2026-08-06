@@ -9,8 +9,8 @@
 # Install to: /usr/local/bin/aircoins-captive-rules
 #
 # Usage:
-#   aircoins-captive-rules add    <iface> <gateway>
-#   aircoins-captive-rules del    <iface> <gateway>
+#   aircoins-captive-rules add    <iface> <gateway> [anti_hotspot]
+#   aircoins-captive-rules del    <iface> <gateway> [anti_hotspot]
 #   aircoins-captive-rules auth   <mac>
 #   aircoins-captive-rules unauth <mac>
 #   aircoins-captive-rules status
@@ -199,7 +199,7 @@ enable_forwarding() {
 # CAPTIVE RULES - ADD
 # ============================================
 cmd_add() {
-    local iface="$1" gateway="$2"
+    local iface="$1" gateway="$2" anti_hotspot="${3:-}"
     valid_iface "$iface" || die "invalid interface: $iface"
     valid_ip "$gateway" || die "invalid gateway: $gateway"
 
@@ -234,15 +234,27 @@ cmd_add() {
         -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     append_rule filter "$FWD_CHAIN" -i "$iface" -j DROP
 
+    # --- Anti-Hotspot: DROP packets with TTL ≤ 63 from this portal.
+    # Most devices send packets with TTL=64. When a client enables
+    # hotspot/tethering, their phone decrements TTL by 1 (64→63) on
+    # friends' packets. We DROP TTL≤63 so only the client's own
+    # packets (TTL=64) pass through — friends are blocked.
+    if [ "$anti_hotspot" = "anti_hotspot" ]; then
+        ensure_chain filter AIRCOINS_TTL
+        ensure_hook filter FORWARD "AIRCOINS_TTL"
+        append_rule filter AIRCOINS_TTL -i "$iface" -m ttl --ttl-eq 0-63 -j DROP
+        log "anti-hotspot enabled for $iface (DROP TTL≤63, client TTL=64 passes)"
+    fi
+
     # --- NAT for authorized clients reaching the internet.
     local subnet wan
     subnet=$(subnet_for "$iface")
     wan=$(detect_wan)
     if [ -n "$subnet" ] && [ -n "$wan" ] && [ "$wan" != "$iface" ]; then
         append_rule nat POSTROUTING -s "$subnet" -o "$wan" -j MASQUERADE
-        log "captive rules added for $iface (gw $gateway, nat $subnet -> $wan)"
+        log "captive rules added for $iface (gw $gateway, nat $subnet -> $wan, anti_hotspot=${anti_hotspot:-off})"
     else
-        log "captive rules added for $iface (gw $gateway, MASQUERADE skipped: no uplink)"
+        log "captive rules added for $iface (gw $gateway, MASQUERADE skipped: no uplink, anti_hotspot=${anti_hotspot:-off})"
     fi
 }
 
@@ -250,7 +262,7 @@ cmd_add() {
 # CAPTIVE RULES - DEL
 # ============================================
 cmd_del() {
-    local iface="$1" gateway="$2"
+    local iface="$1" gateway="$2" anti_hotspot="${3:-}"
     valid_iface "$iface" || die "invalid interface: $iface"
     valid_ip "$gateway" || die "invalid gateway: $gateway"
 
@@ -276,6 +288,15 @@ cmd_del() {
     delete_rule filter "$FWD_CHAIN" -o "$iface" \
         -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     delete_rule filter "$FWD_CHAIN" -i "$iface" -j DROP
+
+    # --- Remove anti-hotspot DROP rules if they were enabled
+    # Always attempt removal (idempotent) — also remove if anti_hotspot
+    # flag is passed or if rules exist for this interface (cleanup).
+    if [ "$anti_hotspot" = "anti_hotspot" ] || \
+       iptables -t filter -C AIRCOINS_TTL -i "$iface" -m ttl --ttl-eq 0-63 -j DROP 2>/dev/null; then
+        delete_rule filter AIRCOINS_TTL -i "$iface" -m ttl --ttl-eq 0-63 -j DROP
+        log "anti-hotspot removed for $iface"
+    fi
 
     rm -f "$STATE_DIR/${iface}.subnet" 2>/dev/null
 
@@ -380,14 +401,20 @@ usage() {
 AirCoins Captive Portal Rules
 
 Usage:
-  aircoins-captive-rules add    <iface> <gateway>   Capture unauthenticated clients on a VLAN
-  aircoins-captive-rules del    <iface> <gateway>   Remove the capture rules for a VLAN
-  aircoins-captive-rules auth   <mac>               Whitelist a paying client (internet + real DNS)
-  aircoins-captive-rules unauth <mac>               Revoke a client's access
-  aircoins-captive-rules status                     Show current rules
+  aircoins-captive-rules add    <iface> <gateway> [anti_hotspot]  Capture unauthenticated clients on a VLAN
+  aircoins-captive-rules del    <iface> <gateway> [anti_hotspot]  Remove the capture rules for a VLAN
+  aircoins-captive-rules auth   <mac>                             Whitelist a paying client (internet + real DNS)
+  aircoins-captive-rules unauth <mac>                             Revoke a client's access
+  aircoins-captive-rules status                                   Show current rules
+
+Options:
+  anti_hotspot    DROP packets with TTL≤63 from this portal. Most devices
+                  send TTL=64; when a client hotspots, their phone decrements
+                  to 63. Client (TTL=64) passes, friends (TTL=63) are blocked.
 
 Examples:
   aircoins-captive-rules add end0.22 10.0.22.1
+  aircoins-captive-rules add end0.22 10.0.22.1 anti_hotspot
   aircoins-captive-rules auth aa:bb:cc:dd:ee:ff
 EOF
 }
@@ -405,12 +432,12 @@ fi
 
 case "${1:-}" in
     add)
-        [ $# -eq 3 ] || { usage; exit 1; }
-        cmd_add "$2" "$3"
+        [ $# -ge 3 ] && [ $# -le 4 ] || { usage; exit 1; }
+        cmd_add "$2" "$3" "${4:-}"
         ;;
     del)
-        [ $# -eq 3 ] || { usage; exit 1; }
-        cmd_del "$2" "$3"
+        [ $# -ge 3 ] && [ $# -le 4 ] || { usage; exit 1; }
+        cmd_del "$2" "$3" "${4:-}"
         ;;
     auth)
         [ $# -eq 2 ] || { usage; exit 1; }

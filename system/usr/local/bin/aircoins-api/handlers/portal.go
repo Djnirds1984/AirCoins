@@ -247,9 +247,9 @@ func dhcpRangeFor(ipCIDR string, startIP string) (string, string) {
 // applyCaptiveRules runs aircoins-captive-rules for an interface. action
 // is "add" or "del". Failures are logged but never fatal: a portal
 // without captive rules is still usable, it just won't auto-pop.
-// antiHotspot, when true, enables per-MAC filtering (like MikroTik 1:1
-// hotspot): only the authorized client's MAC can forward, blocking
-// tethered/hotspot devices with different MACs.
+// antiHotspot, when true, sets TTL=1 on ALL forwarded packets from the
+// portal interface (mangle PREROUTING). This is exactly like MikroTik
+// hotspot server TTL=1.
 func applyCaptiveRules(action, iface, ipCIDR string, antiHotspot bool) {
 	gateway := strings.Split(ipCIDR, "/")[0]
 	if gateway == "" {
@@ -262,18 +262,90 @@ func applyCaptiveRules(action, iface, ipCIDR string, antiHotspot bool) {
 		return
 	}
 
-	// Build args: action, iface, gateway, [anti_hotspot]
-	args := []string{action, iface, gateway}
-	if antiHotspot {
-		args = append(args, "anti_hotspot")
-	}
-
-	if out, err := exec.Command(captiveRulesPath, args...).CombinedOutput(); err != nil {
+	// Call the shell script with standard 3 args only (backward compatible).
+	if out, err := exec.Command(captiveRulesPath, action, iface, gateway).CombinedOutput(); err != nil {
 		log.Printf("applyCaptiveRules: %s %s %s failed: %v — %s", action, iface, gateway, err, string(out))
 		return
 	}
 
+	// Anti-hotspot: set TTL=1 on ALL packets from this portal interface.
+	// Done directly in Go via iptables — no shell script dependency.
+	// This is exactly like MikroTik hotspot server TTL=1.
+	if antiHotspot {
+		applyTTL1(iface)
+	} else if action == "del" {
+		removeTTL1(iface)
+	}
+
 	log.Printf("applyCaptiveRules: %s captive rules for %s (%s, anti_hotspot=%v)", action, iface, gateway, antiHotspot)
+}
+
+// applyTTL1 sets TTL=1 on ALL packets from the portal interface.
+// Uses mangle PREROUTING so it affects packets before routing.
+// This is exactly like MikroTik hotspot server TTL=1.
+func applyTTL1(iface string) {
+	// Create the mangle chain
+	if _, err := exec.Command("iptables", "-t", "mangle", "-S", "AIRCOINS_TTL").CombinedOutput(); err != nil {
+		if out, err := exec.Command("iptables", "-t", "mangle", "-N", "AIRCOINS_TTL").CombinedOutput(); err != nil {
+			log.Printf("applyTTL1: failed to create chain: %v — %s", err, string(out))
+			return
+		}
+	}
+
+	// Hook into mangle PREROUTING
+	if _, err := exec.Command("iptables", "-t", "mangle", "-C", "PREROUTING", "-j", "AIRCOINS_TTL").CombinedOutput(); err != nil {
+		if out, err := exec.Command("iptables", "-t", "mangle", "-I", "PREROUTING", "1", "-j", "AIRCOINS_TTL").CombinedOutput(); err != nil {
+			log.Printf("applyTTL1: failed to hook chain: %v — %s", err, string(out))
+			return
+		}
+	}
+
+	// Set TTL=1 on ALL packets from this interface — no exceptions
+	if _, err := exec.Command("iptables", "-t", "mangle", "-C", "AIRCOINS_TTL", "-i", iface, "-j", "TTL", "--ttl-set", "1").CombinedOutput(); err != nil {
+		if out, err := exec.Command("iptables", "-t", "mangle", "-A", "AIRCOINS_TTL", "-i", iface, "-j", "TTL", "--ttl-set", "1").CombinedOutput(); err != nil {
+			log.Printf("applyTTL1: failed to set TTL=1 for %s: %v — %s", iface, err, string(out))
+			return
+		}
+	}
+
+	log.Printf("applyTTL1: TTL=1 set on ALL packets from %s (mangle PREROUTING)", iface)
+}
+
+// removeTTL1 removes the TTL=1 rule for a portal interface.
+func removeTTL1(iface string) {
+	exec.Command("iptables", "-t", "mangle", "-D", "AIRCOINS_TTL", "-i", iface, "-j", "TTL", "--ttl-set", "1").Run()
+	log.Printf("removeTTL1: removed TTL=1 for %s", iface)
+}
+
+// AddTTL1Bypass adds a per-MAC RETURN rule in the mangle AIRCOINS_TTL
+// chain so the authorized client bypasses the TTL=1 rule. This is
+// exactly like MikroTik: the authenticated client gets normal TTL,
+// while tethered devices (different MACs) get TTL=1.
+func AddTTL1Bypass(mac, iface string) {
+	if mac == "" || iface == "" {
+		return
+	}
+	// Check if the AIRCOINS_TTL chain exists (only add bypass if anti-hotspot is active)
+	if _, err := exec.Command("iptables", "-t", "mangle", "-S", "AIRCOINS_TTL").CombinedOutput(); err != nil {
+		return // chain doesn't exist, anti-hotspot not active
+	}
+	// Insert per-MAC RETURN at position 1 (before the TTL=1 rule)
+	if _, err := exec.Command("iptables", "-t", "mangle", "-C", "AIRCOINS_TTL", "-i", iface, "-m", "mac", "--mac-source", mac, "-j", "RETURN").CombinedOutput(); err != nil {
+		if out2, err2 := exec.Command("iptables", "-t", "mangle", "-I", "AIRCOINS_TTL", "1", "-i", iface, "-m", "mac", "--mac-source", mac, "-j", "RETURN").CombinedOutput(); err2 != nil {
+			log.Printf("AddTTL1Bypass: failed for %s on %s: %v — %s", mac, iface, err2, string(out2))
+			return
+		}
+	}
+	log.Printf("AddTTL1Bypass: %s on %s bypasses TTL=1", mac, iface)
+}
+
+// RemoveTTL1Bypass removes the per-MAC RETURN rule from the mangle chain.
+func RemoveTTL1Bypass(mac, iface string) {
+	if mac == "" || iface == "" {
+		return
+	}
+	exec.Command("iptables", "-t", "mangle", "-D", "AIRCOINS_TTL", "-i", iface, "-m", "mac", "--mac-source", mac, "-j", "RETURN").Run()
+	log.Printf("RemoveTTL1Bypass: removed %s on %s", mac, iface)
 }
 
 // writeNetworkdConfig writes a per-interface systemd-networkd .network file
@@ -910,6 +982,30 @@ func PortalUpdate(w http.ResponseWriter, r *http.Request) {
 	upsertPortalDB(newEntry)
 
 	sendJSON(w, http.StatusOK, map[string]interface{}{"success": true, "portal": portalStatus(newEntry)})
+}
+
+// ============================================
+// STARTUP: Apply TTL=1 for all anti-hotspot portals
+// ============================================
+
+// ApplyAntiHotspotOnStartup reads the portal config and applies TTL=1
+// mangle rules for every portal that has anti-hotspot enabled. This
+// ensures TTL=1 is active immediately after the API restarts, without
+// waiting for the admin to visit the portal page.
+func ApplyAntiHotspotOnStartup() {
+	entries := readPortalConfig()
+	applied := 0
+	for _, e := range entries {
+		if e.AntiHotspot {
+			applyTTL1(e.Interface)
+			applied++
+		}
+	}
+	if applied > 0 {
+		log.Printf("ApplyAntiHotspotOnStartup: TTL=1 applied for %d portal(s)", applied)
+	} else {
+		log.Printf("ApplyAntiHotspotOnStartup: no portals with anti-hotspot enabled")
+	}
 }
 
 // ============================================

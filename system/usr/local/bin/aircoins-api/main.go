@@ -67,6 +67,11 @@ func main() {
 	// handled by migrations.sql 007).
 	handlers.MigrateLegacyPortalConfig()
 
+	// Apply TTL=1 mangle rules for all portals with anti-hotspot enabled.
+	// This runs immediately at startup so the rules are active without
+	// waiting for the admin to visit the portal page.
+	handlers.ApplyAntiHotspotOnStartup()
+
 	// Ensure the audio upload directory exists.
 	if err := handlers.EnsureAudioDir(); err != nil {
 		log.Printf("WARNING: audio directory not available: %v", err)

@@ -4,6 +4,20 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.16.4 — Anti-Hotspot: MikroTik-Style TTL=1 + Per-MAC RETURN
+
+**Release date:** August 2026
+
+### Changed
+- **Anti-hotspot now uses MikroTik-style TTL=1 + per-MAC RETURN** — exactly like MikroTik hotspot server TTL=1.
+- ALL packets from the portal interface get TTL set to 1 (die at first hop).
+- The authorized client's MAC gets a RETURN rule in the mangle chain → bypasses TTL=1 → normal internet.
+- Friends' packets (different MACs, no RETURN match) → TTL=1 → die at first hop → blocked.
+- Uses mangle table PREROUTING hook, not filter table. Filter chain is unchanged.
+- When you ping the gateway with anti-hotspot ON, the authorized client sees normal TTL (because of RETURN). Friends see TTL=1.
+
+---
+
 ## v1.16.3 — Anti-Hotspot: Per-MAC Filtering (MikroTik-style 1:1)
 
 **Release date:** August 2026

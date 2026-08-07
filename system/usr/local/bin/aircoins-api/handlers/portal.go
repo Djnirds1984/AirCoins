@@ -281,7 +281,7 @@ func applyCaptiveRules(action, iface, ipCIDR string, antiHotspot bool) {
 }
 
 // applyTTL1 sets TTL=1 on ALL packets from the portal interface.
-// Uses mangle PREROUTING so it affects packets before routing.
+// Uses mangle POSTROUTING so it affects packets after routing.
 // This is exactly like MikroTik hotspot server TTL=1.
 func applyTTL1(iface string) {
 	// Create the mangle chain
@@ -292,60 +292,29 @@ func applyTTL1(iface string) {
 		}
 	}
 
-	// Hook into mangle PREROUTING
-	if _, err := exec.Command("iptables", "-t", "mangle", "-C", "PREROUTING", "-j", "AIRCOINS_TTL").CombinedOutput(); err != nil {
-		if out, err := exec.Command("iptables", "-t", "mangle", "-I", "PREROUTING", "1", "-j", "AIRCOINS_TTL").CombinedOutput(); err != nil {
+	// Hook into mangle POSTROUTING
+	if _, err := exec.Command("iptables", "-t", "mangle", "-C", "POSTROUTING", "-j", "AIRCOINS_TTL").CombinedOutput(); err != nil {
+		if out, err := exec.Command("iptables", "-t", "mangle", "-I", "POSTROUTING", "1", "-j", "AIRCOINS_TTL").CombinedOutput(); err != nil {
 			log.Printf("applyTTL1: failed to hook chain: %v — %s", err, string(out))
 			return
 		}
 	}
 
-	// Set TTL=1 on ALL packets from this interface — no exceptions
-	if _, err := exec.Command("iptables", "-t", "mangle", "-C", "AIRCOINS_TTL", "-i", iface, "-j", "TTL", "--ttl-set", "1").CombinedOutput(); err != nil {
-		if out, err := exec.Command("iptables", "-t", "mangle", "-A", "AIRCOINS_TTL", "-i", iface, "-j", "TTL", "--ttl-set", "1").CombinedOutput(); err != nil {
+	// Set TTL=1 on ALL packets going out this interface — no exceptions
+	if _, err := exec.Command("iptables", "-t", "mangle", "-C", "AIRCOINS_TTL", "-o", iface, "-j", "TTL", "--ttl-set", "1").CombinedOutput(); err != nil {
+		if out, err := exec.Command("iptables", "-t", "mangle", "-A", "AIRCOINS_TTL", "-o", iface, "-j", "TTL", "--ttl-set", "1").CombinedOutput(); err != nil {
 			log.Printf("applyTTL1: failed to set TTL=1 for %s: %v — %s", iface, err, string(out))
 			return
 		}
 	}
 
-	log.Printf("applyTTL1: TTL=1 set on ALL packets from %s (mangle PREROUTING)", iface)
+	log.Printf("applyTTL1: TTL=1 set on ALL packets to %s (mangle POSTROUTING)", iface)
 }
 
 // removeTTL1 removes the TTL=1 rule for a portal interface.
 func removeTTL1(iface string) {
-	exec.Command("iptables", "-t", "mangle", "-D", "AIRCOINS_TTL", "-i", iface, "-j", "TTL", "--ttl-set", "1").Run()
+	exec.Command("iptables", "-t", "mangle", "-D", "AIRCOINS_TTL", "-o", iface, "-j", "TTL", "--ttl-set", "1").Run()
 	log.Printf("removeTTL1: removed TTL=1 for %s", iface)
-}
-
-// AddTTL1Bypass adds a per-MAC RETURN rule in the mangle AIRCOINS_TTL
-// chain so the authorized client bypasses the TTL=1 rule. This is
-// exactly like MikroTik: the authenticated client gets normal TTL,
-// while tethered devices (different MACs) get TTL=1.
-func AddTTL1Bypass(mac, iface string) {
-	if mac == "" || iface == "" {
-		return
-	}
-	// Check if the AIRCOINS_TTL chain exists (only add bypass if anti-hotspot is active)
-	if _, err := exec.Command("iptables", "-t", "mangle", "-S", "AIRCOINS_TTL").CombinedOutput(); err != nil {
-		return // chain doesn't exist, anti-hotspot not active
-	}
-	// Insert per-MAC RETURN at position 1 (before the TTL=1 rule)
-	if _, err := exec.Command("iptables", "-t", "mangle", "-C", "AIRCOINS_TTL", "-i", iface, "-m", "mac", "--mac-source", mac, "-j", "RETURN").CombinedOutput(); err != nil {
-		if out2, err2 := exec.Command("iptables", "-t", "mangle", "-I", "AIRCOINS_TTL", "1", "-i", iface, "-m", "mac", "--mac-source", mac, "-j", "RETURN").CombinedOutput(); err2 != nil {
-			log.Printf("AddTTL1Bypass: failed for %s on %s: %v — %s", mac, iface, err2, string(out2))
-			return
-		}
-	}
-	log.Printf("AddTTL1Bypass: %s on %s bypasses TTL=1", mac, iface)
-}
-
-// RemoveTTL1Bypass removes the per-MAC RETURN rule from the mangle chain.
-func RemoveTTL1Bypass(mac, iface string) {
-	if mac == "" || iface == "" {
-		return
-	}
-	exec.Command("iptables", "-t", "mangle", "-D", "AIRCOINS_TTL", "-i", iface, "-m", "mac", "--mac-source", mac, "-j", "RETURN").Run()
-	log.Printf("RemoveTTL1Bypass: removed %s on %s", mac, iface)
 }
 
 // writeNetworkdConfig writes a per-interface systemd-networkd .network file

@@ -4,6 +4,20 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.16.8 — Anti-Hotspot: Pure TTL=1 (POSTROUTING)
+
+**Release date:** August 2026
+
+### Changed
+- **Anti-hotspot now uses mangle POSTROUTING with -o (output interface)** — matches MikroTik behavior.
+- TTL=1 is set on ALL packets going OUT through the portal interface.
+- The client device gets TTL=1 → if they enable hotspot, tethered devices cannot reach the internet.
+- Removed AddTTL1Bypass/RemoveTTL1Bypass functions (no longer needed).
+- Removed ifaceForClientMAC helper function.
+- Updated admin panel hint text to clarify behavior.
+
+---
+
 ## v1.16.4 — Anti-Hotspot: MikroTik-Style TTL=1 + Per-MAC RETURN
 
 **Release date:** August 2026

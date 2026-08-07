@@ -162,41 +162,4 @@ func runCaptiveRules(db *sql.DB, action, mac, reason string) {
 	if db != nil {
 		logAction(db, "INFO", "captive", action+" "+mac+" ("+reason+")")
 	}
-
-	// Anti-hotspot TTL=1 bypass: find the portal interface for this MAC
-	// and add/remove the per-MAC RETURN in the mangle chain.
-	if db != nil {
-		if iface := ifaceForClientMAC(db, mac); iface != "" {
-			if action == "auth" {
-				AddTTL1Bypass(mac, iface)
-			} else if action == "unauth" {
-				RemoveTTL1Bypass(mac, iface)
-			}
-		}
-	}
-}
-
-// ifaceForClientMAC resolves a MAC to its portal interface by looking up
-// the ARP table to find the client's IP, then matching the IP to a portal
-// subnet.
-func ifaceForClientMAC(db *sql.DB, mac string) string {
-	mac = normalizeMAC(mac)
-	if mac == "" {
-		return ""
-	}
-	// Look up IP from ARP table
-	if data, err := os.ReadFile("/proc/net/arp"); err == nil {
-		for _, line := range strings.Split(string(data), "\n")[1:] {
-			fields := strings.Fields(line)
-			if len(fields) >= 4 && normalizeMAC(fields[3]) == mac {
-				return ifaceForClientIP(db, fields[0])
-			}
-		}
-	}
-	// Fallback: check sessions table for client IP
-	var clientIP string
-	if err := db.QueryRow("SELECT client_ip FROM sessions WHERE client_mac = $1 AND status = 'active' LIMIT 1", mac).Scan(&clientIP); err == nil && clientIP != "" {
-		return ifaceForClientIP(db, clientIP)
-	}
-	return ""
 }

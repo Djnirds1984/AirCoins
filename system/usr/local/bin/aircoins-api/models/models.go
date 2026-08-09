@@ -3,6 +3,7 @@ package models
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -42,6 +43,65 @@ func InitDB(config DBConfig) error {
 	return nil
 }
 
+// EnsureSchema applies lightweight, idempotent schema fixes that OTA
+// updates depend on but cannot get from migrations.sql — the OTA path
+// (updater.go PerformUpdate) deliberately replaces files only and skips
+// install.sh, so it never runs the SQL migration files. Every statement
+// here MUST be safe to run repeatedly on an already-provisioned database.
+// Failures are logged but not fatal: a missing column degrades one
+// feature and must not prevent the whole API from starting.
+func EnsureSchema() {
+	fixes := []struct {
+		name string
+		sql  string
+	}{
+		{
+			// v1.17.2 — GPIO pulse debounce setting (migrations.sql 015)
+			"gpio_config.debounce_ms",
+			`ALTER TABLE gpio_config ADD COLUMN IF NOT EXISTS debounce_ms INTEGER NOT NULL DEFAULT 50`,
+		},
+		{
+			// v1.18.0 — pre-paid time vouchers (migrations.sql 016)
+			"vouchers table",
+			`CREATE TABLE IF NOT EXISTS vouchers (
+				id SERIAL PRIMARY KEY,
+				code VARCHAR(16) NOT NULL UNIQUE,
+				duration_minutes INTEGER NOT NULL,
+				plan VARCHAR(20) NOT NULL DEFAULT 'time',
+				status VARCHAR(20) NOT NULL DEFAULT 'unused',
+				notes TEXT NOT NULL DEFAULT '',
+				redeemed_at TIMESTAMPTZ,
+				redeemed_mac VARCHAR(17),
+				session_id INTEGER,
+				session_token VARCHAR(8),
+				created_at TIMESTAMPTZ DEFAULT NOW()
+			)`,
+		},
+		{
+			"vouchers indexes",
+			`CREATE INDEX IF NOT EXISTS idx_vouchers_status ON vouchers(status);
+			 CREATE INDEX IF NOT EXISTS idx_vouchers_created_at ON vouchers(created_at DESC)`,
+		},
+		{
+			// v1.18.1 — voucher price tracking (migrations.sql 017)
+			"vouchers.price",
+			`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS price NUMERIC(10,2) NOT NULL DEFAULT 0`,
+		},
+		{
+			// v1.19.0 — generation batch code for print runs (migrations.sql 018)
+			"vouchers.batch_code",
+			`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS batch_code VARCHAR(20) NOT NULL DEFAULT '';
+			 CREATE INDEX IF NOT EXISTS idx_vouchers_batch ON vouchers(batch_code)`,
+		},
+	}
+
+	for _, f := range fixes {
+		if _, err := DB.Exec(f.sql); err != nil {
+			log.Printf("schema fix %q failed: %v", f.name, err)
+		}
+	}
+}
+
 // ============================================
 // MODELS
 // ============================================
@@ -68,6 +128,7 @@ type GPIOConfig struct {
 	CoinValue  int       `json:"coin_value"`
 	PulseMode  string    `json:"pulse_mode"`
 	BoardModel string    `json:"board_model"`
+	DebounceMs int       `json:"debounce_ms"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
@@ -116,6 +177,26 @@ type Session struct {
 type QdiscInfo struct {
 	Type          string `json:"type"`            // "fq_codel" | "cake" | ""
 	PerDeviceMbps int    `json:"per_device_mbps"` // global per-device rate (0 = not active)
+}
+
+// Voucher is a pre-paid time code (6-char alphanumeric). plan is 'time'
+// or 'monthly' (30-day subscription); status is 'unused', 'used' or
+// 'disabled'. On redemption the voucher is bound to the session and its
+// roaming session_token.
+type Voucher struct {
+	ID              int        `json:"id"`
+	Code            string     `json:"code"`
+	BatchCode       string     `json:"batch_code"`
+	DurationMinutes int        `json:"duration_minutes"`
+	Plan            string     `json:"plan"`
+	Status          string     `json:"status"`
+	Price           float64    `json:"price"`
+	Notes           string     `json:"notes"`
+	RedeemedAt      *time.Time `json:"redeemed_at,omitempty"`
+	RedeemedMAC     string     `json:"redeemed_mac,omitempty"`
+	SessionID       *int       `json:"session_id,omitempty"`
+	SessionToken    string     `json:"session_token,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 type SystemLog struct {
@@ -307,6 +388,7 @@ type GPIOConfigRequest struct {
 	CoinValue  int    `json:"coin_value"`
 	PulseMode  string `json:"pulse_mode"`
 	BoardModel string `json:"board_model"`
+	DebounceMs int    `json:"debounce_ms"`
 }
 
 type CoinEventRequest struct {

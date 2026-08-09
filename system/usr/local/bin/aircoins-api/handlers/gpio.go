@@ -32,12 +32,13 @@ func (h *GPIOHandler) Config(w http.ResponseWriter, r *http.Request) {
 func (h *GPIOHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 	var config models.GPIOConfig
 	err := h.DB.QueryRow(`
-		SELECT id, pin, coin_value, pulse_mode, COALESCE(board_model, 'auto'), updated_at
+		SELECT id, pin, coin_value, pulse_mode, COALESCE(board_model, 'auto'),
+		       COALESCE(debounce_ms, 50), updated_at
 		FROM gpio_config ORDER BY id DESC LIMIT 1
-	`).Scan(&config.ID, &config.Pin, &config.CoinValue, &config.PulseMode, &config.BoardModel, &config.UpdatedAt)
+	`).Scan(&config.ID, &config.Pin, &config.CoinValue, &config.PulseMode, &config.BoardModel, &config.DebounceMs, &config.UpdatedAt)
 
 	if err == sql.ErrNoRows {
-		sendJSON(w, http.StatusOK, models.GPIOConfig{Pin: 7, CoinValue: 1, PulseMode: "falling", BoardModel: "auto"})
+		sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Data: models.GPIOConfig{Pin: 7, CoinValue: 1, PulseMode: "falling", BoardModel: "auto", DebounceMs: 50}})
 		return
 	} else if err != nil {
 		log.Printf("Error fetching GPIO config: %v", err)
@@ -76,11 +77,22 @@ func (h *GPIOHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 		req.BoardModel = "auto"
 	}
 
+	// Debounce: edges arriving within this window after a pulse are
+	// contact bounce of the same coin. 0 = keep the 50 ms default;
+	// multi-pulse coins may need it lowered (Admin > Settings > GPIO).
+	if req.DebounceMs == 0 {
+		req.DebounceMs = 50
+	}
+	if req.DebounceMs < 5 || req.DebounceMs > 1000 {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Debounce must be between 5 and 1000 ms"})
+		return
+	}
+
 	// Insert new config (keep history)
 	_, err := h.DB.Exec(`
-		INSERT INTO gpio_config (pin, coin_value, pulse_mode, board_model, updated_at)
-		VALUES ($1, $2, $3, $4, NOW())
-	`, req.Pin, req.CoinValue, req.PulseMode, req.BoardModel)
+		INSERT INTO gpio_config (pin, coin_value, pulse_mode, board_model, debounce_ms, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NOW())
+	`, req.Pin, req.CoinValue, req.PulseMode, req.BoardModel, req.DebounceMs)
 
 	if err != nil {
 		log.Printf("Error saving GPIO config: %v", err)
@@ -89,9 +101,9 @@ func (h *GPIOHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Write config file for gpio-coin-listener to read
-	writeGPIOConfigFile(req.Pin, req.CoinValue, req.PulseMode, req.BoardModel)
+	writeGPIOConfigFile(req.Pin, req.CoinValue, req.PulseMode, req.BoardModel, req.DebounceMs)
 
-	logAction(h.DB, "INFO", "gpio", "GPIO config updated: physical pin="+strconv.Itoa(req.Pin)+" board="+req.BoardModel)
+	logAction(h.DB, "INFO", "gpio", "GPIO config updated: physical pin="+strconv.Itoa(req.Pin)+" board="+req.BoardModel+" debounce="+strconv.Itoa(req.DebounceMs)+"ms")
 	sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "GPIO config saved. Restart GPIO listener to apply."})
 }
 
@@ -417,13 +429,14 @@ func firstNonEmpty(values ...string) string {
 }
 
 // writeGPIOConfigFile writes config to file for gpio-coin-listener
-func writeGPIOConfigFile(pin, coinValue int, pulseMode, boardModel string) {
+func writeGPIOConfigFile(pin, coinValue int, pulseMode, boardModel string, debounceMs int) {
 	content := "# AirCoins GPIO Config - Written by API\n"
 	content += "# COIN_PULSE_PIN is a PHYSICAL HEADER PIN number (not a GPIO number)\n"
 	content += "COIN_PULSE_PIN=" + strconv.Itoa(pin) + "\n"
 	content += "COIN_VALUE=" + strconv.Itoa(coinValue) + "\n"
 	content += "PULSE_MODE=\"" + pulseMode + "\"\n"
 	content += "BOARD_MODEL=\"" + boardModel + "\"\n"
+	content += "DEBOUNCE_MS=" + strconv.Itoa(debounceMs) + "\n"
 
 	os.MkdirAll("/var/lib/pisowifi", 0755)
 	err := os.WriteFile("/var/lib/pisowifi/gpio_config", []byte(content), 0644)

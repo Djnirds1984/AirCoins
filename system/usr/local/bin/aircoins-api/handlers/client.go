@@ -137,10 +137,10 @@ func resolveClientMAC(ip string) string {
 // machines have no iptables layer, and the session row must exist either
 // way so the operator can see what happened.
 //
-// Also manages the anti-hotspot TTL=1 bypass: when a client authenticates
-// on a portal with anti-hotspot enabled, a per-MAC RETURN rule is added
-// so the client bypasses TTL=1 (keeps internet). When they deauth, the
-// bypass is removed (their packets get TTL=1 → blocked).
+// Anti-hotspot needs NO per-session work here: TTL=1 is stamped on the
+// download path (mangle POSTROUTING, see applyTTL1), which a directly
+// connected client receives fine — only hotspot/tethering routers drop
+// it. There is no per-MAC bypass to add or remove.
 func runCaptiveRules(db *sql.DB, action, mac, reason string) {
 	mac = normalizeMAC(mac)
 	if mac == "" {

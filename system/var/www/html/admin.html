@@ -1428,6 +1428,55 @@
             font-size: 12px;
             cursor: default;
         }
+
+        /* ============================================
+           Voucher print templates (batch print + QR)
+           ============================================ */
+        #voucher-print-host { display: none; }
+        .voucher-print-grid { display: grid; grid-template-columns: repeat(auto-fill, 88mm); gap: 4mm; justify-content: center; }
+        .voucher-print-card { width: 86mm; height: 54mm; border-radius: 3mm; padding: 4mm 4.5mm; box-sizing: border-box; position: relative; overflow: hidden; display: flex; flex-direction: column; break-inside: avoid; page-break-inside: avoid; font-family: Arial, Helvetica, sans-serif; }
+        .voucher-print-card .vp-head { display: flex; justify-content: space-between; align-items: center; }
+        .voucher-print-card .vp-brand { font-size: 9pt; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; }
+        .voucher-print-card .vp-batch { font-size: 6.5pt; font-family: monospace; opacity: 0.8; }
+        .voucher-print-card .vp-body { display: flex; align-items: center; justify-content: space-between; flex: 1; gap: 3mm; }
+        .voucher-print-card .vp-left { flex: 1; min-width: 0; }
+        .voucher-print-card .vp-code { font-family: 'Courier New', monospace; font-weight: 800; font-size: 17pt; letter-spacing: 2px; margin: 2mm 0; }
+        .voucher-print-card .vp-badges { display: flex; flex-wrap: wrap; gap: 1.5mm; }
+        .voucher-print-card .vp-badge { font-size: 7pt; font-weight: 700; padding: 1mm 2.2mm; border-radius: 99px; white-space: nowrap; }
+        .voucher-print-card .vp-foot { font-size: 6pt; text-align: center; opacity: 0.8; margin-top: 1.5mm; }
+        .voucher-print-card .vp-qr { flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: #fff; padding: 1mm; border-radius: 1.5mm; }
+        .voucher-print-card .vp-qr img { width: 21mm; height: 21mm; image-rendering: pixelated; display: block; }
+
+        /* Template: Premium Dark */
+        .tpl-premium { background: #10151f; border: 0.5mm solid #d4af37; color: #f5f0e6; }
+        .tpl-premium .vp-brand { color: #ffd166; }
+        .tpl-premium .vp-code { color: #ffffff; }
+        .tpl-premium .vp-badge { background: rgba(212,175,55,0.18); color: #ffd166; border: 0.2mm solid rgba(212,175,55,0.5); }
+        .tpl-premium .vp-batch { color: #cfc9bb; }
+
+        /* Template: Classic Light */
+        .tpl-classic { background: #ffffff; border: 0.3mm solid #1f6feb; color: #16233a; box-shadow: 0 0 0 0.8mm #f2f7ff inset; }
+        .tpl-classic .vp-brand { color: #1f6feb; }
+        .tpl-classic .vp-code { color: #0d1b2e; }
+        .tpl-classic .vp-badge { background: #eaf3ff; color: #1f6feb; border: 0.2mm solid #bcd8ff; }
+        .tpl-classic .vp-batch { color: #5b6b84; }
+
+        /* Template: Compact Ticket */
+        .tpl-ticket { height: 32mm; flex-direction: row; align-items: center; gap: 3.5mm; background: #fffdf5; border: 0.3mm dashed #b8a04a; color: #3a3220; }
+        .tpl-ticket .vp-qr img { width: 22mm; height: 22mm; }
+        .tpl-ticket .vp-ticket-info { flex: 1; min-width: 0; }
+        .tpl-ticket .vp-brand { font-size: 7pt; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: #8a7422; }
+        .tpl-ticket .vp-code { font-family: 'Courier New', monospace; font-weight: 800; font-size: 14pt; letter-spacing: 2px; margin: 0.8mm 0; }
+        .tpl-ticket .vp-badge { background: #f4ecd2; color: #6b5a17; border: 0.2mm solid #d8c781; }
+
+        /* Print: only the voucher grid gets printed */
+        @media print {
+            body.voucher-printing > *:not(#voucher-print-host) { display: none !important; }
+            body.voucher-printing #voucher-print-host { display: block !important; }
+            body.voucher-printing { background: #fff !important; }
+            .voucher-print-card { break-inside: avoid; page-break-inside: avoid; }
+        }
+        @page { margin: 8mm; }
     </style>
 </head>
 <body>
@@ -1463,6 +1512,9 @@
             </a>
             <a href="#" data-section="sessions" class="nav-item">
                 <span class="icon">👥</span><span class="label">Sessions</span>
+            </a>
+            <a href="#" data-section="vouchers" class="nav-item">
+                <span class="icon">🎟️</span><span class="label">Vouchers</span>
             </a>
             <a href="#" data-section="pricing" class="nav-item">
                 <span class="icon">💰</span><span class="label">Pricing</span>
@@ -1661,6 +1713,145 @@
                         <button class="btn btn-ghost btn-sm" id="sessions-next-btn" onclick="sessionsNextPage()">Next</button>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Vouchers Section -->
+        <div id="section-vouchers" class="section" style="display:none;">
+            <!-- Status overview cards -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px;">
+                <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px 16px;display:flex;align-items:center;gap:12px;">
+                    <div style="width:42px;height:42px;border-radius:10px;background:rgba(107,140,192,0.18);display:flex;align-items:center;justify-content:center;font-size:19px;">🎟️</div>
+                    <div>
+                        <div id="voucher-stat-total" style="font-size:20px;font-weight:700;color:#fff;">0</div>
+                        <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;">Total Vouchers</div>
+                    </div>
+                </div>
+                <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px 16px;display:flex;align-items:center;gap:12px;">
+                    <div style="width:42px;height:42px;border-radius:10px;background:rgba(0,255,136,0.12);display:flex;align-items:center;justify-content:center;font-size:19px;">✅</div>
+                    <div>
+                        <div id="voucher-stat-unused" style="font-size:20px;font-weight:700;color:#00ff88;">0</div>
+                        <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;">Available</div>
+                    </div>
+                </div>
+                <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px 16px;display:flex;align-items:center;gap:12px;">
+                    <div style="width:42px;height:42px;border-radius:10px;background:rgba(255,215,0,0.12);display:flex;align-items:center;justify-content:center;font-size:19px;">⚡</div>
+                    <div>
+                        <div id="voucher-stat-used" style="font-size:20px;font-weight:700;color:#ffd700;">0</div>
+                        <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;">Redeemed</div>
+                    </div>
+                </div>
+                <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px 16px;display:flex;align-items:center;gap:12px;">
+                    <div style="width:42px;height:42px;border-radius:10px;background:rgba(255,68,68,0.12);display:flex;align-items:center;justify-content:center;font-size:19px;">🚫</div>
+                    <div>
+                        <div id="voucher-stat-disabled" style="font-size:20px;font-weight:700;color:#ff4444;">0</div>
+                        <div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;">Disabled</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Generator -->
+            <div class="pricing-form-card">
+                <div class="form-title"><span style="margin-right:8px;">🎫</span>Generate Vouchers</div>
+                <form class="pricing-form" id="voucher-gen-form" onsubmit="return false;">
+                    <div class="form-group">
+                        <label for="voucher-gen-count">Quantity</label>
+                        <input type="number" id="voucher-gen-count" min="1" max="100" step="1" value="1" placeholder="1-100" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="voucher-gen-duration">Duration</label>
+                        <select id="voucher-gen-duration" onchange="onVoucherDurationChange()">
+                            <option value="15">15 minutes</option>
+                            <option value="30" selected>30 minutes</option>
+                            <option value="60">1 hour</option>
+                            <option value="180">3 hours</option>
+                            <option value="360">6 hours</option>
+                            <option value="720">12 hours</option>
+                            <option value="1440">1 day</option>
+                            <option value="10080">7 days</option>
+                            <option value="43200">1 month (30 days)</option>
+                            <option value="custom">Custom&hellip;</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="voucher-gen-custom-group" style="display:none;">
+                        <label for="voucher-gen-custom">Custom Duration</label>
+                        <div style="display:flex;gap:8px;">
+                            <input type="number" id="voucher-gen-custom" min="1" step="1" value="1" style="flex:1;">
+                            <select id="voucher-gen-custom-unit" style="flex:1;">
+                                <option value="minutes">Minutes</option>
+                                <option value="hours">Hours</option>
+                                <option value="days">Days</option>
+                                <option value="months">Months (30d)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="voucher-gen-price">Price per Voucher (₱)</label>
+                        <input type="number" id="voucher-gen-price" min="0" step="1" value="0" placeholder="0 = free">
+                    </div>
+                    <div class="form-group">
+                        <label for="voucher-gen-notes">Notes (optional)</label>
+                        <input type="text" id="voucher-gen-notes" placeholder="e.g. June batch">
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="voucher-gen-btn" onclick="generateVouchers()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="vertical-align:-2px;margin-right:6px;"><path d="M12 5v14M5 12h14"/></svg>Generate
+                    </button>
+                </form>
+                <div class="gpio-info-text" style="margin-top:14px;">
+                    Each voucher is a unique 6-character code. Redeeming a voucher on the portal starts
+                    (or extends) a session and binds the voucher to that session's roaming token, so the
+                    subscriber keeps internet when moving between your SSIDs. Monthly = 30-day subscription.
+                </div>
+                <div id="voucher-gen-result" style="display:none;margin-top:14px;">
+                    <div id="voucher-gen-batch" class="gpio-info-text" style="margin-bottom:8px;"></div>
+                    <div class="gpio-info-text" style="margin-bottom:8px;">✅ Generated codes (click a code to copy):</div>
+                    <div id="voucher-gen-codes" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+                </div>
+            </div>
+
+            <!-- Vouchers Table -->
+            <div class="table-container">
+                <div class="table-title"><span style="margin-right:8px;">📋</span>All Vouchers</div>
+                <div class="filter-bar">
+                    <div class="form-group">
+                        <label for="voucher-filter-status">Status</label>
+                        <select id="voucher-filter-status">
+                            <option value="">All</option>
+                            <option value="unused">Unused</option>
+                            <option value="used">Used</option>
+                            <option value="disabled">Disabled</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="voucher-filter-search">Search Code / Notes</label>
+                        <input type="text" id="voucher-filter-search" placeholder="Code or notes...">
+                    </div>
+                    <div class="form-group">
+                        <label for="voucher-filter-batch">Batch Code</label>
+                        <input type="text" id="voucher-filter-batch" placeholder="B-XXXXXX">
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="applyVoucherFilters()">Apply Filters</button>
+                    <button class="btn btn-ghost btn-sm" onclick="resetVoucherFilters()">Reset</button>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Code</th>
+                            <th>Batch</th>
+                            <th>Plan</th>
+                            <th>Duration</th>
+                            <th>Price</th>
+                            <th>Status</th>
+                            <th>Redeemed</th>
+                            <th>Token</th>
+                            <th>Notes</th>
+                            <th style="text-align:right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="vouchers-table-body">
+                        <tr class="empty-row"><td colspan="10">Loading...</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
@@ -2045,12 +2236,22 @@
                                 <option value="both">BOTH</option>
                             </select>
                         </div>
+                        <div class="settings-field">
+                            <label for="gpio-debounce-ms">Pulse Debounce (ms)</label>
+                            <input type="number" id="gpio-debounce-ms" min="5" max="1000" step="5" value="50">
+                        </div>
                     </div>
                     <div class="gpio-info-text">
                         Pin numbers are PHYSICAL header pins (the numbers printed on the 40-pin header),
                         not BCM/sunxi GPIO numbers. The kernel GPIO line is shown next to each pin
                         &mdash; e.g. Orange Pi PC pin 3 = PA12 = GPIO 12.
                         Pins marked with a function (I2C/SPI/UART) only work as GPIO when that overlay is disabled.
+                    </div>
+                    <div class="gpio-info-text">
+                        Debounce: any edge arriving within this window after a pulse is treated as contact
+                        bounce of the same coin and not counted. Recommended: <strong>50 ms</strong>.
+                        If a multi-peso coin (e.g. 10-peso = 10 rapid pulses) still under-counts, lower it
+                        (try 30 or 20 ms). If pulses get double-counted, raise it.
                     </div>
                     <div class="settings-row" style="gap: 12px;">
                         <button class="btn btn-ghost" onclick="testGpioPin()">Test GPIO</button>
@@ -2711,10 +2912,11 @@ async function checkAuth() {
 // ============================================================
 // ROUTER
 // ============================================================
-const SECTION_NAMES = ['dashboard', 'sessions', 'pricing', 'portal', 'bridges', 'settings', 'system', 'reports', 'license', 'zerotier', 'updater'];
+const SECTION_NAMES = ['dashboard', 'sessions', 'vouchers', 'pricing', 'portal', 'bridges', 'settings', 'system', 'reports', 'license', 'zerotier', 'updater'];
 const SECTION_TITLES = {
     dashboard: 'Dashboard',
     sessions: 'Sessions',
+    vouchers: 'Voucher Management',
     pricing: 'Pricing',
     portal: 'Portal',
     bridges: 'Bridges',
@@ -2749,6 +2951,8 @@ function showSection(name) {
     } else if (name === 'sessions') {
         loadSessions();
         startSessionsRefresh();
+    } else if (name === 'vouchers') {
+        loadVouchers();
     } else if (name === 'pricing') {
         loadPricing();
     } else if (name === 'portal') {
@@ -2911,6 +3115,17 @@ async function rebootSystem() {
     }
 }
 
+// Format a remaining-seconds value as DD:HH:MM:SS (Time Remaining columns).
+function formatRemaining(seconds) {
+    var total = Math.max(0, Math.floor(seconds || 0));
+    var d = Math.floor(total / 86400);
+    var h = Math.floor((total % 86400) / 3600);
+    var m = Math.floor((total % 3600) / 60);
+    var s = total % 60;
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return p(d) + ':' + p(h) + ':' + p(m) + ':' + p(s);
+}
+
 function renderSessionsTable(data) {
     var tbody = document.getElementById('recent-sessions-body');
     var sessions = [];
@@ -2929,7 +3144,7 @@ function renderSessionsTable(data) {
     tbody.innerHTML = '';
     sessions.forEach(function(s) {
         var statusColor = s.status === 'active' ? '#00ff88' : (s.status === 'expired' ? '#ff4444' : '#ffd700');
-        var mins = Math.round((s.remaining_seconds || 0) / 60);
+        var remaining = formatRemaining(s.remaining_seconds);
         var started = s.started_at ? new Date(s.started_at).toLocaleString() : '-';
         var lifetimeCoins = (s.client_mac && s.client_mac !== '-') ? (s.total_coins_lifetime || 0) : '\u2014';
         tbody.innerHTML +=
@@ -2941,7 +3156,7 @@ function renderSessionsTable(data) {
                 '<td>' + (s.session_token || '\u2014') + '</td>' +
                 '<td>' + (s.coins_inserted || 0) + '</td>' +
                 '<td>' + lifetimeCoins + '</td>' +
-                '<td>' + mins + ' min</td>' +
+                '<td>' + remaining + '</td>' +
                 '<td style="color:' + statusColor + ';">' + (s.status || 'unknown') + '</td>' +
                 '<td>' + started + '</td>' +
             '</tr>';
@@ -3226,7 +3441,7 @@ function renderSessionsAdminTable(sessions) {
 
     tbody.innerHTML = '';
     sessions.forEach(function(s) {
-        var mins = Math.round((s.remaining_seconds || 0) / 60);
+        var remaining = formatRemaining(s.remaining_seconds);
         var started = s.started_at ? new Date(s.started_at).toLocaleString() : '-';
         // F9: if status is 'active' AND paused_at is non-null, render an
         // amber 'paused' badge instead of the green 'active' badge.
@@ -3273,7 +3488,7 @@ function renderSessionsAdminTable(sessions) {
                 '<td>' + (s.session_token || '\u2014') + '</td>' +
                 '<td>' + (s.coins_inserted || 0) + '</td>' +
                 '<td>' + lifetimeCoins + '</td>' +
-                '<td>' + mins + ' min</td>' +
+                '<td>' + remaining + '</td>' +
                 '<td><span class="status-badge ' + badgeClass + '">' + badgeLabel + '</span></td>' +
                 '<td>' + speedCell + '</td>' +
                 '<td>' + started + '</td>' +
@@ -4119,6 +4334,8 @@ async function loadSettings() {
         if (gpioCfg.pin) document.getElementById('gpio-pin').value = gpioCfg.pin;
         // Set pulse mode
         if (gpioCfg.pulse_mode) document.getElementById('gpio-pulse-mode').value = gpioCfg.pulse_mode;
+        // Set debounce (ms)
+        document.getElementById('gpio-debounce-ms').value = gpioCfg.debounce_ms || 50;
     } catch (e) {
         if (e.message !== 'Unauthorized') showNotification('Failed to load GPIO config', 'error');
     }
@@ -4285,14 +4502,29 @@ async function saveGpioConfig() {
         var boardModel = document.getElementById('gpio-board-model').value;
         var pin = parseInt(document.getElementById('gpio-pin').value);
         var pulseMode = document.getElementById('gpio-pulse-mode').value;
+        var debounceMs = parseInt(document.getElementById('gpio-debounce-ms').value);
+        if (!debounceMs || debounceMs < 5 || debounceMs > 1000) {
+            showNotification('Debounce must be between 5 and 1000 ms', 'error');
+            return;
+        }
 
         await apiCall('POST', '/gpio/config', {
             pin: pin,
             coin_value: 1,
             pulse_mode: pulseMode,
-            board_model: boardModel
+            board_model: boardModel,
+            debounce_ms: debounceMs
         });
-        showNotification('GPIO config saved. Restart GPIO listener to apply.', 'success');
+
+        // Apply immediately: the listener reads gpio_config on startup,
+        // so restart it. Config is stored in the DB + config file, so
+        // the setting also survives reboots.
+        try {
+            await apiCall('POST', '/system/services/gpio-coin-listener/restart');
+            showNotification('GPIO config saved (debounce ' + debounceMs + ' ms) and coin listener restarted.', 'success');
+        } catch (re) {
+            showNotification('GPIO config saved. Restart GPIO listener to apply.', 'success');
+        }
     } catch (e) {
         showNotification('Failed to save GPIO config: ' + e.message, 'error');
     }
@@ -4829,6 +5061,716 @@ function exportDailyCSV() {
     document.body.removeChild(link);
 
     showNotification('CSV exported successfully', 'success');
+}
+
+// ============================================================
+// QR ENCODER (offline, zero-dependency — the device has no internet)
+// Byte mode, EC level M, versions 1-10. Validated against a real
+// decoder (jsQR) round-trip before shipping.
+// ============================================================
+var AirCoinsQR = (function () {
+    'use strict';
+    var EXP = new Array(512), LOG = new Array(256);
+    (function () {
+        var x = 1, i;
+        for (i = 0; i < 255; i++) { EXP[i] = x; LOG[x] = i; x <<= 1; if (x & 0x100) x ^= 0x11d; }
+        for (i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
+    })();
+    function gfMul(a, b) { return (a === 0 || b === 0) ? 0 : EXP[LOG[a] + LOG[b]]; }
+    function rsGenPoly(degree) {
+        var poly = [1], i, j, np;
+        for (i = 0; i < degree; i++) {
+            np = [];
+            for (j = 0; j <= poly.length; j++) np.push(0);
+            for (j = 0; j < poly.length; j++) {
+                np[j] ^= poly[j];
+                np[j + 1] ^= gfMul(poly[j], EXP[i]);
+            }
+            poly = np;
+        }
+        return poly;
+    }
+    function rsRemainder(data, ecLen) {
+        var gen = rsGenPoly(ecLen);
+        var result = [], i, j;
+        for (i = 0; i < data.length + ecLen; i++) result.push(0);
+        for (i = 0; i < data.length; i++) result[i] = data[i];
+        for (i = 0; i < data.length; i++) {
+            var factor = result[i];
+            if (factor !== 0) {
+                for (j = 0; j < gen.length; j++) result[i + j] ^= gfMul(gen[j], factor);
+            }
+        }
+        return result.slice(data.length);
+    }
+    var VERSIONS = {
+        1: { ec: 10, groups: [[1, 16]], align: [] },
+        2: { ec: 16, groups: [[1, 28]], align: [6, 18] },
+        3: { ec: 26, groups: [[1, 44]], align: [6, 22] },
+        4: { ec: 18, groups: [[2, 32]], align: [6, 26] },
+        5: { ec: 24, groups: [[2, 43]], align: [6, 30] },
+        6: { ec: 16, groups: [[4, 27]], align: [6, 34] },
+        7: { ec: 18, groups: [[4, 31]], align: [6, 22, 38] },
+        8: { ec: 22, groups: [[2, 38], [2, 39]], align: [6, 24, 42] },
+        9: { ec: 22, groups: [[3, 36], [2, 37]], align: [6, 26, 46] },
+        10: { ec: 26, groups: [[4, 43], [1, 44]], align: [6, 28, 50] }
+    };
+    function totalDataCodewords(v) {
+        var t = 0;
+        VERSIONS[v].groups.forEach(function (g) { t += g[0] * g[1]; });
+        return t;
+    }
+    function encodeData(text, version) {
+        var bytes = [], i;
+        for (i = 0; i < text.length; i++) {
+            var c = text.charCodeAt(i);
+            if (c > 0xff) throw new Error('QR: only Latin-1 characters supported');
+            bytes.push(c);
+        }
+        var bits = [];
+        function push(val, n) { for (var k = n - 1; k >= 0; k--) bits.push((val >>> k) & 1); }
+        push(4, 4);
+        push(bytes.length, version <= 9 ? 8 : 16);
+        for (i = 0; i < bytes.length; i++) push(bytes[i], 8);
+        var cap = totalDataCodewords(version) * 8;
+        for (i = 0; i < 4 && bits.length < cap; i++) bits.push(0);
+        while (bits.length % 8 !== 0) bits.push(0);
+        var pads = [0xEC, 0x11], pi = 0;
+        while (bits.length < cap) { push(pads[pi % 2], 8); pi++; }
+        var codewords = [];
+        for (i = 0; i < bits.length; i += 8) {
+            var b = 0;
+            for (var j = 0; j < 8; j++) b = (b << 1) | bits[i + j];
+            codewords.push(b);
+        }
+        return codewords;
+    }
+    function buildBlocks(codewords, version) {
+        var info = VERSIONS[version];
+        var blocks = [], offset = 0, i;
+        info.groups.forEach(function (g) {
+            for (var b = 0; b < g[0]; b++) {
+                var data = codewords.slice(offset, offset + g[1]);
+                offset += g[1];
+                blocks.push({ data: data, ec: rsRemainder(data, info.ec) });
+            }
+        });
+        var out = [], maxData = 0;
+        blocks.forEach(function (bl) { if (bl.data.length > maxData) maxData = bl.data.length; });
+        for (i = 0; i < maxData; i++)
+            blocks.forEach(function (bl) { if (i < bl.data.length) out.push(bl.data[i]); });
+        for (i = 0; i < info.ec; i++)
+            blocks.forEach(function (bl) { out.push(bl.ec[i]); });
+        return out;
+    }
+    function makeMatrix(text) {
+        var version = 0, v;
+        for (v = 1; v <= 10; v++) {
+            var need = 4 + (v <= 9 ? 8 : 16) + text.length * 8;
+            if (totalDataCodewords(v) * 8 >= need) { version = v; break; }
+        }
+        if (!version) throw new Error('QR: content too long');
+        var size = 17 + 4 * version;
+        var modules = [], isFunc = [], y, x;
+        for (y = 0; y < size; y++) {
+            modules.push(new Array(size).fill(false));
+            isFunc.push(new Array(size).fill(false));
+        }
+        function set(X, Y, dark) { modules[Y][X] = dark; }
+        function drawFinder(cx, cy) {
+            for (var dy = -4; dy <= 4; dy++)
+                for (var dx = -4; dx <= 4; dx++) {
+                    var X = cx + dx, Y = cy + dy;
+                    if (X < 0 || X >= size || Y < 0 || Y >= size) continue;
+                    var dist = Math.max(Math.abs(dx), Math.abs(dy));
+                    set(X, Y, dist !== 2 && dist !== 4);
+                    isFunc[Y][X] = true;
+                }
+        }
+        drawFinder(3, 3);
+        drawFinder(size - 4, 3);
+        drawFinder(3, size - 4);
+        var align = VERSIONS[version].align;
+        for (var ai = 0; ai < align.length; ai++)
+            for (var aj = 0; aj < align.length; aj++) {
+                if ((ai === 0 && aj === 0) ||
+                    (ai === 0 && aj === align.length - 1) ||
+                    (ai === align.length - 1 && aj === 0)) continue;
+                var acx = align[aj], acy = align[ai];
+                for (var ady = -2; ady <= 2; ady++)
+                    for (var adx = -2; adx <= 2; adx++) {
+                        set(acx + adx, acy + ady, Math.max(Math.abs(adx), Math.abs(ady)) !== 1);
+                        isFunc[acy + ady][acx + adx] = true;
+                    }
+            }
+        for (var t = 0; t < size; t++) {
+            if (!isFunc[6][t]) { set(t, 6, t % 2 === 0); isFunc[6][t] = true; }
+            if (!isFunc[t][6]) { set(6, t, t % 2 === 0); isFunc[t][6] = true; }
+        }
+        function drawFormatBits(mask, markFunc) {
+            var data = mask;
+            var rem = data;
+            for (var i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+            var bits = ((data << 10) | rem) ^ 0x5412;
+            function fb(i) { return ((bits >>> i) & 1) !== 0; }
+            function sf(X, Y, dark) { set(X, Y, dark); if (markFunc) isFunc[Y][X] = true; }
+            var i;
+            for (i = 0; i <= 5; i++) sf(8, i, fb(i));
+            sf(8, 7, fb(6));
+            sf(8, 8, fb(7));
+            sf(7, 8, fb(8));
+            for (i = 9; i < 15; i++) sf(14 - i, 8, fb(i));
+            for (i = 0; i < 8; i++) sf(size - 1 - i, 8, fb(i));
+            for (i = 8; i < 15; i++) sf(8, size - 15 + i, fb(i));
+            sf(8, size - 8, true);
+        }
+        drawFormatBits(0, true);
+        if (version >= 7) {
+            var vrem = version;
+            for (var vi = 0; vi < 12; vi++) vrem = (vrem << 1) ^ ((vrem >>> 11) * 0x1F25);
+            var vbits = (version << 12) | vrem;
+            for (var i2 = 0; i2 < 18; i2++) {
+                var bit = ((vbits >>> i2) & 1) !== 0;
+                var a = size - 11 + i2 % 3;
+                var b = Math.floor(i2 / 3);
+                set(a, b, bit); isFunc[b][a] = true;
+                set(b, a, bit); isFunc[a][b] = true;
+            }
+        }
+        var allCW = buildBlocks(encodeData(text, version), version);
+        var bitIdx = 0, totalBits = allCW.length * 8;
+        for (var right = size - 1; right >= 1; right -= 2) {
+            if (right === 6) right = 5;
+            for (var vert = 0; vert < size; vert++) {
+                for (var j = 0; j < 2; j++) {
+                    var dx = right - j;
+                    var upward = ((right + 1) & 2) === 0;
+                    var dy = upward ? size - 1 - vert : vert;
+                    if (!isFunc[dy][dx] && bitIdx < totalBits) {
+                        modules[dy][dx] = ((allCW[bitIdx >>> 3] >>> (7 - (bitIdx & 7))) & 1) !== 0;
+                        bitIdx++;
+                    }
+                }
+            }
+        }
+        function applyMask(mask) {
+            for (var Y = 0; Y < size; Y++)
+                for (var X = 0; X < size; X++) {
+                    var invert = false;
+                    switch (mask) {
+                        case 0: invert = (X + Y) % 2 === 0; break;
+                        case 1: invert = Y % 2 === 0; break;
+                        case 2: invert = X % 3 === 0; break;
+                        case 3: invert = (X + Y) % 3 === 0; break;
+                        case 4: invert = (Math.floor(X / 3) + Math.floor(Y / 2)) % 2 === 0; break;
+                        case 5: invert = (X * Y) % 2 + (X * Y) % 3 === 0; break;
+                        case 6: invert = ((X * Y) % 2 + (X * Y) % 3) % 2 === 0; break;
+                        case 7: invert = ((X + Y) % 2 + (X * Y) % 3) % 2 === 0; break;
+                    }
+                    if (!isFunc[Y][X] && invert) modules[Y][X] = !modules[Y][X];
+                }
+        }
+        function getPenalty() {
+            var n = size, result = 0;
+            for (var Y = 0; Y < n; Y++) {
+                var rc = modules[Y][0], rl = 1;
+                for (var X = 1; X < n; X++) {
+                    if (modules[Y][X] === rc) rl++;
+                    else { if (rl >= 5) result += rl - 2; rc = modules[Y][X]; rl = 1; }
+                }
+                if (rl >= 5) result += rl - 2;
+            }
+            for (var X2 = 0; X2 < n; X2++) {
+                var rc2 = modules[0][X2], rl2 = 1;
+                for (var Y2 = 1; Y2 < n; Y2++) {
+                    if (modules[Y2][X2] === rc2) rl2++;
+                    else { if (rl2 >= 5) result += rl2 - 2; rc2 = modules[Y2][X2]; rl2 = 1; }
+                }
+                if (rl2 >= 5) result += rl2 - 2;
+            }
+            for (var yb = 0; yb < n - 1; yb++)
+                for (var xb = 0; xb < n - 1; xb++) {
+                    var c = modules[yb][xb];
+                    if (c === modules[yb][xb + 1] && c === modules[yb + 1][xb] && c === modules[yb + 1][xb + 1]) result += 3;
+                }
+            var patA = [true, false, true, true, true, false, true, false, false, false, false];
+            var patB = [false, false, false, false, true, false, true, true, true, false, true];
+            function matches(sx, sy, ddx, ddy, pat) {
+                for (var k = 0; k < 11; k++) {
+                    var xx = sx + ddx * k, yy = sy + ddy * k;
+                    if (xx < 0 || xx >= n || yy < 0 || yy >= n) return false;
+                    if (modules[yy][xx] !== pat[k]) return false;
+                }
+                return true;
+            }
+            for (var yf = 0; yf < n; yf++)
+                for (var xf = 0; xf < n; xf++) {
+                    if (matches(xf, yf, 1, 0, patA)) result += 40;
+                    if (matches(xf, yf, 1, 0, patB)) result += 40;
+                    if (matches(xf, yf, 0, 1, patA)) result += 40;
+                    if (matches(xf, yf, 0, 1, patB)) result += 40;
+                }
+            var dark = 0;
+            for (var yd = 0; yd < n; yd++)
+                for (var xd = 0; xd < n; xd++) if (modules[yd][xd]) dark++;
+            var total = n * n;
+            var k4 = Math.ceil(Math.abs(dark * 20 - total * 10) / total) - 1;
+            result += k4 * 10;
+            return result;
+        }
+        var bestMask = 0, bestPenalty = Infinity;
+        for (var m = 0; m < 8; m++) {
+            applyMask(m);
+            drawFormatBits(m, false);
+            var p = getPenalty();
+            if (p < bestPenalty) { bestPenalty = p; bestMask = m; }
+            applyMask(m);
+        }
+        applyMask(bestMask);
+        drawFormatBits(bestMask, false);
+        return modules;
+    }
+    return { matrix: makeMatrix };
+})();
+
+// Renders a QR code to a PNG data URL (high-res for printing).
+function voucherQRDataURL(text, px) {
+    var m = AirCoinsQR.matrix(text);
+    var n = m.length, q = 4;
+    var scale = Math.max(4, Math.ceil((px || 110) / (n + q * 2)));
+    var dim = (n + q * 2) * scale;
+    var canvas = document.createElement('canvas');
+    canvas.width = dim; canvas.height = dim;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, dim, dim);
+    ctx.fillStyle = '#000000';
+    for (var y = 0; y < n; y++)
+        for (var x = 0; x < n; x++)
+            if (m[y][x]) ctx.fillRect((x + q) * scale, (y + q) * scale, scale, scale);
+    return canvas.toDataURL('image/png');
+}
+
+// ============================================================
+// VOUCHER MANAGEMENT
+// ============================================================
+var _voucherCache = [];
+
+var VOUCHER_ICONS = {
+    copy: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>',
+    edit: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>',
+    del: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>',
+    print: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"></path><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>'
+};
+
+function voucherEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+}
+
+function formatVoucherDuration(mins) {
+    if (mins >= 43200 && mins % 43200 === 0) { var mo = mins / 43200; return mo + ' month' + (mo > 1 ? 's' : ''); }
+    if (mins >= 1440 && mins % 1440 === 0) { var d = mins / 1440; return d + ' day' + (d > 1 ? 's' : ''); }
+    if (mins >= 60 && mins % 60 === 0) { var h = mins / 60; return h + ' hour' + (h > 1 ? 's' : ''); }
+    return mins + ' min';
+}
+
+function formatVoucherPrice(p) {
+    var n = parseFloat(p) || 0;
+    return '\u20b1' + n.toLocaleString('en-PH', { minimumFractionDigits: (n % 1 ? 2 : 0), maximumFractionDigits: 2 });
+}
+
+function voucherStatusBadge(status) {
+    if (status === 'unused') return '<span style="display:inline-block;background:rgba(0,255,136,0.12);color:#00ff88;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600;">\u25cf Unused</span>';
+    if (status === 'used') return '<span style="display:inline-block;background:rgba(255,215,0,0.12);color:#ffd700;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600;">\u25cf Used</span>';
+    return '<span style="display:inline-block;background:rgba(255,68,68,0.12);color:#ff4444;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600;">\u25cf Disabled</span>';
+}
+
+function voucherPlanBadge(plan) {
+    if (plan === 'monthly') return '<span style="display:inline-block;background:rgba(255,215,0,0.10);color:#ffd700;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600;">\ud83d\uddd3\ufe0f Monthly</span>';
+    return '<span style="display:inline-block;background:rgba(255,255,255,0.07);color:#aaa;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600;">\u23f1\ufe0f Time</span>';
+}
+
+function onVoucherDurationChange() {
+    var val = document.getElementById('voucher-gen-duration').value;
+    document.getElementById('voucher-gen-custom-group').style.display = (val === 'custom') ? '' : 'none';
+}
+
+async function generateVouchers() {
+    var count = parseInt(document.getElementById('voucher-gen-count').value, 10);
+    var durVal = document.getElementById('voucher-gen-duration').value;
+    var minutes;
+    if (durVal === 'custom') {
+        var value = parseInt(document.getElementById('voucher-gen-custom').value, 10);
+        var unit = document.getElementById('voucher-gen-custom-unit').value;
+        var perUnit = { minutes: 1, hours: 60, days: 1440, months: 43200 };
+        minutes = (value || 0) * (perUnit[unit] || 1);
+    } else {
+        minutes = parseInt(durVal, 10);
+    }
+    var price = parseFloat(document.getElementById('voucher-gen-price').value) || 0;
+    var notes = document.getElementById('voucher-gen-notes').value.trim();
+
+    if (!count || count < 1 || count > 100) {
+        showNotification('Quantity must be between 1 and 100', 'error');
+        return;
+    }
+    if (!minutes || minutes < 1) {
+        showNotification('Please enter a valid duration', 'error');
+        return;
+    }
+    if (price < 0) {
+        showNotification('Price cannot be negative', 'error');
+        return;
+    }
+
+    try {
+        var res = await apiCall('POST', '/admin/vouchers/generate', {
+            count: count,
+            minutes: minutes,
+            price: price,
+            notes: notes
+        });
+        showNotification(res.message || 'Vouchers generated', 'success');
+
+        // Show the fresh codes as clickable copy chips
+        var codes = (res.data && res.data.codes) || [];
+        var box = document.getElementById('voucher-gen-codes');
+        box.innerHTML = '';
+        codes.forEach(function(c) {
+            var chip = document.createElement('span');
+            chip.textContent = c;
+            chip.style.cssText = 'font-family:monospace;font-size:14px;font-weight:600;letter-spacing:2px;padding:6px 12px;border:1px solid rgba(0,255,136,0.3);border-radius:6px;cursor:pointer;background:rgba(0,255,136,0.08);color:#00ff88;';
+            chip.title = 'Click to copy';
+            chip.onclick = function() { copyVoucherCode(c); };
+            box.appendChild(chip);
+        });
+        document.getElementById('voucher-gen-result').style.display = codes.length ? '' : 'none';
+
+        // Show the auto-generated batch code + one-click print
+        var batchRow = document.getElementById('voucher-gen-batch');
+        var batch = (res.data && res.data.batch_code) || '';
+        if (batchRow) {
+            if (batch) {
+                batchRow.innerHTML = '📦 Batch <b style="font-family:monospace;letter-spacing:1px;">' + voucherEsc(batch) + '</b> ' +
+                    '<button class="btn btn-primary btn-sm" style="margin-left:10px;" onclick="openPrintBatchModal(\'' + voucherEsc(batch) + '\')">' +
+                    VOUCHER_ICONS.print + ' Print Batch</button>';
+                batchRow.style.display = '';
+            } else {
+                batchRow.style.display = 'none';
+            }
+        }
+
+        loadVouchers();
+    } catch (e) {
+        if (e.message !== 'Unauthorized') showNotification(e.message || 'Failed to generate vouchers', 'error');
+    }
+}
+
+async function loadVouchers() {
+    var status = document.getElementById('voucher-filter-status').value;
+    var search = document.getElementById('voucher-filter-search').value.trim();
+    var batch = document.getElementById('voucher-filter-batch').value.trim();
+    var params = ['limit=200'];
+    if (status) params.push('status=' + encodeURIComponent(status));
+    if (search) params.push('search=' + encodeURIComponent(search));
+    if (batch) params.push('batch=' + encodeURIComponent(batch));
+
+    try {
+        var res = await apiCall('GET', '/admin/vouchers?' + params.join('&'));
+        _voucherCache = (res && res.data) || [];
+        if (res && res.stats) {
+            document.getElementById('voucher-stat-total').textContent = res.stats.total || 0;
+            document.getElementById('voucher-stat-unused').textContent = res.stats.unused || 0;
+            document.getElementById('voucher-stat-used').textContent = res.stats.used || 0;
+            document.getElementById('voucher-stat-disabled').textContent = res.stats.disabled || 0;
+        }
+        renderVouchersTable(_voucherCache);
+    } catch (e) {
+        if (e.message !== 'Unauthorized') {
+            showNotification('Failed to load vouchers', 'error');
+        }
+    }
+}
+
+function renderVouchersTable(vouchers) {
+    var tbody = document.getElementById('vouchers-table-body');
+    if (!vouchers || vouchers.length === 0) {
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="10">No vouchers found</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = '';
+    vouchers.forEach(function(v) {
+        var redeemed = v.redeemed_at
+            ? new Date(v.redeemed_at).toLocaleString() + (v.redeemed_mac ? '<br><span style="color:#888;font-size:11px;font-family:monospace;">' + voucherEsc(v.redeemed_mac) + '</span>' : '')
+            : '\u2014';
+        var tokenCell = v.session_token
+            ? '<span style="font-family:monospace;background:rgba(0,255,136,0.08);color:#00ff88;padding:2px 8px;border-radius:5px;font-size:11px;">' + voucherEsc(v.session_token) + '</span>'
+            : '\u2014';
+
+        var actions = '<div class="action-btns" style="display:flex;gap:4px;justify-content:flex-end;">';
+        actions += '<button class="btn btn-ghost btn-sm" style="padding:4px 7px;" onclick="copyVoucherCode(\'' + voucherEsc(v.code) + '\')" title="Copy code">' + VOUCHER_ICONS.copy + '</button>';
+        if (v.batch_code) {
+            actions += '<button class="btn btn-ghost btn-sm" style="padding:4px 7px;" onclick="openPrintBatchModal(\'' + voucherEsc(v.batch_code) + '\')" title="Print batch ' + voucherEsc(v.batch_code) + '">' + VOUCHER_ICONS.print + '</button>';
+        }
+        actions += '<button class="btn btn-ghost btn-sm" style="padding:4px 7px;" onclick="openEditVoucherModal(' + v.id + ')" title="Edit voucher">' + VOUCHER_ICONS.edit + '</button>';
+        actions += '<button class="btn btn-danger btn-sm" style="padding:4px 7px;background:rgba(220,50,50,0.15);" onclick="deleteVoucher(' + v.id + ', \'' + voucherEsc(v.code) + '\')" title="Delete permanently">' + VOUCHER_ICONS.del + '</button>';
+        actions += '</div>';
+
+        tbody.innerHTML +=
+            '<tr>' +
+                '<td style="font-family:monospace;font-weight:700;letter-spacing:1px;cursor:pointer;" onclick="copyVoucherCode(\'' + voucherEsc(v.code) + '\')" title="Click to copy">' + voucherEsc(v.code) + '</td>' +
+                '<td style="font-family:monospace;font-size:11px;">' + voucherEsc(v.batch_code || '\u2014') + '</td>' +
+                '<td>' + voucherPlanBadge(v.plan) + '</td>' +
+                '<td>' + formatVoucherDuration(v.duration_minutes) + '</td>' +
+                '<td style="font-weight:600;">' + formatVoucherPrice(v.price) + '</td>' +
+                '<td>' + voucherStatusBadge(v.status) + '</td>' +
+                '<td>' + redeemed + '</td>' +
+                '<td>' + tokenCell + '</td>' +
+                '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + voucherEsc(v.notes || '\u2014') + '</td>' +
+                '<td>' + actions + '</td>' +
+            '</tr>';
+    });
+}
+
+function applyVoucherFilters() { loadVouchers(); }
+
+function resetVoucherFilters() {
+    document.getElementById('voucher-filter-status').value = '';
+    document.getElementById('voucher-filter-search').value = '';
+    document.getElementById('voucher-filter-batch').value = '';
+    loadVouchers();
+}
+
+function copyVoucherCode(code) {
+    var done = function() { showNotification('Copied ' + code, 'success'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(code).then(done).catch(function() {
+            window.prompt('Copy this code:', code);
+        });
+    } else {
+        window.prompt('Copy this code:', code);
+    }
+}
+
+async function openEditVoucherModal(id) {
+    var v = null;
+    for (var i = 0; i < _voucherCache.length; i++) {
+        if (_voucherCache[i].id === id) { v = _voucherCache[i]; break; }
+    }
+    if (!v) {
+        try {
+            var res = await apiCall('GET', '/admin/vouchers/' + id);
+            v = res && res.data;
+        } catch (e) {}
+    }
+    if (!v) { showNotification('Voucher not found', 'error'); return; }
+
+    closeEditVoucherModal();
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'edit-voucher-modal-overlay';
+    overlay.innerHTML =
+        '<div class="modal-card" style="max-width:480px;max-height:85vh;overflow-y:auto;">' +
+            '<div class="form-title">Edit Voucher ' + voucherEsc(v.code) + '</div>' +
+            '<div style="margin-bottom:12px;padding:8px;background:rgba(255,255,255,0.03);border-radius:8px;font-size:12px;color:#888;">' +
+                '<div>Plan: ' + voucherEsc(v.plan) + '</div>' +
+                '<div>Created: ' + (v.created_at ? new Date(v.created_at).toLocaleString() : '\u2014') + '</div>' +
+                '<div>Redeemed: ' + (v.redeemed_at ? new Date(v.redeemed_at).toLocaleString() + ' (' + voucherEsc(v.redeemed_mac || '?') + ')' : '\u2014') + '</div>' +
+                (v.session_id ? '<div>Session: #' + v.session_id + (v.session_token ? ' (token ' + voucherEsc(v.session_token) + ')' : '') + '</div>' : '') +
+            '</div>' +
+            '<div class="form-group"><label for="edit-voucher-minutes">Duration (minutes)</label>' +
+            '<input type="number" id="edit-voucher-minutes" min="1" step="1" value="' + v.duration_minutes + '"></div>' +
+            '<div class="form-group"><label for="edit-voucher-price">Price (\u20b1)</label>' +
+            '<input type="number" id="edit-voucher-price" min="0" step="1" value="' + (v.price || 0) + '"></div>' +
+            '<div class="form-group"><label for="edit-voucher-status">Status</label>' +
+            '<select id="edit-voucher-status">' +
+                '<option value="unused"' + (v.status === 'unused' ? ' selected' : '') + '>unused</option>' +
+                '<option value="disabled"' + (v.status === 'disabled' ? ' selected' : '') + '>disabled</option>' +
+            '</select>' +
+            (v.status === 'used' ? '<div style="font-size:11px;color:#ffd700;margin-top:4px;">This voucher was already redeemed. Setting it back to unused re-issues the code (clears the session binding).</div>' : '') +
+            '</div>' +
+            '<div class="form-group"><label for="edit-voucher-notes">Notes</label>' +
+            '<input type="text" id="edit-voucher-notes" value="' + voucherEsc(v.notes || '') + '"></div>' +
+            '<div style="display:flex;gap:8px;margin-top:14px;">' +
+                '<button class="btn btn-primary" style="flex:1;" onclick="submitEditVoucher(' + v.id + ')">Save</button>' +
+                '<button class="btn btn-ghost" style="flex:1;" onclick="closeEditVoucherModal()">Cancel</button>' +
+            '</div>' +
+        '</div>';
+    document.body.appendChild(overlay);
+}
+
+function closeEditVoucherModal() {
+    var overlay = document.getElementById('edit-voucher-modal-overlay');
+    if (overlay) overlay.remove();
+}
+
+async function submitEditVoucher(id) {
+    var minutes = parseInt(document.getElementById('edit-voucher-minutes').value, 10);
+    var price = parseFloat(document.getElementById('edit-voucher-price').value);
+    var status = document.getElementById('edit-voucher-status').value;
+    var notes = document.getElementById('edit-voucher-notes').value.trim();
+
+    if (isNaN(minutes) || minutes < 1) {
+        showNotification('Duration must be at least 1 minute', 'error');
+        return;
+    }
+    if (isNaN(price) || price < 0) {
+        showNotification('Price cannot be negative', 'error');
+        return;
+    }
+
+    try {
+        await apiCall('PATCH', '/admin/vouchers/' + id, {
+            duration_minutes: minutes,
+            price: price,
+            status: status,
+            notes: notes
+        });
+        showNotification('Voucher updated', 'success');
+        closeEditVoucherModal();
+        loadVouchers();
+    } catch (e) {
+        if (e.message !== 'Unauthorized') showNotification(e.message || 'Failed to update voucher', 'error');
+    }
+}
+
+async function deleteVoucher(id, code) {
+    if (!confirm('Delete voucher ' + code + ' permanently?')) return;
+    try {
+        await apiCall('DELETE', '/admin/vouchers/' + id);
+        showNotification('Voucher deleted', 'success');
+        loadVouchers();
+    } catch (e) {
+        if (e.message !== 'Unauthorized') showNotification(e.message || 'Failed to delete voucher', 'error');
+    }
+}
+
+// ============================================================
+// VOUCHER PRINTING (batch print templates + QR codes)
+// ============================================================
+var _printTemplate = 'premium';
+var _printVouchers = [];
+var _printBatch = '';
+
+async function openPrintBatchModal(batchCode) {
+    if (!batchCode) { showNotification('No batch code', 'error'); return; }
+    try {
+        var res = await apiCall('GET', '/admin/vouchers?batch=' + encodeURIComponent(batchCode) + '&limit=500');
+        var vouchers = (res && res.data) || [];
+        if (!vouchers.length) { showNotification('No vouchers in batch ' + batchCode, 'error'); return; }
+        _printBatch = batchCode;
+        _printVouchers = vouchers;
+        showPrintModal();
+    } catch (e) {
+        if (e.message !== 'Unauthorized') showNotification(e.message || 'Failed to load batch', 'error');
+    }
+}
+
+function showPrintModal() {
+    closePrintModal();
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'voucher-print-overlay';
+    overlay.innerHTML =
+        '<div class="modal-card" style="max-width:960px;max-height:94vh;overflow-y:auto;">' +
+            '<div class="form-title">🖨️ Print Vouchers — Batch <span style="font-family:monospace;">' + voucherEsc(_printBatch) + '</span> <span style="color:#888;font-weight:400;">(' + _printVouchers.length + ' pcs)</span></div>' +
+            '<div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap;">' +
+                '<span style="font-size:12px;color:#888;">Template:</span>' +
+                '<button class="btn btn-sm btn-ghost voucher-tpl-btn" data-tpl="premium" onclick="setPrintTemplate(\'premium\')">✨ Premium Dark</button>' +
+                '<button class="btn btn-sm btn-ghost voucher-tpl-btn" data-tpl="classic" onclick="setPrintTemplate(\'classic\')">📄 Classic Light</button>' +
+                '<button class="btn btn-sm btn-ghost voucher-tpl-btn" data-tpl="ticket" onclick="setPrintTemplate(\'ticket\')">🎫 Compact Ticket</button>' +
+            '</div>' +
+            '<div id="voucher-print-slot" style="background:#fff;border-radius:8px;padding:12px;"></div>' +
+            '<div style="display:flex;gap:8px;margin-top:14px;">' +
+                '<button class="btn btn-primary" style="flex:1;" onclick="printVouchersNow()">🖨️ Print ' + _printVouchers.length + ' Voucher(s)</button>' +
+                '<button class="btn btn-ghost" onclick="closePrintModal()">Close</button>' +
+            '</div>' +
+        '</div>';
+    document.body.appendChild(overlay);
+    setPrintTemplate(_printTemplate);
+}
+
+function closePrintModal() {
+    var overlay = document.getElementById('voucher-print-overlay');
+    if (overlay) overlay.remove();
+}
+
+function setPrintTemplate(tpl) {
+    _printTemplate = tpl;
+    var btns = document.querySelectorAll('.voucher-tpl-btn');
+    for (var i = 0; i < btns.length; i++) {
+        var active = btns[i].getAttribute('data-tpl') === tpl;
+        btns[i].style.background = active ? 'rgba(0,255,136,0.15)' : '';
+        btns[i].style.borderColor = active ? 'rgba(0,255,136,0.4)' : '';
+        btns[i].style.color = active ? '#00ff88' : '';
+    }
+    renderPrintArea();
+}
+
+// Printer-safe: plain text only (no emoji) inside the cards.
+function buildPrintCard(v) {
+    var code = voucherEsc(v.code);
+    var dur = voucherEsc(formatVoucherDuration(v.duration_minutes));
+    var price = voucherEsc(formatVoucherPrice(v.price));
+    var batch = voucherEsc(v.batch_code || '');
+    if (_printTemplate === 'ticket') {
+        return '<div class="voucher-print-card tpl-ticket">' +
+            '<div class="vp-qr"></div>' +
+            '<div class="vp-ticket-info">' +
+                '<div class="vp-brand">WiFi Voucher</div>' +
+                '<div class="vp-code">' + code + '</div>' +
+                '<div class="vp-badges"><span class="vp-badge">' + dur + '</span><span class="vp-badge">' + price + '</span><span class="vp-badge">' + batch + '</span></div>' +
+            '</div>' +
+        '</div>';
+    }
+    return '<div class="voucher-print-card tpl-' + _printTemplate + '">' +
+        '<div class="vp-head"><div class="vp-brand">WiFi Voucher</div><div class="vp-batch">' + batch + '</div></div>' +
+        '<div class="vp-body">' +
+            '<div class="vp-left">' +
+                '<div class="vp-code">' + code + '</div>' +
+                '<div class="vp-badges"><span class="vp-badge">' + dur + '</span><span class="vp-badge">' + price + '</span></div>' +
+            '</div>' +
+            '<div class="vp-qr"></div>' +
+        '</div>' +
+        '<div class="vp-foot">Scan the QR or enter the code on the WiFi portal</div>' +
+    '</div>';
+}
+
+function renderPrintArea() {
+    var slot = document.getElementById('voucher-print-slot');
+    if (!slot) return;
+    var html = '<div class="voucher-print-grid" id="voucher-print-area">';
+    for (var i = 0; i < _printVouchers.length; i++) html += buildPrintCard(_printVouchers[i]);
+    html += '</div>';
+    slot.innerHTML = html;
+    // QR points at this portal with the code pre-filled.
+    var portalBase = window.location.origin + '/?voucher=';
+    var area = document.getElementById('voucher-print-area');
+    var slots = area.querySelectorAll('.vp-qr');
+    for (var k = 0; k < slots.length; k++) {
+        var img = document.createElement('img');
+        img.src = voucherQRDataURL(portalBase + encodeURIComponent(_printVouchers[k].code), _printTemplate === 'ticket' ? 96 : 110);
+        img.alt = _printVouchers[k].code;
+        slots[k].appendChild(img);
+    }
+}
+
+function printVouchersNow() {
+    var area = document.getElementById('voucher-print-area');
+    if (!area) return;
+    var host = document.getElementById('voucher-print-host');
+    if (!host) {
+        host = document.createElement('div');
+        host.id = 'voucher-print-host';
+        document.body.appendChild(host);
+    }
+    host.innerHTML = area.innerHTML;
+    document.body.classList.add('voucher-printing');
+    window.print();
+    document.body.classList.remove('voucher-printing');
+    host.innerHTML = '';
 }
 
 // ============================================================

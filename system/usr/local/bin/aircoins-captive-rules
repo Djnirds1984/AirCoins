@@ -36,7 +36,33 @@ set -u
 # ============================================
 # Upstream resolver handed to authorized clients (their port 53
 # traffic is DNAT'ed here, bypassing the wildcard portal hijack).
-UPSTREAM_DNS="8.8.8.8"
+#
+# Auto-detected from the gateway's own resolver so it works on any
+# ISP (many Philippine ISPs block/reject external resolvers like
+# 8.8.8.8, which leaves authorized clients with dead DNS). A manual
+# UPSTREAM_DNS in /etc/pisowifi/captive.conf always wins.
+detect_upstream_dns() {
+    local d=""
+    # 1) systemd-resolved per-link servers (skips the 127.0.0.53 stub)
+    if command -v resolvectl >/dev/null 2>&1; then
+        d=$(resolvectl dns 2>/dev/null \
+            | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+            | grep -v '^127\.' | head -1)
+        [ -n "$d" ] && { echo "$d"; return; }
+    fi
+    # 2) the real upstream file behind the stub resolver
+    if [ -f /run/systemd/resolve/resolv.conf ]; then
+        d=$(awk '/^nameserver/ && $2 !~ /^127\./ {print $2; exit}' \
+            /run/systemd/resolve/resolv.conf)
+        [ -n "$d" ] && { echo "$d"; return; }
+    fi
+    # 3) plain /etc/resolv.conf (ignore loopback stubs)
+    d=$(awk '/^nameserver/ && $2 !~ /^127\./ {print $2; exit}' /etc/resolv.conf)
+    [ -n "$d" ] && { echo "$d"; return; }
+    # 4) last resort
+    echo "8.8.8.8"
+}
+UPSTREAM_DNS=$(detect_upstream_dns)
 
 # Leave empty to auto-detect the uplink from the default route.
 WAN_IFACE=""
@@ -48,6 +74,30 @@ CAPTIVE_CONF="/etc/pisowifi/captive.conf"
 NAT_CHAIN="AIRCOINS_CAPTIVE"
 FWD_CHAIN="AIRCOINS_FORWARD"
 STATE_DIR="/var/lib/pisowifi/captive"
+
+# Port of the AirCoins Go API. Authorized clients' cached captive probes
+# (still addressed to the gateway IP) are REDIRECTed here so the API's
+# ProbeRelease handler can answer them with the exact success content each
+# OS expects. Must match the API listen port (systemd: PORT, default 8080).
+API_PORT="${AIRCOINS_API_PORT:-8080}"
+
+# Probe paths mirrored from lighttpd.conf's captive redirect list and the
+# Go ProbeRelease handler. Keep all three in sync.
+PROBE_PATHS=(
+    "/hotspot-detect.html"
+    "/library/test/success.html"
+    "/canonical.html"
+    "/generate_204"
+    "/gen_204"
+    "/generate204"
+    "/mobile/status.php"
+    "/connecttest.txt"
+    "/ncsi.txt"
+    "/success.txt"
+    "/nm-check.txt"
+    "/check_network_status.txt"
+    "/kindle-wifi/wifistub.html"
+)
 
 # ============================================
 # LOGGING
@@ -306,14 +356,27 @@ flush_client_conntrack() {
 
 # Removes the whitelist rules for a MAC (used by both unauth and
 # auth, so re-authorizing cannot leave rules in the wrong order).
+#
+# Rules are deleted by MAC pattern, NOT by exact rule spec: the DNAT
+# destination embedded in the DNS rules depends on UPSTREAM_DNS at the
+# time of auth, and that value can change between auth and unauth
+# (captive.conf edits, resolver auto-detect results). Exact-spec deletes
+# would silently miss stale variants and leave orphan rules that divert
+# the client's DNS to a dead resolver forever — no popup, no internet.
 remove_auth_rules() {
-    local mac="$1"
-    delete_rule nat "$NAT_CHAIN" -p udp --dport 53 -m mac --mac-source "$mac" \
-        -j DNAT --to-destination "$UPSTREAM_DNS:53"
-    delete_rule nat "$NAT_CHAIN" -p tcp --dport 53 -m mac --mac-source "$mac" \
-        -j DNAT --to-destination "$UPSTREAM_DNS:53"
-    delete_rule nat "$NAT_CHAIN" -m mac --mac-source "$mac" -j RETURN
-    delete_rule filter "$FWD_CHAIN" -m mac --mac-source "$mac" -j ACCEPT
+    local mac="$1" line
+    while :; do
+        line=$(iptables -t nat -S "$NAT_CHAIN" 2>/dev/null |
+            grep -- "--mac-source $mac" | tail -1)
+        [ -z "$line" ] && break
+        eval "iptables -t nat -D $NAT_CHAIN ${line#-A $NAT_CHAIN }" 2>/dev/null || break
+    done
+    while :; do
+        line=$(iptables -S "$FWD_CHAIN" 2>/dev/null |
+            grep -- "--mac-source $mac" | tail -1)
+        [ -z "$line" ] && break
+        eval "iptables -D $FWD_CHAIN ${line#-A $FWD_CHAIN }" 2>/dev/null || break
+    done
 }
 
 cmd_auth() {
@@ -330,8 +393,30 @@ cmd_auth() {
     remove_auth_rules "$mac"
 
     # Inserted at position 1 each time, so the resulting top-down
-    # order is: udp/53 -> upstream, tcp/53 -> upstream, RETURN.
+    # order is: udp/53 -> upstream, tcp/53 -> upstream,
+    # probe release (x N), RETURN.
     insert_rule nat "$NAT_CHAIN" -m mac --mac-source "$mac" -j RETURN
+
+    # --- Probe release ---------------------------------------------
+    # iOS caches the hijacked DNS answer (captive.apple.com -> gateway
+    # IP) while captive and keeps re-probing that IP AFTER payment.
+    # Without an intercept, those probes land on lighttpd and get 302'd
+    # back to the portal, so the iPhone never drops its captive state
+    # (Android re-resolves DNS and escapes on its own). Redirect probe
+    # requests still aimed at a LOCAL address to the Go API, which
+    # answers with the exact success content each OS expects. The path
+    # is matched WITHOUT a "GET " prefix because some clients send
+    # absolute-form request lines (GET http://host/path). The MAC +
+    # LOCAL-dst + port-80 constraints make a stray match impossible in
+    # practice. Real-internet destinations (addrtype not LOCAL) fall
+    # through to RETURN and are forwarded normally.
+    local p
+    for p in "${PROBE_PATHS[@]}"; do
+        insert_rule nat "$NAT_CHAIN" -p tcp --dport 80 -m mac --mac-source "$mac" \
+            -m addrtype --dst-type LOCAL -m string --algo bm \
+            --string "$p" -j REDIRECT --to-ports "$API_PORT"
+    done
+
     insert_rule nat "$NAT_CHAIN" -p tcp --dport 53 -m mac --mac-source "$mac" \
         -j DNAT --to-destination "$UPSTREAM_DNS:53"
     insert_rule nat "$NAT_CHAIN" -p udp --dport 53 -m mac --mac-source "$mac" \

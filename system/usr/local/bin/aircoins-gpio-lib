@@ -22,7 +22,8 @@
 # Provides: detect_board, get_gpio_method, pin_to_gpio, pin_to_label,
 #           pin_conflict_note, gpio_chip_name, gpio_line_busy,
 #           gpio_read, gpio_setup_input, gpio_wait_falling_edge,
-#           gpio_test_pin, get_available_pins, get_pin_labels
+#           gpio_stream_falling_edges, gpio_test_pin, get_available_pins,
+#           get_pin_labels
 # ============================================
 
 # Guard against double-sourcing
@@ -544,6 +545,30 @@ gpio_wait_falling_edge() {
         124) return 1 ;;   # window elapsed (timeout killed gpiomon)
         *)   return 2 ;;   # gpiomon refused the line (busy / bad syntax)
     esac
+}
+
+# gpio_stream_falling_edges <physical pin> <seconds>
+# Runs ONE long-lived gpiomon for <seconds> and prints one line to stdout
+# per falling edge (the monitor keeps the line claimed the whole time, so
+# no edge can fall into a restart gap). Blocks until the timeout elapses.
+#   returns 0 = timeout elapsed, 124-style non-zero = gpiomon died early
+#             (line busy / unsupported), 2 = not supported
+gpio_stream_falling_edges() {
+    local pin=$1 seconds=$2 gpio_num chip
+
+    command -v gpiomon &>/dev/null || return 2
+    command -v timeout &>/dev/null || return 2
+
+    gpio_num=$(pin_to_gpio "$pin") || return 2
+    chip=$(gpio_chip_name)
+
+    if [ "$(gpiod_major)" = "2" ]; then
+        timeout "$seconds" gpiomon --edges falling \
+            -c "$chip" "$gpio_num" 2>/dev/null
+    else
+        timeout "$seconds" gpiomon --falling-edge \
+            "$chip" "$gpio_num" 2>/dev/null
+    fi
 }
 
 # gpio_test_pin <physical pin>

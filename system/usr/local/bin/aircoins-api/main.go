@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -31,6 +32,23 @@ func main() {
 	defer models.DB.Close()
 
 	log.Println("Connected to PostgreSQL database")
+
+	// Apply idempotent schema fixes. OTA updates replace the binary but
+	// never run migrations.sql, so the API must self-heal any column a
+	// newer release expects (e.g. gpio_config.debounce_ms, v1.17.2).
+	models.EnsureSchema()
+
+	// Restart the GPIO coin listener. OTA updates shipped by older API
+	// binaries replaced /usr/local/bin/gpio-coin-listener on disk but
+	// never restarted its service, so the old lossy pulse code stayed in
+	// memory and multi-peso coins kept under-counting. The API is always
+	// restarted by the update script (and on every boot), which makes
+	// this the reliable moment to load the listener that is on disk.
+	if out, err := exec.Command("systemctl", "restart", "gpio-coin-listener").CombinedOutput(); err != nil {
+		log.Printf("WARNING: gpio-coin-listener restart failed: %v (%s)", err, strings.TrimSpace(string(out)))
+	} else {
+		log.Println("gpio-coin-listener restarted to load the on-disk version")
+	}
 
 	// ── License system ──────────────────────────────────────────────────
 	licenseHandler := handlers.NewLicenseHandler(models.DB)
@@ -72,6 +90,15 @@ func main() {
 	// waiting for the admin to visit the portal page.
 	handlers.ApplyAntiHotspotOnStartup()
 
+	// Heal all enabled portals on boot: restore IP, dnsmasq, and captive
+	// iptables rules. This ensures the captive portal survives reboots
+	// without requiring the admin to visit the portal page first.
+	handlers.HealAllPortalsOnBoot()
+
+	// Restore saved WAN config on boot: writes systemd-networkd configs
+	// for static/VLAN modes so the WAN settings survive reboots.
+	handlers.RestoreWANOnBoot()
+
 	// Ensure the audio upload directory exists.
 	if err := handlers.EnsureAudioDir(); err != nil {
 		log.Printf("WARNING: audio directory not available: %v", err)
@@ -88,6 +115,7 @@ func main() {
 	appearanceHandler := &handlers.AppearanceHandler{DB: models.DB}
 	qdiscHandler := &handlers.QdiscHandler{DB: models.DB}
 	sessionAdminHandler := &handlers.SessionAdminHandler{DB: models.DB}
+	voucherHandler := &handlers.VoucherHandler{DB: models.DB}
 
 	// Inject LicenseHandler into SessionHandler so /api/status can report
 	// whether the license is valid to portal clients.
@@ -159,6 +187,14 @@ func main() {
 	mux.HandleFunc("/api/session/ban-status", sessionHandler.BanStatus)
 	mux.Handle("/api/admin/session/create", adminProtected(sessionHandler.AdminCreate))
 
+	// Voucher routes: redeem is PUBLIC (portal-facing, caller identified
+	// by its own IP/MAC, same trust model as /api/session/start); CRUD is
+	// admin-only.
+	mux.HandleFunc("/api/session/redeem", sessionHandler.RedeemVoucher)
+	mux.Handle("/api/admin/vouchers", adminProtected(voucherHandler.List))
+	mux.Handle("/api/admin/vouchers/generate", adminProtected(voucherHandler.Generate))
+	mux.Handle("/api/admin/vouchers/", adminProtected(voucherHandler.Dispatch))
+
 	// GPIO routes
 	mux.HandleFunc("/api/gpio/config", gpioHandler.Config)
 	mux.HandleFunc("/api/gpio/test", gpioHandler.Test)
@@ -168,6 +204,16 @@ func main() {
 	mux.HandleFunc("/api/coinslot/arm", coinslotHandler.Arm)
 	mux.HandleFunc("/api/coinslot/disarm", coinslotHandler.Disarm)
 	mux.HandleFunc("/api/coinslot/status", coinslotHandler.Status)
+
+	// Probe release responder (PUBLIC). Not browsed by humans:
+	// aircoins-captive-rules auth installs per-MAC REDIRECT rules that
+	// send an authorized client's cached captive probes (captive.apple.com
+	// etc. still resolving to the gateway IP) to these paths. Answering
+	// them with the exact expected success content is what makes iOS (and
+	// Windows/Android) drop their captive state after paying.
+	for _, p := range handlers.ProbeReleasePaths {
+		mux.HandleFunc(p, handlers.ProbeRelease)
+	}
 
 	// Pricing routes
 	mux.HandleFunc("/api/pricing", pricingHandler.Handle)

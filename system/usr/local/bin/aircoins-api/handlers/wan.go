@@ -726,3 +726,110 @@ func removeStaticFromDhcpcd(iface string) error {
 	}
 	return os.WriteFile(confPath, []byte(cleaned), 0644)
 }
+
+// ============================================
+// STARTUP RESTORE
+// ============================================
+
+// RestoreWANOnBoot loads the saved WAN config from the database and
+// re-applies it to the OS. For static mode, it writes a systemd-networkd
+// config so the IP persists across reboots. For DHCP/VLAN modes, it
+// ensures the interface is configured on boot.
+func RestoreWANOnBoot() {
+	cfg := loadWANConfig()
+	if cfg.Mode == "" || cfg.Mode == "dhcp" {
+		// DHCP mode: OS handles this automatically via dhclient/dhcpcd
+		log.Printf("RestoreWANOnBoot: DHCP mode, OS handles automatically")
+		return
+	}
+
+	wanIface := detectWANIface()
+	if wanIface == "" {
+		log.Printf("RestoreWANOnBoot: no WAN interface detected, skipping")
+		return
+	}
+
+	switch cfg.Mode {
+	case "static":
+		if cfg.StaticConfig == nil {
+			log.Printf("RestoreWANOnBoot: static mode but no config saved")
+			return
+		}
+		// Write systemd-networkd config for static IP so it survives reboots
+		if err := writeStaticNetworkd(wanIface, cfg.StaticConfig); err != nil {
+			log.Printf("RestoreWANOnBoot: failed to write networkd config: %v", err)
+		} else {
+			log.Printf("RestoreWANOnBoot: static IP %s/%s persisted to networkd for %s",
+				cfg.StaticConfig.IP, cfg.StaticConfig.Subnet, wanIface)
+		}
+	case "vlan_dhcp":
+		if cfg.VLANID == nil {
+			log.Printf("RestoreWANOnBoot: vlan_dhcp mode but no VLAN ID saved")
+			return
+		}
+		// Create VLAN interface and write networkd config for DHCP
+		vlanName := fmt.Sprintf("%s.%d", wanIface, *cfg.VLANID)
+		if err := writeVLAN_DHCPNetworkd(wanIface, vlanName, *cfg.VLANID); err != nil {
+			log.Printf("RestoreWANOnBoot: failed to write VLAN networkd config: %v", err)
+		} else {
+			log.Printf("RestoreWANOnBoot: VLAN %s DHCP persisted to networkd", vlanName)
+		}
+	}
+}
+
+// writeStaticNetworkd writes a systemd-networkd config for static IP.
+// This ensures the static IP survives reboots.
+func writeStaticNetworkd(iface string, sc *models.WANStaticConfig) error {
+	cidr := subnetToCIDR(sc.Subnet)
+	content := fmt.Sprintf(`[Match]
+Name=%s
+
+[Network]
+Address=%s/%s
+Gateway=%s
+DNS=%s
+DNS=%s
+`, iface, sc.IP, cidr, sc.Gateway, sc.DNS1, sc.DNS2)
+
+	path := fmt.Sprintf("/etc/systemd/network/03-aircoins-wan-%s.network", iface)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return err
+	}
+	exec.Command("networkctl", "reload").Run()
+	return nil
+}
+
+// writeVLAN_DHCPNetworkd writes a systemd-networkd config for a VLAN
+// interface that uses DHCP. This ensures the VLAN and DHCP survive reboots.
+func writeVLAN_DHCPNetworkd(parentIface, vlanName string, vlanID int) error {
+	// First, create the VLAN device if it doesn't exist
+	vlanDev := fmt.Sprintf("/etc/systemd/network/02-aircoins-%s.netdev", vlanName)
+	vlanDevContent := fmt.Sprintf(`[NetDev]
+Name=%s
+Kind=vlan
+
+[VLAN]
+Id=%d
+`, vlanName, vlanID)
+	if err := os.WriteFile(vlanDev, []byte(vlanDevContent), 0644); err != nil {
+		return fmt.Errorf("failed to write netdev: %w", err)
+	}
+
+	// Then, configure DHCP on the VLAN interface
+	vlanNetwork := fmt.Sprintf("/etc/systemd/network/03-aircoins-%s.network", vlanName)
+	vlanNetworkContent := fmt.Sprintf(`[Match]
+Name=%s
+
+[Network]
+DHCP=yes
+
+[Link]
+RequiredForOnline=no
+`, vlanName)
+	if err := os.WriteFile(vlanNetwork, []byte(vlanNetworkContent), 0644); err != nil {
+		return fmt.Errorf("failed to write network: %w", err)
+	}
+
+	exec.Command("networkctl", "reload").Run()
+	return nil
+}

@@ -280,15 +280,64 @@ func applyCaptiveRules(action, iface, ipCIDR string, antiHotspot bool) {
 	log.Printf("applyCaptiveRules: %s captive rules for %s (%s, anti_hotspot=%v)", action, iface, gateway, antiHotspot)
 }
 
-// applyTTL1 sets TTL=1 on ALL packets from the portal interface.
-// Uses mangle POSTROUTING so it affects packets after routing.
-// This is exactly like MikroTik hotspot server TTL=1.
+// applyTTL1 sets TTL=1 on ALL packets going out this interface (the
+// download path). Uses mangle POSTROUTING so it affects packets after
+// routing. This is exactly like MikroTik hotspot server TTL=1.
+//
+// The download-path stamp needs NO per-session bypass: a directly
+// connected client receives TTL=1 packets fine (one hop), while a
+// client that is actually a hotspot/router must forward them and drops
+// them (TTL expires), which is the anti-tethering effect.
 func applyTTL1(iface string) {
 	// Create the mangle chain
 	if _, err := exec.Command("iptables", "-t", "mangle", "-S", "AIRCOINS_TTL").CombinedOutput(); err != nil {
 		if out, err := exec.Command("iptables", "-t", "mangle", "-N", "AIRCOINS_TTL").CombinedOutput(); err != nil {
 			log.Printf("applyTTL1: failed to create chain: %v — %s", err, string(out))
 			return
+		}
+	}
+
+	// Purge legacy upstream-design rules for this interface. Old AirCoins
+	// builds (and manual iptables setups) stamped TTL=1 on INCOMING client
+	// packets (-i) and relied on a per-MAC RETURN bypass added at auth.
+	// The current build never manages those bypasses, so any leftover -i
+	// stamp silently kills a paying client's internet the moment its
+	// bypass is missing (iPhone pays, gets TTL=1 upstream, ISP router
+	// drops everything beyond itself). Delete every -i rule for this
+	// interface — TTL stamps and MAC bypasses alike.
+	if out, err := exec.Command("iptables", "-t", "mangle", "-S", "AIRCOINS_TTL").CombinedOutput(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			if !strings.HasPrefix(line, "-A AIRCOINS_TTL -i "+iface+" ") {
+				continue
+			}
+			spec := strings.Fields(strings.TrimPrefix(line, "-A AIRCOINS_TTL "))
+			args := append([]string{"-t", "mangle", "-D", "AIRCOINS_TTL"}, spec...)
+			exec.Command("iptables", args...).Run()
+			log.Printf("applyTTL1: purged legacy upstream rule: %s", line)
+		}
+	}
+
+	// Drop a stale PREROUTING hook left by the legacy design (the chain
+	// is hooked in POSTROUTING below; a PREROUTING jump is useless for
+	// -o rules and only ever carried the legacy -i stamps).
+	for exec.Command("iptables", "-t", "mangle", "-C", "PREROUTING", "-j", "AIRCOINS_TTL").Run() == nil {
+		if exec.Command("iptables", "-t", "mangle", "-D", "PREROUTING", "-j", "AIRCOINS_TTL").Run() != nil {
+			break
+		}
+		log.Printf("applyTTL1: removed stale PREROUTING hook for AIRCOINS_TTL")
+	}
+
+	// Remove stray direct POSTROUTING TTL stamps for this interface. These
+	// are manual duplicates of this chain's own rule (commonly added by
+	// hand); they double-stamp and — worse — are typically frozen to disk
+	// with netfilter-persistent, which resurrects stale whitelists on boot.
+	// AirCoins owns the stamp: managed chain + re-applied on every boot.
+	for _, ttl := range []string{"1", "64"} {
+		for exec.Command("iptables", "-t", "mangle", "-C", "POSTROUTING", "-o", iface, "-j", "TTL", "--ttl-set", ttl).Run() == nil {
+			if exec.Command("iptables", "-t", "mangle", "-D", "POSTROUTING", "-o", iface, "-j", "TTL", "--ttl-set", ttl).Run() != nil {
+				break
+			}
+			log.Printf("applyTTL1: removed stray manual POSTROUTING TTL rule for %s (ttl-set %s)", iface, ttl)
 		}
 	}
 
@@ -311,10 +360,19 @@ func applyTTL1(iface string) {
 	log.Printf("applyTTL1: TTL=1 set on ALL packets to %s (mangle POSTROUTING)", iface)
 }
 
-// removeTTL1 removes the TTL=1 rule for a portal interface.
+// removeTTL1 removes the TTL=1 rule for a portal interface. When the
+// last portal's rule is gone, the POSTROUTING hook is removed too.
 func removeTTL1(iface string) {
 	exec.Command("iptables", "-t", "mangle", "-D", "AIRCOINS_TTL", "-o", iface, "-j", "TTL", "--ttl-set", "1").Run()
 	log.Printf("removeTTL1: removed TTL=1 for %s", iface)
+
+	// If no TTL stamps remain in the chain, unhook it from POSTROUTING.
+	if out, err := exec.Command("iptables", "-t", "mangle", "-S", "AIRCOINS_TTL").CombinedOutput(); err == nil {
+		if !strings.Contains(string(out), "--ttl-set") {
+			exec.Command("iptables", "-t", "mangle", "-D", "POSTROUTING", "-j", "AIRCOINS_TTL").Run()
+			log.Printf("removeTTL1: chain empty, POSTROUTING hook removed")
+		}
+	}
 }
 
 // writeNetworkdConfig writes a per-interface systemd-networkd .network file
@@ -974,6 +1032,29 @@ func ApplyAntiHotspotOnStartup() {
 		log.Printf("ApplyAntiHotspotOnStartup: TTL=1 applied for %d portal(s)", applied)
 	} else {
 		log.Printf("ApplyAntiHotspotOnStartup: no portals with anti-hotspot enabled")
+	}
+}
+
+// HealAllPortalsOnBoot iterates every ENABLED portal from portals.conf
+// and calls healPortal to restore the full stack: IP, networkd file,
+// dnsmasq config+service, and captive iptables rules. This ensures the
+// captive portal survives reboots without requiring the admin to visit
+// the portal page first.
+func HealAllPortalsOnBoot() {
+	entries := readPortalConfig()
+	healed := 0
+	for _, e := range entries {
+		if !e.Enabled {
+			continue
+		}
+		log.Printf("HealAllPortalsOnBoot: healing portal %s (%s)", e.Interface, e.IPCIDR)
+		healPortal(e)
+		healed++
+	}
+	if healed > 0 {
+		log.Printf("HealAllPortalsOnBoot: healed %d portal(s)", healed)
+	} else {
+		log.Printf("HealAllPortalsOnBoot: no enabled portals to heal")
 	}
 }
 

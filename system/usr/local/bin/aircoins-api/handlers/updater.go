@@ -450,11 +450,20 @@ fi
 [ -f "$DIR/admin.html" ] && sudo cp "$DIR/admin.html" /var/www/html/admin.html
 [ -f "$DIR/index.html" ] && sudo cp "$DIR/index.html" /var/www/html/index.html
 echo "HTML updated"
-# Update scripts
-for s in gpio-coin-listener pisowifi-api-update pisowifi-ctl pisowifi-session-manager; do
+# Update scripts (aircoins-gpio-lib MUST be here: gpio-coin-listener
+# sources it for the edge-stream helpers; without it the listener falls
+# back to lossy polling after an update. aircoins-captive-rules MUST be
+# here too: it carries the per-MAC captive release rules).
+for s in gpio-coin-listener aircoins-gpio-lib aircoins-captive-rules pisowifi-api-update pisowifi-ctl pisowifi-session-manager; do
     [ -f "$DIR/system/usr/local/bin/$s" ] && sudo cp "$DIR/system/usr/local/bin/$s" /usr/local/bin/$s && sudo chmod +x /usr/local/bin/$s
 done
 echo "Scripts updated"
+# Restart the coin listener so the new script+lib actually load into
+# memory. bash daemons keep executing the OLD code they read at startup
+# until restarted, so without this step every listener fix shipped via
+# OTA stays dead until the device is rebooted.
+sudo systemctl restart gpio-coin-listener 2>/dev/null || true
+echo "gpio-coin-listener restarted"
 # Update recovery
 [ -f "$DIR/aircoins-recover.sh" ] && sudo cp "$DIR/aircoins-recover.sh" /opt/aircoins/aircoins-recover.sh && sudo chmod +x /opt/aircoins/aircoins-recover.sh
 # Update CGI

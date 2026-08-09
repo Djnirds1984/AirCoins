@@ -610,6 +610,17 @@
             <div>
                 <button class="rates-btn" onclick="openRatesModal()">View Rates</button>
             </div>
+
+            <!-- VOUCHER REDEEM -->
+            <div class="status-card" style="margin-top:12px; text-align:left;">
+                <p style="margin-bottom:8px; color:#aaa; font-size:13px;">Have a voucher? Enter your code:</p>
+                <div style="display:flex; gap:8px;">
+                    <input type="text" id="voucherInput" maxlength="6" placeholder="XXXXXX"
+                           style="flex:1; min-width:0; text-transform:uppercase; letter-spacing:3px; font-family:monospace; font-size:16px; padding:10px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.2); background:rgba(255,255,255,0.06); color:#fff; text-align:center;"
+                           autocomplete="off" spellcheck="false">
+                    <button class="btn btn-primary" id="voucherRedeemBtn" onclick="redeemVoucher()" style="white-space:nowrap;">Use Voucher</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1458,6 +1469,53 @@
                 });
         }
 
+        // ==================== VOUCHER REDEMPTION ====================
+        // Redeems a 6-char voucher code for the CALLING device. The server
+        // identifies the caller by IP/MAC (same trust model as coin
+        // payment), credits the voucher's minutes and binds the voucher
+        // to the session's roaming token — so the subscriber keeps
+        // internet when moving between SSIDs.
+        function redeemVoucher() {
+            var input = document.getElementById('voucherInput');
+            var btn = document.getElementById('voucherRedeemBtn');
+            var code = (input.value || '').trim().toUpperCase();
+            if (code.length !== 6) {
+                showNotification('Please enter the 6-character voucher code', 'error');
+                return;
+            }
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+
+            fetch('/api/session/redeem', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Session-Token': getSessionToken() },
+                body: JSON.stringify({ code: code, session_token: getSessionToken() })
+            })
+                .then(r => r.json().catch(() => ({})).then(body => ({ ok: r.ok, body: body })))
+                .then(res => {
+                    btn.disabled = false;
+                    btn.textContent = 'Use Voucher';
+                    if (!res.ok || !res.body || !res.body.success || !res.body.session) {
+                        var msg = (res.body && res.body.message) || 'Invalid or already used voucher code';
+                        showNotification(msg, 'error');
+                        return;
+                    }
+                    // Bind the roaming token so the session follows the
+                    // device across SSIDs.
+                    if (res.body.session_token) storeSessionToken(res.body.session_token);
+                    input.value = '';
+                    showNotification('Voucher accepted — enjoy your internet!', 'success');
+                    playAudioSafe(audioDonePaying);
+                    applyServerSession(res.body.session, res.body.extended);
+                })
+                .catch(err => {
+                    btn.disabled = false;
+                    btn.textContent = 'Use Voucher';
+                    warnOnce('voucher redeem', err);
+                    showNotification('Could not reach the server to redeem the voucher.', 'error');
+                });
+        }
+
         function closeGpioModal() {
             clearInterval(gpio.countdownInterval);
             if (gpio.statusInterval) {
@@ -1810,6 +1868,19 @@
         // Auto-start API polling when page loads
         startApiPolling();
         updateDebugToken();
+
+        // Pre-fill the voucher input from ?voucher=CODE (printed QR codes
+        // point at this portal URL so customers can redeem with one tap).
+        (function () {
+            try {
+                var qp = new URLSearchParams(window.location.search);
+                var vc = (qp.get('voucher') || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+                if (vc) {
+                    var el = document.getElementById('voucherInput');
+                    if (el) el.value = vc;
+                }
+            } catch (e) { /* ignore — manual entry still works */ }
+        })();
     </script>
 
     <!-- License lockdown overlay — shown when license_required === true -->

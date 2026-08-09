@@ -32,12 +32,18 @@ PIN=$(echo "$POST_DATA" | grep -o '"pin":[0-9]*' | cut -d: -f2)
 COIN_VALUE=$(echo "$POST_DATA" | grep -o '"coin_value":[0-9]*' | cut -d: -f2)
 PULSE_MODE=$(echo "$POST_DATA" | grep -o '"pulse_mode":"[^"]*"' | cut -d'"' -f4)
 BOARD_MODEL=$(echo "$POST_DATA" | grep -o '"board_model":"[^"]*"' | cut -d'"' -f4)
+DEBOUNCE_MS=$(echo "$POST_DATA" | grep -o '"debounce_ms":[0-9]*' | cut -d: -f2)
 
 # Defaults
 PIN=${PIN:-7}
 COIN_VALUE=${COIN_VALUE:-1}
 PULSE_MODE=${PULSE_MODE:-falling}
 BOARD_MODEL=${BOARD_MODEL:-auto}
+DEBOUNCE_MS=${DEBOUNCE_MS:-50}
+
+# Clamp debounce to a sane range (ms)
+[ "$DEBOUNCE_MS" -lt 5 ] 2>/dev/null && DEBOUNCE_MS=5
+[ "$DEBOUNCE_MS" -gt 1000 ] 2>/dev/null && DEBOUNCE_MS=1000
 
 # Validate the physical pin against this board's header map and resolve
 # its label so the log/response show exactly which pad was selected
@@ -65,13 +71,14 @@ COIN_PULSE_PIN=$PIN
 COIN_VALUE=$COIN_VALUE
 PULSE_MODE="$PULSE_MODE"
 BOARD_MODEL="$BOARD_MODEL"
+DEBOUNCE_MS=$DEBOUNCE_MS
 EOF
 
 # Set permissions
 chmod 644 "$CONFIG_FILE"
 
 # Log the change
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] GPIO config updated: physical pin=$PIN${PIN_LABEL:+ ($PIN_LABEL, GPIO $INTERNAL_GPIO)}, Value=P$COIN_VALUE, Mode=$PULSE_MODE, Board=$BOARD_MODEL" >> /var/log/pisowifi/gpio-coin.log
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] GPIO config updated: physical pin=$PIN${PIN_LABEL:+ ($PIN_LABEL, GPIO $INTERNAL_GPIO)}, Value=P$COIN_VALUE, Mode=$PULSE_MODE, Board=$BOARD_MODEL, Debounce=${DEBOUNCE_MS}ms" >> /var/log/pisowifi/gpio-coin.log
 if [ -n "$PIN_NOTE" ]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] WARNING: physical pin $PIN - $PIN_NOTE" >> /var/log/pisowifi/gpio-coin.log
 fi

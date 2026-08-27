@@ -2950,17 +2950,12 @@ function logout() {
 
 function lockDownForLicense(lic) {
     licenseLocked = true;
-    // Hide all nav items except License and Updater
-    // Users need access to Updater to update software when locked
-    document.querySelectorAll('.nav-item').forEach(function(el) {
-        var section = el.getAttribute('data-section');
-        if (section === 'license' || section === 'updater') {
-            el.style.display = 'flex';
-        } else {
-            el.style.display = 'none';
-        }
-    });
+    // Show a warning notification instead of locking down the UI
+    showNotification('License invalid or missing. Please visit the License section to activate.', 'warning');
+    
+    // Auto-navigate to the license section
     showSection('license');
+    
     // Load license status into the UI
     if (lic) updateLicenseUI(lic);
     else loadLicenseStatus();

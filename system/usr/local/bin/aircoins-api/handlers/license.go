@@ -281,10 +281,16 @@ func (h *LicenseHandler) isLicenseValidLocked() bool {
 			return false
 		}
 	case "active":
-		// ok
+		// Check for license expiration
+		if h.state.ExpiresAt != nil && time.Now().After(*h.state.ExpiresAt) {
+			return false
+		}
+		// Active licenses are valid even if heartbeat is stale
+		return true
 	default:
 		return false
 	}
+	// Heartbeat check (only for trials)
 	if h.state.LastSupabaseResponseAt != nil {
 		if time.Since(*h.state.LastSupabaseResponseAt) > 24*time.Hour {
 			return false

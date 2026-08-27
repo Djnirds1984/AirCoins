@@ -4,6 +4,20 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+---
+
+## v1.19.1 — Hotfix: License System Stability & Admin Access
+
+**Release date:** August 2026
+
+### Fixed
+- **Admin panel lockdown** — Resolved an issue where the admin panel would lock users out entirely if the license was missing. The navigation is now always accessible, with a warning notification guiding users to the license section for activation.
+- **License verification logic** — Fixed a bug where "active" licenses were incorrectly invalidated if the device missed its 24-hour heartbeat check. Active licenses are now persistent and valid until their actual expiration date.
+
+### Action required
+Update to v1.19.1 from Admin > System > Update, then reboot.
+
+
 ## v1.19.0 — Voucher Upgrade: Batch Codes, Print Templates, QR Codes
 
 **Release date:** August 2026

@@ -1,44 +1,44 @@
 ﻿{
-    "version":  "v1.19.2",
-    "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Upload Bandwidth Shaping** â€” Refactored traffic control (`qdisc.go`) to add `tc` ingress policing on client interfaces, properly enforcing per-device upload bandwidth limits.\n- **Updater Cache Bypass** â€” Updated the admin interface and updater handler to force a live fetch when clicking the **Check for Updates** button, removing the 1-hour caching delay.\n\n### Action required\nUpdate to v1.19.2 from Admin \u003e System \u003e Update, then reboot.",
-    "sha256":  "7bc42cb0161cc30dcbb15ee54a0d7890b7357a479e31548ef998b06e33474257",
-    "tarball":  "releases/aircoins-v1.19.2.tar.gz",
+    "version":  "v1.21.1",
+    "release_notes":  "- **Voucher printing fixed**: explicit A4 portrait `@page` size (no longer inherits the browser\u0027s last-used Landscape setting) and a fixed 2-column print grid, so vouchers fill the page instead of one-per-sheet.",
+    "sha256":  "0ed1ab47baf25b049af69edb5be8652d76c3c6361b7e49fed47fa1cb64c3216a",
+    "tarball":  "releases/aircoins-v1.21.1.tar.gz",
     "versions":  [
                      {
-                         "released_at":  "2026-08-27T08:55:42Z",
-                         "sha256":  "7bc42cb0161cc30dcbb15ee54a0d7890b7357a479e31548ef998b06e33474257",
-                         "version":  "v1.19.2",
-                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Upload Bandwidth Shaping** â€” Refactored traffic control (`qdisc.go`) to add `tc` ingress policing on client interfaces, properly enforcing per-device upload bandwidth limits.\n- **Updater Cache Bypass** â€” Updated the admin interface and updater handler to force a live fetch when clicking the **Check for Updates** button, removing the 1-hour caching delay.\n\n### Action required\nUpdate to v1.19.2 from Admin \u003e System \u003e Update, then reboot.",
-                         "tarball":  "releases/aircoins-v1.19.2.tar.gz"
+                         "released_at":  "2026-08-29T09:05:45Z",
+                         "sha256":  "0ed1ab47baf25b049af69edb5be8652d76c3c6361b7e49fed47fa1cb64c3216a",
+                         "version":  "v1.21.1",
+                         "release_notes":  "- **Voucher printing fixed**: explicit A4 portrait `@page` size (no longer inherits the browser\u0027s last-used Landscape setting) and a fixed 2-column print grid, so vouchers fill the page instead of one-per-sheet.",
+                         "tarball":  "releases/aircoins-v1.21.1.tar.gz"
                      },
                      {
-                         "released_at":  "2026-08-27T08:48:44Z",
-                         "sha256":  "a9ece51aad8416160c8875e31b4bf0159d8b70e639814fdbbc181b94c27058b3",
-                         "version":  "v1.19.1",
-                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- **Admin panel lockdown** â€” Resolved an issue where the admin panel would lock users out entirely if the license was missing. The navigation is now always accessible, with a warning notification guiding users to the license section for activation.\n- **License verification logic** â€” Fixed a bug where \"active\" licenses were incorrectly invalidated if the device missed its 24-hour heartbeat check. Active licenses are now persistent and valid until their actual expiration date.\n\n### Action required\nUpdate to v1.19.1 from Admin \u003e System \u003e Update, then reboot.",
-                         "tarball":  "releases/aircoins-v1.19.1.tar.gz"
+                         "released_at":  "2026-08-29T08:54:32Z",
+                         "sha256":  "e0c4917449cf5ff33f38074deca78d6b2d37c9dcba10027d18712cd71ac1014a",
+                         "version":  "v1.21.0",
+                         "release_notes":  "- **Vouchers inherit the coin-rate pause rules**: the generator now has Rate Type (Pausable/Consumable) and Pause Expiry (hours/days, disabled for consumables). Rules are stored on the voucher and applied to the session at FIRST redemption only â€” an unused voucher never ages, the pause-expiry clock starts when the code is first used.\n- Voucher table shows pause-rule badges (â± expiry window / C = consumable).\n- New migration: `vouchers.pausable`, `vouchers.expiration_hours`.",
+                         "tarball":  "releases/aircoins-v1.21.0.tar.gz"
                      },
                      {
-                         "released_at":  "2026-08-07T09:57:41Z",
-                         "sha256":  "a90f931d4df072b296980bc85d96b8235ad2bac9e5781ebc5adfa670a57c48e2",
-                         "version":  "v1.19.0",
-                         "release_notes":  "**Release date:** August 2026\n\n### Added\n- **Auto-generated batch codes**: every voucher generation run now stamps all its vouchers with a unique batch code (`B-XXXXXX`, same unambiguous alphabet). The batch code is shown right after generating, with a one-click **Print Batch** button.\n- **Print vouchers by batch**: new print modal opens from the generator result or from the printer icon on any voucher row â€” prints the whole batch at once.\n- **3 beautiful print templates**: âœ¨ Premium Dark (gold-on-black business card), ðŸ“„ Classic Light (clean white/blue), and ðŸŽ« Compact Ticket (thin dashed-cut strip) â€” live preview, 86Ã—54 mm printer-safe cards with page-break protection.\n- **QR code on every printed voucher**: each card carries a scannable QR that opens the portal with the code pre-filled (`/?voucher=CODE`) â€” customers scan and tap \"Use Voucher\".\n- **Built-in offline QR encoder**: full ISO/IEC 18004 byte-mode encoder (EC level M, versions 1â€“10) embedded in the admin page â€” zero external dependencies since the device has no internet; validated with a decoder round-trip before shipping.\n- **Batch column + batch filter** in the voucher table (filter bar and reset included).\n- **Portal auto-fill**: the captive portal pre-fills the voucher input from the `?voucher=` URL parameter (used by the printed QR codes).\n- New `vouchers.batch_code` column + index (migration 018, self-healed on boot â€” OTA updates need no manual SQL).\n\n### Action required\nUpdate to v1.19.0 from Admin \u003e System \u003e Update, then reboot. Vouchers generated before this release keep working; they simply have no batch code (and thus no print button).\n\n---",
-                         "tarball":  "releases/aircoins-v1.19.0.tar.gz"
+                         "released_at":  "2026-08-29T08:38:28Z",
+                         "sha256":  "a234219b4f6945b06ee92b1f7d6c8e706af40c5c33ef0969a191a41b10d07f4c",
+                         "version":  "v1.20.5",
+                         "release_notes":  "- Pricing: coin resolution is now deterministic when two active tiers share the same coin value â€” the longest-duration tier wins (previously an old short tier could arbitrarily steal coins, e.g. a P1=240min tier shadowing a new P1=3-day tier).\n- Pricing: admin UI warns when adding a tier for a coin value that already has an active tier.",
+                         "tarball":  "releases/aircoins-v1.20.5.tar.gz"
                      },
                      {
-                         "released_at":  "2026-08-07T09:06:59Z",
-                         "sha256":  "7e51f7a64e4feae17174003c9501749ae00660ce6fc1a6b6815ddd7a5a9e4b6c",
-                         "version":  "v1.18.1",
-                         "release_notes":  "**Release date:** August 2026\n\n### Added\n- **Price per voucher (â‚±)**: set a sale price when generating a batch; the price is stored on every voucher, shown in a new table column, editable per voucher, and returned on redemption â€” enabling voucher sales reporting. 0 = free/promo.\n- **Custom duration units**: the generator\u0027s \"Custom...\" option now takes a value plus a unit â€” Minutes, Hours, Days, or Months (1 month = 30 days) â€” instead of minutes only.\n- **Voucher dashboard cards**: Total / Available / Redeemed / Disabled counters with icons at the top of the Voucher Management page.\n- New `vouchers.price` column (migration 017, self-healed on boot â€” OTA updates need no manual SQL).\n\n### Changed\n- **Professional Voucher Management UI**: icon-led section titles, pill badges for plan (Time/Monthly) and status (Unused/Used/Disabled), styled generated-code chips, green token highlight, and crisp SVG icons for copy/edit/delete actions.\n- Duration formatting now shows \"1 month\", \"3 days\", \"2 hours\" instead of \"Ã— 30 days\" / \"day(s)\".\n\n### Action required\nUpdate to v1.18.1 from Admin \u003e System \u003e Update, then reboot. Existing vouchers get a price of â‚±0.\n\n---",
-                         "tarball":  "releases/aircoins-v1.18.1.tar.gz"
+                         "released_at":  "2026-08-29T08:25:08Z",
+                         "sha256":  "3fd032de749e7fca0483123ac42e5422e135e55d347afbb7855ab693eb677242",
+                         "version":  "v1.20.4",
+                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- VLAN Management no longer shows working VLANs as \"Down\": VLAN interfaces already live in the kernel but missed by the `ip -d link show type vlan` parse are now recognized by the heal path, and bridge/VLAN interfaces without an IP address report link up via the kernel `LOWER_UP` flag instead of the misleading RFC 2863 operstate.\n\n---",
+                         "tarball":  "releases/aircoins-v1.20.4.tar.gz"
                      },
                      {
-                         "released_at":  "2026-08-07T08:41:49Z",
-                         "sha256":  "412cba8c0c23b4b69e99735e6a7818eb254a02cb6a02a8ed89d7266ca2354457",
-                         "version":  "v1.18.0",
-                         "release_notes":  "**Release date:** August 2026\n\n### Added\n- **Voucher Management page in the admin sidebar** (ðŸŽŸï¸ Vouchers): generate batches of up to 100 unique **6-character alphanumeric codes** (unambiguous alphabet â€” no 0/O/1/I/L), with duration presets (15 min up to 1 day, 7 days) or custom minutes, plus full CRUD: filter by status, search by code/notes, copy, edit (duration/status/notes), and delete.\n- **Monthly subscription vouchers**: the \"Monthly (30 days)\" preset creates 30-day (43,200 min) vouchers marked `plan=monthly` â€” ideal for monthly WiFi subscribers.\n- **Voucher redemption on the captive portal**: the portal page now has a \"Have a voucher? Enter your code\" input. Redeeming a code starts (or extends) the device\u0027s session exactly like a coin payment â€” no coins needed.\n- **Voucher â†” session token binding for SSID roaming**: on redemption the voucher is bound to the resulting session and its roaming `session_token`, so a voucher subscriber keeps internet when moving between your SSIDs/portals (same token-roaming used by coin sessions).\n- New `vouchers` table (migration 016, self-healed on boot â€” OTA updates need no manual SQL).\n- New API endpoints: `POST /api/admin/vouchers/generate`, `GET /api/admin/vouchers`, `GET/PATCH/DELETE /api/admin/vouchers/\u003cid\u003e` (admin-only), and public `POST /api/session/redeem`.\n\n### Security\n- Redemption is atomic (a code can never be double-redeemed); the caller is identified by its own IP/MAC exactly like coin payment â€” a client cannot grant itself time with someone else\u0027s code after use; banned MACs are rejected; per-IP throttling blocks code brute-forcing; failed session creation rolls the voucher back to `unused`.\n\n### Action required\nUpdate to v1.18.0 from Admin \u003e System \u003e Update, then reboot. Open the new **Vouchers** page in the sidebar, generate your first batch, and test by entering a code in the portal\u0027s voucher box.\n\n---",
-                         "tarball":  "releases/aircoins-v1.18.0.tar.gz"
+                         "released_at":  "2026-08-29T08:07:00Z",
+                         "sha256":  "aa7947252d99e8908b018bbb8f7fec422a01fb495817ba6b3771fa0f05a65462",
+                         "version":  "v1.20.3",
+                         "release_notes":  "**Release date:** August 2026\n\n### Changed\n- Pricing tab: duration and pause-expiry inputs now use **Minutes / Hours / Days** unit dropdowns (add form and inline edit row), matching the CCNDS panel layout. Values are converted to minutes/hours on save.\n- Consumable rates: both the expiry input and its unit dropdown are disabled (and forced to 0) when Rate Type is **Consumable**, in the add form and the edit row.\n\n---",
+                         "tarball":  "releases/aircoins-v1.20.3.tar.gz"
                      }
                  ],
-    "released_at":  "2026-08-27T08:55:42Z"
+    "released_at":  "2026-08-29T09:05:45Z"
 }

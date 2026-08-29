@@ -234,8 +234,8 @@ func roundTo2(val float64) float64 {
 	return float64(int(val*100+0.5)) / 100
 }
 
-// ResetSalesReports deletes all sales data: daily_stats, coin_events, and sessions.
-// This is an irreversible operation — use with caution.
+	// ResetSalesReports deletes financial sales data: daily_stats and coin_events.
+// It deliberately preserves the sessions table so active user sessions and device time are never wiped out.
 func (h *ReportsHandler) ResetSalesReports(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -244,7 +244,7 @@ func (h *ReportsHandler) ResetSalesReports(w http.ResponseWriter, r *http.Reques
 
 	// Parse optional scope from request body
 	var req struct {
-		Scope string `json:"scope"` // "all" (default), "daily_stats", "coin_events", "sessions"
+		Scope string `json:"scope"` // "all" (default), "daily_stats", "coin_events"
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -291,19 +291,6 @@ func (h *ReportsHandler) ResetSalesReports(w http.ResponseWriter, r *http.Reques
 		}
 		n, _ := res.RowsAffected()
 		deleted["daily_stats"] = int(n)
-	}
-
-	if scope == "all" || scope == "sessions" {
-		res, err := tx.Exec("DELETE FROM sessions")
-		if err != nil {
-			log.Printf("ResetSalesReports: delete sessions failed: %v", err)
-			sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
-				"success": false, "message": "Failed to delete sessions: " + err.Error(),
-			})
-			return
-		}
-		n, _ := res.RowsAffected()
-		deleted["sessions"] = int(n)
 	}
 
 	if err := tx.Commit(); err != nil {

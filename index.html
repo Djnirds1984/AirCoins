@@ -667,9 +667,7 @@
             <div>
                 <button class="rates-btn" onclick="openRatesModal()">View Rates</button>
             </div>
-            <div>
-                <button class="btn btn-warning" onclick="openPortalCustomizeModal()" style="margin-top:8px; width:100%; max-width:300px;">Customize Portal</button>
-            </div>
+
 
             <!-- VOUCHER REDEEM -->
             <div class="status-card" style="margin-top:12px; text-align:left;">
@@ -1169,6 +1167,17 @@
                             'url("' + img + '") center / cover no-repeat, ' + c.background);
                     } else {
                         rs.setProperty('--pp-bg', c.background);
+                    }
+
+                    const headerImg = PP_BG_RE.test(res.data.header_image || '')
+                        ? res.data.header_image : '';
+                    const headerContainer = document.getElementById('portalHeaderImage');
+                    const headerImgEl = document.getElementById('headerImage');
+                    if (headerImg && headerContainer && headerImgEl) {
+                        headerImgEl.src = headerImg;
+                        headerContainer.style.display = 'block';
+                    } else if (headerContainer) {
+                        headerContainer.style.display = 'none';
                     }
                 })
                 .catch(err => warnOnce('appearance', err));
@@ -1946,44 +1955,8 @@
             } catch (e) { /* ignore — manual entry still works */ }
         })();
 
-        // ==================== PORTAL CUSTOMIZATION ====================
-        function openPortalCustomizeModal() {
-            document.getElementById('portalCustomizeModal').classList.add('active');
-        }
 
-        function closePortalCustomizeModal() {
-            document.getElementById('portalCustomizeModal').classList.remove('active');
-        }
 
-        // ==================== PORTAL HEADER IMAGE ====================
-        // Function to load and display portal header image
-        function loadPortalHeaderImage() {
-            const headerImageContainer = document.getElementById('portalHeaderImage');
-            const headerImage = document.getElementById('headerImage');
-            
-            // Check if there's a saved header image in localStorage
-            const savedImage = localStorage.getItem('portal_header_image');
-            
-            if (savedImage) {
-                headerImage.src = savedImage;
-                headerImageContainer.style.display = 'block';
-                
-                // Add a caption/credit text below the image
-                const existingCaption = headerImageContainer.querySelector('.image-caption');
-                if (!existingCaption) {
-                    const caption = document.createElement('div');
-                    caption.className = 'image-caption';
-                    caption.style.cssText = 'text-align: center; margin-top: 5px; font-size: 11px; color: #666; font-style: italic;';
-                    caption.textContent = 'Portal Header Image';
-                    headerImageContainer.appendChild(caption);
-                }
-            } else {
-                headerImageContainer.style.display = 'none';
-            }
-        }
-        
-        // Load header image when page loads
-        loadPortalHeaderImage();
     </script>
 
     <!-- License lockdown overlay — shown when license_required === true -->

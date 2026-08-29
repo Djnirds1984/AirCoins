@@ -113,7 +113,13 @@ func VLANList(w http.ResponseWriter, r *http.Request) {
 		}
 
 		restored := false
-		if _, err := os.Stat("/sys/class/net/" + cfg.Interface); err == nil {
+		if _, err := os.Stat("/sys/class/net/" + name); err == nil {
+			// Already in the kernel — the active-list parse above missed it
+			// (e.g. iproute2 without "-d link show type vlan" support).
+			// Treat it as live instead of failing the redundant add.
+			exec.Command("ip", "link", "set", name, "up").Run()
+			restored = true
+		} else if _, err := os.Stat("/sys/class/net/" + cfg.Interface); err == nil {
 			if out, err := exec.Command("ip", "link", "add", "link", cfg.Interface,
 				"name", name, "type", "vlan", "id", strconv.Itoa(cfg.VLANID)).CombinedOutput(); err == nil {
 				exec.Command("ip", "link", "set", name, "up").Run()
@@ -397,16 +403,29 @@ func parseIPFromOutput(out string) string {
 }
 
 // getInterfaceState reads the operstate of a network interface from sysfs.
+// Bridges and VLAN subinterfaces without an IP address report operstate
+// "down" (RFC 2863 operational state) even while they pass traffic, so we
+// fall back to the kernel LOWER_UP flag, which reflects the real link path.
 func getInterfaceState(iface string) string {
 	data, err := os.ReadFile("/sys/class/net/" + iface + "/operstate")
 	if err != nil {
 		return "unknown"
 	}
 	state := strings.TrimSpace(string(data))
+	if state == "up" || hasLowerUp(iface) {
+		return "up"
+	}
 	if state == "" {
 		return "unknown"
 	}
 	return state
+}
+
+// hasLowerUp reports whether the interface has the kernel LOWER_UP flag set
+// (i.e. there is an actual carrier/link path), regardless of operstate.
+func hasLowerUp(iface string) bool {
+	out, err := exec.Command("ip", "-o", "link", "show", "dev", iface).Output()
+	return err == nil && strings.Contains(string(out), "LOWER_UP")
 }
 
 // ============================================

@@ -1433,7 +1433,7 @@
            Voucher print templates (batch print + QR)
            ============================================ */
         #voucher-print-host { display: none; }
-        .voucher-print-grid { display: grid; grid-template-columns: repeat(auto-fill, 88mm); gap: 4mm; justify-content: center; }
+        .voucher-print-grid { display: grid; grid-template-columns: repeat(2, 88mm); gap: 4mm; justify-content: center; }
         .voucher-print-card { width: 86mm; height: 54mm; border-radius: 3mm; padding: 4mm 4.5mm; box-sizing: border-box; position: relative; overflow: hidden; display: flex; flex-direction: column; break-inside: avoid; page-break-inside: avoid; font-family: Arial, Helvetica, sans-serif; }
         .voucher-print-card .vp-head { display: flex; justify-content: space-between; align-items: center; }
         .voucher-print-card .vp-brand { font-size: 9pt; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; }
@@ -1471,10 +1471,13 @@
 
         /* Print: only the voucher grid gets printed */
         @media print {
+            @page { size: A4 portrait; margin: 8mm; }
             body.voucher-printing > *:not(#voucher-print-host) { display: none !important; }
             body.voucher-printing #voucher-print-host { display: block !important; }
             body.voucher-printing { background: #fff !important; }
-            .voucher-print-card { break-inside: avoid; page-break-inside: avoid; }
+            #voucher-print-host { width: 100%; }
+            .voucher-print-grid { width: 100%; grid-template-columns: repeat(2, 88mm); }
+            .voucher-print-card { break-inside: avoid; page-break-inside: avoid; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
         @page { margin: 8mm; }
     </style>
@@ -1790,6 +1793,23 @@
                         <input type="number" id="voucher-gen-price" min="0" step="1" value="0" placeholder="0 = free">
                     </div>
                     <div class="form-group">
+                        <label for="voucher-gen-pausable">Rate Type</label>
+                        <select id="voucher-gen-pausable" onchange="onVoucherPausableChange()">
+                            <option value="1" selected>Pausable (can pause)</option>
+                            <option value="0">Consumable (no pause)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="voucher-gen-expiration-hours">Pause Expiry (optional)</label>
+                        <div style="display:flex;gap:6px;">
+                            <input type="number" id="voucher-gen-expiration-hours" min="0" step="1" value="0" placeholder="e.g. 72" style="flex:1;" title="Pause deadline after first use (0 = none)">
+                            <select id="voucher-gen-expiry-unit" style="width:96px;">
+                                <option value="1" selected>Hours</option>
+                                <option value="24">Days</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
                         <label for="voucher-gen-notes">Notes (optional)</label>
                         <input type="text" id="voucher-gen-notes" placeholder="e.g. June batch">
                     </div>
@@ -1866,14 +1886,40 @@
                         <input type="number" id="pricing-coin-value" min="1" step="1" placeholder="e.g. 5" required>
                     </div>
                     <div class="form-group">
-                        <label for="pricing-minutes">Minutes</label>
-                        <input type="number" id="pricing-minutes" min="1" step="1" placeholder="e.g. 30" required>
+                        <label for="pricing-minutes">Duration</label>
+                        <div style="display:flex;gap:6px;">
+                            <input type="number" id="pricing-minutes" min="1" step="1" placeholder="e.g. 30" required style="flex:1;">
+                            <select id="pricing-duration-unit" style="width:96px;">
+                                <option value="1" selected>Minutes</option>
+                                <option value="60">Hours</option>
+                                <option value="1440">Days</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="pricing-pausable">Rate Type</label>
+                        <select id="pricing-pausable">
+                            <option value="1" selected>Pausable (can pause)</option>
+                            <option value="0">Consumable (no pause)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="pricing-expiration-hours">Expiration (optional)</label>
+                        <div style="display:flex;gap:6px;">
+                            <input type="number" id="pricing-expiration-hours" min="0" step="1" value="0" placeholder="e.g. 24" style="flex:1;">
+                            <select id="pricing-expiry-unit" style="width:96px;">
+                                <option value="1" selected>Hours</option>
+                                <option value="24">Days</option>
+                            </select>
+                        </div>
                     </div>
                     <button type="submit" class="btn btn-primary" id="add-pricing-btn">Add Tier</button>
                 </form>
                 <div class="gpio-info-text" style="margin-top:14px;">
                     1 peso coin = 1 pulse. A tier maps the inserted amount (₱) to minutes of internet.
                     The table starts empty — add every tier you accept.
+                    <br>Pause rules: pausable tiers show the Pause button; consumable tiers do not.
+                    Pause Expiry limits how long a paused session can stay paused before it is expired (0 = unlimited/frozen while paused).
                 </div>
             </div>
 
@@ -1884,13 +1930,15 @@
                     <thead>
                         <tr>
                             <th>Coin Value (₱)</th>
-                            <th>Minutes</th>
+                            <th>Duration</th>
+                            <th>Expiration</th>
                             <th>Active</th>
+                            <th>Pause Rule</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="pricing-tiers-body">
-                        <tr class="empty-row"><td colspan="4">Loading...</td></tr>
+                        <tr class="empty-row"><td colspan="6">Loading...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -3315,6 +3363,7 @@ async function loadPricing() {
             tiers = res;
         }
         pricingData = tiers;
+        window.__pricingTiers = tiers;
         renderPricingTable(tiers);
     } catch (e) {
         if (e.message !== 'Unauthorized') {
@@ -3323,28 +3372,106 @@ async function loadPricing() {
     }
 }
 
+// Humanize a minutes value as e.g. 24m / 2h / 24h / 2d (days shown when evenly divisible)
+function formatDurationMinutes(mins) {
+    var m = parseInt(mins, 10) || 0;
+    if (m <= 0) return '—';
+    if (m % 1440 === 0) return (m / 1440) + 'd';
+    if (m % 60 === 0) return (m / 60) + 'h';
+    return m + 'm';
+}
+
+// Humanize an hours value as e.g. 6h / 24h / 2d
+function formatExpiryHours(hours) {
+    var h = parseInt(hours, 10) || 0;
+    if (h <= 0) return 'None';
+    if (h % 24 === 0) return (h / 24) + 'd';
+    return h + 'h';
+}
+
+function pauseRuleLabel(t) {
+    var pausable = (t.pausable !== false); // default true
+    var expiry = parseInt(t.expiration_hours, 10) || 0;
+    if (!pausable) {
+        return '<span style="font-size:12px;color:#ff9800;">Consumable</span>';
+    }
+    return '<span style="font-size:12px;">Pausable' +
+        (expiry > 0 ? ' · <span style="color:#888;">expires after ' + formatExpiryHours(expiry) + '</span>' : ' · <span style="color:#888;">no expiry</span>') +
+        '</span>';
+}
+
+// Pick the best unit select value for a minutes amount (days > hours > minutes)
+function durationUnitFor(mins) {
+    var m = parseInt(mins, 10) || 0;
+    if (m > 0 && m % 1440 === 0) return '1440';
+    if (m > 0 && m % 60 === 0) return '60';
+    return '1';
+}
+
+// Pick the best unit select value for an hours amount (days > hours)
+function expiryUnitFor(hours) {
+    var h = parseInt(hours, 10) || 0;
+    if (h > 0 && h % 24 === 0) return '24';
+    return '1';
+}
+
+// Consumable rates cannot pause — keep their expiry inputs disabled (edit row)
+document.getElementById('pricing-tiers-body').addEventListener('change', function(e) {
+    if (e.target && e.target.id === 'edit-pausable') {
+        var consumable = e.target.value === '0';
+        var inp = document.getElementById('edit-expiration-hours');
+        var unit = document.getElementById('edit-expiry-unit');
+        if (inp) {
+            inp.disabled = consumable;
+            if (consumable) { inp.value = 0; }
+            inp.title = consumable ? 'Not applicable: consumable rates cannot pause' : 'Pause expiry (0 = none)';
+        }
+        if (unit) { unit.disabled = consumable; }
+    }
+});
+
 function renderPricingTable(tiers) {
     var tbody = document.getElementById('pricing-tiers-body');
     if (!tiers || tiers.length === 0) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No pricing tiers configured</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No pricing tiers configured</td></tr>';
         return;
     }
 
+    var editSelectStyle = 'padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:#1a1f2b;color:#fff;font-size:12px;';
     tbody.innerHTML = '';
     tiers.forEach(function(t) {
         var rowClass = t.active ? '' : ' class="inactive-row"';
 
         if (editingPricingId === t.id) {
+            var editPausable = (t.pausable !== false);
             // Inline edit row
             tbody.innerHTML +=
                 '<tr class="inline-edit-row" data-id="' + t.id + '">' +
                     '<td><input type="number" id="edit-coin-value" value="' + t.coin_value + '" min="1"></td>' +
-                    '<td><input type="number" id="edit-minutes" value="' + t.minutes + '" min="1"></td>' +
+                    '<td><div style="display:flex;gap:4px;">' +
+                        '<input type="number" id="edit-minutes" value="' + Math.round(t.minutes / (parseInt(durationUnitFor(t.minutes), 10) || 1)) + '" min="1" style="flex:1;min-width:64px;">' +
+                        '<select id="edit-duration-unit" style="' + editSelectStyle + 'width:84px;">' +
+                            '<option value="1"' + (durationUnitFor(t.minutes) === '1' ? ' selected' : '') + '>Minutes</option>' +
+                            '<option value="60"' + (durationUnitFor(t.minutes) === '60' ? ' selected' : '') + '>Hours</option>' +
+                            '<option value="1440"' + (durationUnitFor(t.minutes) === '1440' ? ' selected' : '') + '>Days</option>' +
+                        '</select></div></td>' +
+                    '<td><div style="display:flex;gap:4px;">' +
+                        '<input type="number" id="edit-expiration-hours" min="0" step="1" value="' + Math.round((t.expiration_hours || 0) / (parseInt(expiryUnitFor(t.expiration_hours), 10) || 1)) + '" style="flex:1;min-width:64px;" title="Pause expiry (0 = none)"' + (editPausable ? '' : ' disabled') + '>' +
+                        '<select id="edit-expiry-unit" style="' + editSelectStyle + 'width:84px;"' + (editPausable ? '' : ' disabled') + '>' +
+                            '<option value="1"' + (expiryUnitFor(t.expiration_hours) === '1' ? ' selected' : '') + '>Hours</option>' +
+                            '<option value="24"' + (expiryUnitFor(t.expiration_hours) === '24' ? ' selected' : '') + '>Days</option>' +
+                        '</select></div></td>' +
                     '<td>' +
                         '<label class="toggle-switch">' +
                             '<input type="checkbox" id="edit-active" ' + (t.active ? 'checked' : '') + '>' +
                             '<span class="toggle-slider"></span>' +
                         '</label>' +
+                    '</td>' +
+                    '<td>' +
+                        '<select id="edit-pausable" style="' + editSelectStyle + '">' +
+                            '<option value="1"' + (editPausable ? ' selected' : '') + '>Pausable</option>' +
+                            '<option value="0"' + (editPausable ? '' : ' selected') + '>Consumable</option>' +
+                        '</select>' +
                     '</td>' +
                     '<td>' +
                         '<div class="action-btns">' +
@@ -3358,13 +3485,15 @@ function renderPricingTable(tiers) {
             tbody.innerHTML +=
                 '<tr' + rowClass + ' data-id="' + t.id + '">' +
                     '<td>\u20B1' + t.coin_value + '</td>' +
-                    '<td>' + t.minutes + '</td>' +
+                    '<td>' + formatDurationMinutes(t.minutes) + '</td>' +
+                    '<td>' + (t.pausable !== false ? formatExpiryHours(t.expiration_hours) : '<span style="color:#666;">—</span>') + '</td>' +
                     '<td>' +
                         '<label class="toggle-switch">' +
                             '<input type="checkbox" ' + (t.active ? 'checked' : '') + ' onchange="togglePricingActive(' + t.id + ', ' + t.coin_value + ', ' + t.minutes + ', this.checked)">' +
                             '<span class="toggle-slider"></span>' +
                         '</label>' +
                     '</td>' +
+                    '<td>' + pauseRuleLabel(t) + '</td>' +
                     '<td>' +
                         '<div class="action-btns">' +
                             '<button class="btn btn-ghost btn-sm" onclick="startPricingEdit(' + t.id + ')">Edit</button>' +
@@ -3376,10 +3505,10 @@ function renderPricingTable(tiers) {
     });
 }
 
-async function addPricingTier(coinValue, minutes) {
+async function addPricingTier(coinValue, minutes, pausable, expirationHours) {
     try {
         var res = await apiCall('POST', '/pricing', {
-            pricing: [{ coin_value: coinValue, minutes: minutes, active: true }]
+            pricing: [{ coin_value: coinValue, minutes: minutes, active: true, pausable: pausable, expiration_hours: expirationHours }]
         });
         if (res.success) {
             showNotification('Pricing tier added successfully', 'success');
@@ -3397,9 +3526,19 @@ async function addPricingTier(coinValue, minutes) {
 }
 
 async function togglePricingActive(id, coinValue, minutes, active) {
+    // Preserve the tier's current pause rules when toggling active state.
+    var pausable = true;
+    var expirationHours = 0;
+    for (var i = 0; i < pricingData.length; i++) {
+        if (pricingData[i].id === id) {
+            pausable = pricingData[i].pausable !== false;
+            expirationHours = parseInt(pricingData[i].expiration_hours, 10) || 0;
+            break;
+        }
+    }
     try {
         var res = await apiCall('POST', '/pricing', {
-            pricing: [{ coin_value: coinValue, minutes: minutes, active: active }]
+            pricing: [{ coin_value: coinValue, minutes: minutes, active: active, pausable: pausable, expiration_hours: expirationHours }]
         });
         if (res.success) {
             showNotification('Pricing tier ' + (active ? 'activated' : 'deactivated'), 'success');
@@ -3428,17 +3567,26 @@ function cancelPricingEdit() {
 
 async function savePricingEdit(id) {
     var coinValue = parseInt(document.getElementById('edit-coin-value').value, 10);
-    var minutes = parseInt(document.getElementById('edit-minutes').value, 10);
+    var durationUnit = parseInt(document.getElementById('edit-duration-unit').value, 10) || 1;
+    var minutes = (parseInt(document.getElementById('edit-minutes').value, 10) || 0) * durationUnit;
     var active = document.getElementById('edit-active').checked;
+    var pausable = document.getElementById('edit-pausable').value === '1';
+    var expiryUnit = parseInt(document.getElementById('edit-expiry-unit').value, 10) || 1;
+    var expirationHours = (parseInt(document.getElementById('edit-expiration-hours').value, 10) || 0) * expiryUnit;
+    if (!pausable) { expirationHours = 0; } // consumable rates have no pause expiry
 
     if (!coinValue || coinValue <= 0 || !minutes || minutes <= 0) {
         showNotification('Coin value and minutes must be positive', 'error');
         return;
     }
+    if (expirationHours < 0) {
+        showNotification('Pause expiry must be 0 or greater', 'error');
+        return;
+    }
 
     try {
         var res = await apiCall('POST', '/pricing', {
-            pricing: [{ coin_value: coinValue, minutes: minutes, active: active }]
+            pricing: [{ coin_value: coinValue, minutes: minutes, active: active, pausable: pausable, expiration_hours: expirationHours }]
         });
         if (res.success) {
             showNotification('Pricing tier updated successfully', 'success');
@@ -4771,6 +4919,11 @@ function safePortalHeader() {
     return (img && PORTAL_BG_RE.test(img)) ? img : '';
 }
 
+function safePortalBg() {
+    var img = portalAppearance && portalAppearance.background_image;
+    return (img && PORTAL_BG_RE.test(img)) ? img : '';
+}
+
 var portalHeaderVersion = Date.now();
 
 function updatePortalHeaderThumb() {
@@ -5631,6 +5784,10 @@ async function generateVouchers() {
         minutes = parseInt(durVal, 10);
     }
     var price = parseFloat(document.getElementById('voucher-gen-price').value) || 0;
+    var pausable = document.getElementById('voucher-gen-pausable').value === '1';
+    var expiryUnit = parseInt(document.getElementById('voucher-gen-expiry-unit').value, 10) || 1;
+    var expirationHours = (parseInt(document.getElementById('voucher-gen-expiration-hours').value, 10) || 0) * expiryUnit;
+    if (!pausable) { expirationHours = 0; } // consumable vouchers cannot pause
     var notes = document.getElementById('voucher-gen-notes').value.trim();
 
     if (!count || count < 1 || count > 100) {
@@ -5651,7 +5808,9 @@ async function generateVouchers() {
             count: count,
             minutes: minutes,
             price: price,
-            notes: notes
+            notes: notes,
+            pausable: pausable,
+            expiration_hours: expirationHours
         });
         showNotification(res.message || 'Vouchers generated', 'success');
 
@@ -5730,6 +5889,13 @@ function renderVouchersTable(vouchers) {
         var tokenCell = v.session_token
             ? '<span style="font-family:monospace;background:rgba(0,255,136,0.08);color:#00ff88;padding:2px 8px;border-radius:5px;font-size:11px;">' + voucherEsc(v.session_token) + '</span>'
             : '\u2014';
+        // Pause-rules badge: consumable, or pause-expiry window after first use
+        var pauseBadge = '';
+        if (v.pausable === false) {
+            pauseBadge = ' <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(255,170,0,0.15);color:#ffaa00;vertical-align:middle;" title="Consumable: cannot pause">C</span>';
+        } else if ((v.expiration_hours || 0) > 0) {
+            pauseBadge = ' <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(0,170,255,0.15);color:#00aaff;vertical-align:middle;" title="Pause expiry after first use: ' + formatExpiryHours(v.expiration_hours) + '">' + formatExpiryHours(v.expiration_hours) + '</span>';
+        }
 
         var actions = '<div class="action-btns" style="display:flex;gap:4px;justify-content:flex-end;">';
         actions += '<button class="btn btn-ghost btn-sm" style="padding:4px 7px;" onclick="copyVoucherCode(\'' + voucherEsc(v.code) + '\')" title="Copy code">' + VOUCHER_ICONS.copy + '</button>';
@@ -5745,7 +5911,7 @@ function renderVouchersTable(vouchers) {
                 '<td style="font-family:monospace;font-weight:700;letter-spacing:1px;cursor:pointer;" onclick="copyVoucherCode(\'' + voucherEsc(v.code) + '\')" title="Click to copy">' + voucherEsc(v.code) + '</td>' +
                 '<td style="font-family:monospace;font-size:11px;">' + voucherEsc(v.batch_code || '\u2014') + '</td>' +
                 '<td>' + voucherPlanBadge(v.plan) + '</td>' +
-                '<td>' + formatVoucherDuration(v.duration_minutes) + '</td>' +
+                '<td>' + formatVoucherDuration(v.duration_minutes) + pauseBadge + '</td>' +
                 '<td style="font-weight:600;">' + formatVoucherPrice(v.price) + '</td>' +
                 '<td>' + voucherStatusBadge(v.status) + '</td>' +
                 '<td>' + redeemed + '</td>' +
@@ -6034,11 +6200,31 @@ document.addEventListener('DOMContentLoaded', function() {
             closeSidebarMobile();
         });
     });
+    // Disable Pause Expiry when rate type is Consumable (no pause = no pause expiry)
+    var pricingPausableSelect = document.getElementById('pricing-pausable');
+    var pricingExpiryInput = document.getElementById('pricing-expiration-hours');
+    function syncPricingExpiryState() {
+        if (pricingPausableSelect.value === '0') {
+            pricingExpiryInput.disabled = true;
+            pricingExpiryInput.value = 0;
+            pricingExpiryInput.title = 'Not applicable: consumable rates cannot pause';
+        } else {
+            pricingExpiryInput.disabled = false;
+            pricingExpiryInput.title = 'Pause expiry in hours (0 = unlimited)';
+        }
+    }
+    pricingPausableSelect.addEventListener('change', syncPricingExpiryState);
+    syncPricingExpiryState();
 
     // Wire add pricing form
     document.getElementById('add-pricing-btn').addEventListener('click', function() {
         var coinValue = parseInt(document.getElementById('pricing-coin-value').value, 10);
-        var minutes = parseInt(document.getElementById('pricing-minutes').value, 10);
+        var durationUnit = parseInt(document.getElementById('pricing-duration-unit').value, 10) || 1;
+        var minutes = (parseInt(document.getElementById('pricing-minutes').value, 10) || 0) * durationUnit;
+        var pausable = document.getElementById('pricing-pausable').value === '1';
+        var expiryUnit = parseInt(document.getElementById('pricing-expiry-unit').value, 10) || 1;
+        var expirationHours = (parseInt(document.getElementById('pricing-expiration-hours').value, 10) || 0) * expiryUnit;
+        if (!pausable) { expirationHours = 0; } // consumable rates have no pause expiry
         if (!coinValue || coinValue <= 0) {
             showNotification('Please enter a valid coin value', 'error');
             return;
@@ -6047,8 +6233,35 @@ document.addEventListener('DOMContentLoaded', function() {
             showNotification('Please enter valid minutes', 'error');
             return;
         }
-        addPricingTier(coinValue, minutes);
+        if (expirationHours < 0) {
+            showNotification('Pause expiry must be 0 or greater', 'error');
+            return;
+        }
+        // Warn when another active tier already serves this coin value —
+        // two active tiers for the same amount is ambiguous and confusing.
+        var dup = (window.__pricingTiers || []).filter(function(t) {
+            return t.active && t.coin_value === coinValue;
+        })[0];
+        if (dup) {
+            var ok = confirm('A tier for \u20B1' + coinValue + ' is already active (' +
+                formatDurationMinutes(dup.minutes) + '). Adding another one for the same amount is ambiguous.\n\n' +
+                'Add anyway? The longest-duration tier will win when a coin is inserted.');
+            if (!ok) { return; }
+        }
+        addPricingTier(coinValue, minutes, pausable, expirationHours);
     });
+
+    // Disable voucher Pause Expiry when rate type is Consumable
+    window.onVoucherPausableChange = function() {
+        var sel = document.getElementById('voucher-gen-pausable');
+        var inp = document.getElementById('voucher-gen-expiration-hours');
+        var unit = document.getElementById('voucher-gen-expiry-unit');
+        var consumable = sel.value === '0';
+        inp.disabled = consumable;
+        unit.disabled = consumable;
+        if (consumable) { inp.value = 0; }
+        inp.title = consumable ? 'Not applicable: consumable vouchers cannot pause' : 'Pause deadline after first use (0 = none)';
+    };
 
     // Enter key on pricing form
     document.getElementById('pricing-minutes').addEventListener('keydown', function(e) {

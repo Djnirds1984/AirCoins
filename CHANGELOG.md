@@ -1,6 +1,149 @@
 # Changelog
 
+## v1.21.1
+- **Voucher printing fixed**: explicit A4 portrait `@page` size (no longer inherits the browser's last-used Landscape setting) and a fixed 2-column print grid, so vouchers fill the page instead of one-per-sheet.
+
+## v1.21.0
+- **Vouchers inherit the coin-rate pause rules**: the generator now has Rate Type (Pausable/Consumable) and Pause Expiry (hours/days, disabled for consumables). Rules are stored on the voucher and applied to the session at FIRST redemption only — an unused voucher never ages, the pause-expiry clock starts when the code is first used.
+- Voucher table shows pause-rule badges (⏱ expiry window / C = consumable).
+- New migration: `vouchers.pausable`, `vouchers.expiration_hours`.
+
+## v1.20.5
+- Pricing: coin resolution is now deterministic when two active tiers share the same coin value — the longest-duration tier wins (previously an old short tier could arbitrarily steal coins, e.g. a P1=240min tier shadowing a new P1=3-day tier).
+- Pricing: admin UI warns when adding a tier for a coin value that already has an active tier.
+
+## v1.20.4
 All notable changes to AirCoins are documented in this file.
+
+---
+
+## v1.20.4 — VLAN Link Status Fix
+
+**Release date:** August 2026
+
+### Fixed
+- VLAN Management no longer shows working VLANs as "Down": VLAN interfaces already live in the kernel but missed by the `ip -d link show type vlan` parse are now recognized by the heal path, and bridge/VLAN interfaces without an IP address report link up via the kernel `LOWER_UP` flag instead of the misleading RFC 2863 operstate.
+
+---
+
+
+## v1.20.3 — Duration & Expiry Unit Selectors
+
+**Release date:** August 2026
+
+### Changed
+- Pricing tab: duration and pause-expiry inputs now use **Minutes / Hours / Days** unit dropdowns (add form and inline edit row), matching the CCNDS panel layout. Values are converted to minutes/hours on save.
+- Consumable rates: both the expiry input and its unit dropdown are disabled (and forced to 0) when Rate Type is **Consumable**, in the add form and the edit row.
+
+---
+
+## v1.20.2 — Consumable Rate Expiry Guard
+
+**Release date:** August 2026
+
+### Fixed
+- Pricing tab: selecting the **Consumable** rate type now disables the Pause Expiry field (and resets it to 0), preventing an accidental expiry on non-pausable rates. The field is re-enabled when switching back to Pausable.
+
+---
+
+
+
+
+## v1.20.1 — Admin Pause-Rule Controls for Pricing Rates
+
+**Release date:** August 2026
+
+### Added
+- **Rate pause rules in the Pricing tab** — Each coin rate can now be set as **Pausable** (shows the Pause button in the portal) or **Consumable** (no pause) right from the Add Tier form and the inline edit row.
+- **Pause expiry window** — Operators can set the maximum wall-clock pause window (`expiration_hours`) per rate directly in the admin UI. 0 keeps the legacy behaviour of a paused session staying frozen while paused.
+- A new **Pause Rule** column in the pricing table displays each tier's rule (e.g. `Pausable · expires after 2h`, or `Consumable`).
+
+### Fixed
+- Toggling a rate Active/Inactive no longer silently resets its pause rules back to defaults.
+
+### Action required
+Update to v1.20.1 from Admin > System > Update, then reboot.
+
+---
+## v1.20.0 — Pausable & Consumable Rates + Pause Expiry Window
+
+**Release date:** August 2026
+
+### Added
+- **Consumable vs. pausable rates** — Each coin rate is now flagged `pausable` (a consumable rate must be explicitly created with `pausable=false`). Consumable rates hide the Pause button in the captive portal. The purchased rate's behaviour is snapshotted onto each session.
+- **Pause expiry window** — Operators can set a maximum wall-clock pause window (`expiration_hours`) per rate. A paused session that is not resumed before its `pause_expires_at` deadline is forcibly expired (remaining time → 0; the user must insert coin again). `0` keeps the legacy behaviour of a paused session being frozen indefinitely.
+- **Sturdier portal image uploads** — Background & header images now fall back to the original file extension (`.jpg`/`.jpeg`/`.png`/`.webp`) when MIME sniffing returns `application/octet-stream`/ambiguous, and background images are persisted to `system_settings` with a correct `updated_at`.
+
+### Fixed
+- **Reports reset no longer wipes active sessions** — `ResetSalesReports` clears only financial statistics (`daily_stats`, `coin_events`) and deliberately preserves the `sessions` table so connected devices and their remaining time are never lost.
+- **Coinslot pricing resolution** — Fixed the lookup that could return the wrong minute value for a coin pulse.
+
+### Action required
+Update to v1.20.0 from Admin > System > Update, then reboot.
+
+---
+## v1.19.7 — Reports Reset Isolation (Protect Active Sessions)
+
+**Release date:** August 2026
+
+### Fixed
+- **Sales Reports Reset Isolation (`reports.go`)** — Updated `ResetSalesReports` so that resetting sales/earnings data clears only financial statistics (`daily_stats` and `coin_events`) and deliberately preserves the `sessions` table, ensuring active connected devices and user remaining times are never wiped out.
+
+### Action required
+Update to v1.19.7 from Admin > System > Update, then reboot.
+
+---
+
+
+## v1.19.6 — Portal Header Image Display Fix
+
+**Release date:** August 2026
+
+### Fixed
+- **Portal Header Image Sync (`index.html`)** — Updated captive portal appearance loading (`applyPortalAppearance()`) to fetch and display the uploaded header image directly from the `/api/portal/appearance` endpoint instead of looking for non-existent local storage keys.
+
+### Action required
+Update to v1.19.6 from Admin > System > Update, then reboot.
+
+---
+
+
+## v1.19.5 — Bugfix: safePortalBg Helper Definition
+
+**Release date:** August 2026
+
+### Fixed
+- **Admin Panel Background Preview Fix** — Defined the missing `safePortalBg()` helper function in `admin.html` to resolve the `safePortalBg is not defined` error when updating portal background thumbnails and live previews.
+
+### Action required
+Update to v1.19.5 from Admin > System > Update, then reboot.
+
+---
+
+
+## v1.19.4 — Robust Image Uploads & Portal UI Streamlining
+
+**Release date:** August 2026
+
+### Fixed & Improved
+- **Portal Background & Header Image Uploader Fix** — Enhanced backend MIME-type validation (`appearance.go`) to gracefully fallback to original file extensions (`.jpg`, `.jpeg`, `.png`, `.webp`) and robustly process file uploads without corruption.
+- **Streamlined Captive Portal UI** — Removed the irrelevant "Customize Portal" button from the portal home view (`index.html`).
+
+### Action required
+Update to v1.19.4 from Admin > System > Update, then reboot.
+
+---
+
+
+## v1.19.3 — System Health Diagnostics & API Enhancements
+
+**Release date:** August 2026
+
+### Added
+- **New System Health Diagnostics API (`/api/health`)** — Upgraded the health check endpoint to dynamically verify database connection status, report exact API version, and return standard JSON structure with HTTP status codes for robust monitoring and automation.
+
+### Action required
+Update to v1.19.3 from Admin > System > Update, then reboot.
 
 ---
 

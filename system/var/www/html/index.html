@@ -668,6 +668,7 @@
                 <button class="rates-btn" onclick="openRatesModal()">View Rates</button>
             </div>
 
+
             <!-- VOUCHER REDEEM -->
             <div class="status-card" style="margin-top:12px; text-align:left;">
                 <p style="margin-bottom:8px; color:#aaa; font-size:13px;">Have a voucher? Enter your code:</p>
@@ -678,6 +679,8 @@
                     <button class="btn btn-primary" id="voucherRedeemBtn" onclick="redeemVoucher()" style="white-space:nowrap;">Use Voucher</button>
                 </div>
             </div>
+
+
         </div>
     </div>
 
@@ -701,6 +704,8 @@
             <button class="btn btn-warning" onclick="closeWarningModal()">Insert More Coins</button>
         </div>
     </div>
+
+
 
     <!-- GPIO COIN LISTENER MODAL -->
     <div class="modal-overlay gpio-modal" id="gpioModal">
@@ -1162,6 +1167,17 @@
                             'url("' + img + '") center / cover no-repeat, ' + c.background);
                     } else {
                         rs.setProperty('--pp-bg', c.background);
+                    }
+
+                    const headerImg = PP_BG_RE.test(res.data.header_image || '')
+                        ? res.data.header_image : '';
+                    const headerContainer = document.getElementById('portalHeaderImage');
+                    const headerImgEl = document.getElementById('headerImage');
+                    if (headerImg && headerContainer && headerImgEl) {
+                        headerImgEl.src = headerImg;
+                        headerContainer.style.display = 'block';
+                    } else if (headerContainer) {
+                        headerContainer.style.display = 'none';
                     }
                 })
                 .catch(err => warnOnce('appearance', err));
@@ -1939,231 +1955,8 @@
             } catch (e) { /* ignore — manual entry still works */ }
         })();
 
-        // ==================== PORTAL HEADER IMAGE ====================
-        // Function to load and display portal header image
-        function loadPortalHeaderImage() {
-            const headerImageContainer = document.getElementById('portalHeaderImage');
-            const headerImage = document.getElementById('headerImage');
-            
-            // Check if there's a saved header image in localStorage
-            const savedImage = localStorage.getItem('portal_header_image');
-            
-            if (savedImage) {
-                headerImage.src = savedImage;
-                headerImageContainer.style.display = 'block';
-                
-                // Add a caption/credit text below the image
-                const existingCaption = headerImageContainer.querySelector('.image-caption');
-                if (!existingCaption) {
-                    const caption = document.createElement('div');
-                    caption.className = 'image-caption';
-                    caption.style.cssText = 'text-align: center; margin-top: 5px; font-size: 11px; color: #666; font-style: italic;';
-                    caption.textContent = 'Portal Header Image';
-                    headerImageContainer.appendChild(caption);
-                }
-            } else {
-                headerImageContainer.style.display = 'none';
-            }
-        }
-        
-        // Load header image when page loads
-        loadPortalHeaderImage();
 
-        // Initialize upload functionality
-        (function initImageUpload() {
-            const uploadArea = document.getElementById('uploadArea');
-            const fileInput = document.getElementById('imageUpload');
-            const uploadPlaceholder = document.getElementById('uploadPlaceholder');
-            const imagePreview = document.getElementById('imagePreview');
-            const uploadBtn = document.getElementById('uploadBtn');
-            const cancelBtn = document.getElementById('cancelBtn');
 
-            // Click on upload area triggers file input
-            uploadArea.addEventListener('click', function(e) {
-                if (!imagePreview.style.display || imagePreview.style.display === 'none') {
-                    fileInput.click();
-                }
-            });
-
-            // Drag and drop functionality
-            uploadArea.addEventListener('dragover', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                uploadArea.style.borderColor = '#00d4ff';
-                uploadArea.style.background = 'rgba(0,212,255,0.15)';
-            });
-
-            uploadArea.addEventListener('dragleave', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                uploadArea.style.borderColor = 'rgba(0,212,255,0.3)';
-                uploadArea.style.background = 'rgba(0,212,255,0.05)';
-            });
-
-            uploadArea.addEventListener('drop', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                uploadArea.style.borderColor = 'rgba(0,212,255,0.3)';
-                uploadArea.style.background = 'rgba(0,212,255,0.05)';
-
-                if (e.dataTransfer.files.length > 0) {
-                    handleFileSelect(e.dataTransfer.files[0]);
-                }
-            });
-
-            // File input change handler
-            fileInput.addEventListener('change', function(e) {
-                if (this.files.length > 0) {
-                    handleFileSelect(this.files[0]);
-                }
-            });
-
-            function handleFileSelect(file) {
-                // Reset previous state
-                clearUploadResult();
-
-                // Validate file type
-                if (!ALLOWED_TYPES.includes(file.type)) {
-                    showUploadResult('Please select a JPG, JPEG, or PNG image file.', 'error');
-                    return;
-                }
-
-                // Validate file size
-                if (file.size > MAX_FILE_SIZE) {
-                    showUploadResult('File size must be less than 5MB.', 'error');
-                    return;
-                }
-
-                selectedFile = file;
-
-                // Show preview
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    imagePreview.src = e.target.result;
-                    imagePreview.style.display = 'block';
-                    uploadPlaceholder.style.display = 'none';
-                    uploadBtn.disabled = false;
-                    cancelBtn.style.display = 'block';
-                    
-                    // Show success message
-                    showUploadResult('Image selected: ' + file.name, 'success');
-                };
-                reader.readAsDataURL(file);
-            }
-        })();
-
-        function uploadImage() {
-            if (!selectedFile) {
-                showUploadResult('Please select an image first.', 'error');
-                return;
-            }
-
-            const uploadBtn = document.getElementById('uploadBtn');
-            const cancelBtn = document.getElementById('cancelBtn');
-            const progressDiv = document.getElementById('uploadProgress');
-            const progressBar = document.getElementById('progressBar');
-            const progressPercent = document.getElementById('progressPercent');
-
-            // Disable buttons and show progress
-            uploadBtn.disabled = true;
-            cancelBtn.disabled = true;
-            progressDiv.style.display = 'block';
-            clearUploadResult();
-
-            // Simulate upload progress (in a real app, this would be actual upload to server)
-            let progress = 0;
-            const interval = setInterval(() => {
-                progress += Math.random() * 15;
-                if (progress > 100) progress = 100;
-                
-                progressBar.style.width = progress + '%';
-                progressPercent.textContent = Math.round(progress) + '%';
-
-                if (progress >= 100) {
-                    clearInterval(interval);
-                    
-                    // Simulate server response delay
-                    setTimeout(() => {
-                        // In a real implementation, you would send the file to a server endpoint like:
-                        // const formData = new FormData();
-                        // formData.append('file', selectedFile);
-                        // formData.append('type', 'portal_image'); // Or similar identifier
-                        // 
-                        // fetch('/api/admin/portal/images', {
-                        //     method: 'POST',
-                        //     headers: { 'Authorization': 'Bearer ' + getAdminToken() },
-                        //     body: formData
-                        // })
-                        // .then(response => response.json())
-                        // .then(data => {
-                        //     if (data.success) {
-                        //         showUploadResult('Image uploaded successfully! URL: ' + data.url, 'success');
-                        //         // The uploaded image would be accessible at /portal-assets/filename.jpg
-                        //     } else {
-                        //         showUploadResult('Upload failed: ' + (data.message || 'Unknown error'), 'error');
-                        //     }
-                        // })
-                        // .catch(error => {
-                        //     showUploadResult('Upload failed: ' + error.message, 'error');
-                        // })
-                        // .finally(() => {
-                        //     // Reset UI
-                        // });
-
-                        // For now, simulate successful upload
-                        progressDiv.style.display = 'none';
-                        showUploadResult('Image uploaded successfully! (Demo mode)', 'success');
-                        
-                        // Reset after success
-                        setTimeout(resetUpload, 3000);
-                    }, 500);
-                }
-            }, 200);
-        }
-
-        function cancelUpload() {
-            resetUpload();
-            showUploadResult('Upload cancelled.', 'info');
-        }
-
-        function resetUpload() {
-            const uploadPlaceholder = document.getElementById('uploadPlaceholder');
-            const imagePreview = document.getElementById('imagePreview');
-            const uploadBtn = document.getElementById('uploadBtn');
-            const cancelBtn = document.getElementById('cancelBtn');
-            const progressDiv = document.getElementById('uploadProgress');
-            const fileInput = document.getElementById('imageUpload');
-
-            // Reset UI
-            uploadPlaceholder.style.display = 'block';
-            imagePreview.style.display = 'none';
-            imagePreview.src = '';
-            uploadBtn.disabled = true;
-            cancelBtn.style.display = 'none';
-            cancelBtn.disabled = false;
-            progressDiv.style.display = 'none';
-            fileInput.value = '';
-            
-            // Reset progress
-            document.getElementById('progressBar').style.width = '0%';
-            document.getElementById('progressPercent').textContent = '0%';
-            
-            selectedFile = null;
-            clearUploadResult();
-        }
-
-        function showUploadResult(message, type) {
-            const resultDiv = document.getElementById('uploadResult');
-            resultDiv.textContent = message;
-            resultDiv.className = 'upload-result ' + type;
-            resultDiv.style.display = 'block';
-        }
-
-        function clearUploadResult() {
-            const resultDiv = document.getElementById('uploadResult');
-            resultDiv.style.display = 'none';
-            resultDiv.className = 'upload-result';
-        }
     </script>
 
     <!-- License lockdown overlay — shown when license_required === true -->

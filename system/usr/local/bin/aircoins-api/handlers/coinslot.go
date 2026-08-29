@@ -289,12 +289,12 @@ func (h *CoinslotHandler) coinsSinceArm(armedAt int64) coinWindow {
 
 		minutes, cached := minutesByValue[ev.Value]
 		if !cached {
-			resolved, _, perr := MinutesForAmount(h.DB, ev.Value)
+			m, perr := MinutesForAmount(h.DB, ev.Value)
 			if perr != nil {
 				log.Printf("Error resolving pricing for P%d: %v", ev.Value, perr)
-				resolved = 0
+				m = PricingMatch{}
 			}
-			minutes = resolved
+			minutes = m.Minutes
 			minutesByValue[ev.Value] = minutes
 		}
 		ev.Minutes = minutes

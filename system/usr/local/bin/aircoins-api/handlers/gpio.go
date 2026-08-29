@@ -231,10 +231,11 @@ func (h *GPIOHandler) Coin(w http.ResponseWriter, r *http.Request) {
 	// Resolve minutes from the pricing table only (1 peso = 1 pulse).
 	// A blank/incomplete pricing table credits nothing — the operator must
 	// add the tier in the admin panel.
-	minutes, _, err := MinutesForAmount(h.DB, req.CoinValue)
+	pricingMatch, err := MinutesForAmount(h.DB, req.CoinValue)
 	if err != nil {
 		log.Printf("Error resolving pricing for P%d: %v", req.CoinValue, err)
 	}
+	minutes := pricingMatch.Minutes
 
 	if minutes == 0 {
 		logAction(h.DB, "ERROR", "gpio", "Coin detected: P"+strconv.Itoa(req.CoinValue)+" but NO pricing tier is configured for it — no time credited")

@@ -63,7 +63,7 @@ func (h *PricingHandler) getPricing(w http.ResponseWriter, r *http.Request) {
 	includeInactive := r.URL.Query().Get("include_inactive") == "true"
 
 	query := `
-		SELECT id, coin_value, minutes, active, created_at, updated_at
+		SELECT id, coin_value, minutes, active, pausable, expiration_hours, created_at, updated_at
 		FROM pricing
 	`
 	if !includeInactive {
@@ -83,7 +83,7 @@ func (h *PricingHandler) getPricing(w http.ResponseWriter, r *http.Request) {
 	pricing := []models.Pricing{}
 	for rows.Next() {
 		var p models.Pricing
-		if err := rows.Scan(&p.ID, &p.CoinValue, &p.Minutes, &p.Active, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.CoinValue, &p.Minutes, &p.Active, &p.Pausable, &p.ExpirationHours, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			log.Printf("Error scanning pricing: %v", err)
 			continue
 		}
@@ -101,12 +101,13 @@ func (h *PricingHandler) quotePricing(w http.ResponseWriter, amountStr string) {
 		return
 	}
 
-	minutes, matched, err := MinutesForAmount(h.DB, amount)
+	match, err := MinutesForAmount(h.DB, amount)
 	if err != nil {
 		log.Printf("Error resolving pricing for P%d: %v", amount, err)
 		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to resolve pricing"})
 		return
 	}
+	minutes := match.Minutes
 
 	if minutes == 0 {
 		sendJSON(w, http.StatusOK, models.APIResponse{
@@ -128,42 +129,52 @@ func (h *PricingHandler) quotePricing(w http.ResponseWriter, amountStr string) {
 			"coin_value": amount,
 			"minutes":    minutes,
 			"seconds":    minutes * 60,
-			"matched":    matched,
+			"matched":    match.MatchedCoin,
 		},
 	})
 }
 
-// MinutesForAmount resolves an inserted peso amount (= pulse count) to
-// minutes using the pricing table only.
+// PricingMatch is the resolved pricing row for an inserted amount.
+type PricingMatch struct {
+	Minutes         int
+	MatchedCoin     int
+	Pausable        bool
+	ExpirationHours int
+}
+
+// MinutesForAmount resolves an inserted peso amount (= pulse count) to minutes
+// using the pricing table only, returning the matched row's pause rules too.
 //
 // Resolution order:
 //  1. exact active row for that amount
 //  2. otherwise the highest active row whose coin_value is below the amount
 //     (partial credit, e.g. P7 with tiers 1/5/10 credits the P5 tier)
 //
-// Returns minutes = 0 when the pricing table has nothing usable — callers
+// Returns Match.Minutes = 0 when the pricing table has nothing usable — callers
 // must treat that as "no time credited" and surface it to the operator.
-// The second return value is the coin_value of the row that matched.
-func MinutesForAmount(db *sql.DB, amount int) (int, int, error) {
+func MinutesForAmount(db *sql.DB, amount int) (PricingMatch, error) {
 	if amount <= 0 {
-		return 0, 0, nil
+		return PricingMatch{}, nil
 	}
 
-	var minutes, matched int
+	var m PricingMatch
+	// Deterministic winner when several active rows share the same
+	// coin_value (e.g. an old P1=240min tier left active next to a new
+	// P1=3-day tier): prefer the longest duration, then the newest row.
 	err := db.QueryRow(`
-		SELECT minutes, coin_value FROM pricing
+		SELECT minutes, coin_value, pausable, expiration_hours FROM pricing
 		WHERE active = true AND coin_value <= $1
-		ORDER BY coin_value DESC
+		ORDER BY coin_value DESC, minutes DESC, id DESC
 		LIMIT 1
-	`, amount).Scan(&minutes, &matched)
+	`, amount).Scan(&m.Minutes, &m.MatchedCoin, &m.Pausable, &m.ExpirationHours)
 
 	if err == sql.ErrNoRows {
-		return 0, 0, nil
+		return m, nil
 	} else if err != nil {
-		return 0, 0, err
+		return m, err
 	}
 
-	return minutes, matched, nil
+	return m, nil
 }
 
 func (h *PricingHandler) updatePricing(w http.ResponseWriter, r *http.Request) {
@@ -181,18 +192,28 @@ func (h *PricingHandler) updatePricing(w http.ResponseWriter, r *http.Request) {
 			sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Coin value and minutes must be positive"})
 			return
 		}
+		if p.ExpirationHours < 0 {
+			sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Expiration hours must be 0 or greater"})
+			return
+		}
 
 		active := true
 		if p.Active != nil {
 			active = *p.Active
 		}
+		// Default: pausable = true (a consumable rate has to be explicitly
+		// created with pausable=false by the operator).
+		pausable := true
+		if p.Pausable != nil {
+			pausable = *p.Pausable
+		}
 
 		_, err := h.DB.Exec(`
-			INSERT INTO pricing (coin_value, minutes, active, updated_at)
-			VALUES ($1, $2, $3, NOW())
-			ON CONFLICT (coin_value) DO UPDATE 
-			SET minutes = $2, active = $3, updated_at = NOW()
-		`, p.CoinValue, p.Minutes, active)
+			INSERT INTO pricing (coin_value, minutes, active, pausable, expiration_hours, updated_at)
+			VALUES ($1, $2, $3, $4, $5, NOW())
+			ON CONFLICT (coin_value) DO UPDATE
+			SET minutes = $2, active = $3, pausable = $4, expiration_hours = $5, updated_at = NOW()
+		`, p.CoinValue, p.Minutes, active, pausable, p.ExpirationHours)
 		if err != nil {
 			log.Printf("Error updating pricing: %v", err)
 		}

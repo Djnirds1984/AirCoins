@@ -88,6 +88,12 @@ CREATE TABLE IF NOT EXISTS pricing (
     coin_value INTEGER NOT NULL UNIQUE,
     minutes INTEGER NOT NULL,
     active BOOLEAN DEFAULT true,
+    -- false = consumable rate (no Pause button in the portal); true = pausable.
+    pausable BOOLEAN DEFAULT true,
+    -- Maximum wall-clock pause window (hours) before a paused session is
+    -- forcibly expired (remaining becomes 0, user must re-insert coin).
+    -- 0 = frozen indefinitely while paused (legacy behaviour).
+    expiration_hours INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -117,6 +123,14 @@ CREATE TABLE IF NOT EXISTS sessions (
     paused_at TIMESTAMPTZ,
     remaining_seconds_at_pause INT,
     pause_count INT DEFAULT 0,
+    -- Snapshot of the rate's pause behaviour at purchase:
+    -- false = consumable (no Pause button in portal), true = pausable.
+    pausable BOOLEAN DEFAULT true,
+    -- Max wall-clock pause window (hours) for this session (from the rate).
+    expiration_hours INTEGER DEFAULT 0,
+    -- Absolute wall-clock deadline a PAUSED session must be resumed by; when
+    -- reached the session is forcibly expired (remaining -> 0). NULL = frozen.
+    pause_expires_at TIMESTAMPTZ,
     -- Per-session speed override (Mbps). NULL = use the portal's global
     -- per_device_bw_mbps from portal_qdisc_rules. >0 = override for this session.
     shaped_mbps INT,
@@ -176,6 +190,8 @@ CREATE TABLE IF NOT EXISTS vouchers (
     status VARCHAR(20) NOT NULL DEFAULT 'unused',  -- unused | used | disabled
     price NUMERIC(10,2) NOT NULL DEFAULT 0,        -- sale price in ₱ per voucher
     notes TEXT NOT NULL DEFAULT '',
+    pausable BOOLEAN NOT NULL DEFAULT TRUE,        -- consumable vouchers cannot pause
+    expiration_hours INTEGER NOT NULL DEFAULT 0,   -- pause deadline after FIRST use (0 = none)
     redeemed_at TIMESTAMPTZ,
     redeemed_mac VARCHAR(17),
     session_id INTEGER,

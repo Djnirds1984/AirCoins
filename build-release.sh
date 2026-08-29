@@ -85,7 +85,7 @@ else
     # Using (cd src && cp -r . dst) to avoid the system/system/ nesting
     # that cp -r src/ dst/ can produce depending on the cp implementation.
     mkdir -p "$TARBALL_DIR/system"
-    (cd "$SCRIPT_DIR/system" && cp -r . "$TARBALL_DIR/system/")
+    (cd "$SCRIPT_DIR/system" && tar cf - .) | (cd "$TARBALL_DIR/system" && tar xf -)
     rm -rf "$TARBALL_DIR/system/.env" \
            "$TARBALL_DIR/system/__diff_tmp.txt" \
            "$TARBALL_DIR/system/.git" \

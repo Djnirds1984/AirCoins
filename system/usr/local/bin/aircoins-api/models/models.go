@@ -93,6 +93,36 @@ func EnsureSchema() {
 			`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS batch_code VARCHAR(20) NOT NULL DEFAULT '';
 			 CREATE INDEX IF NOT EXISTS idx_vouchers_batch ON vouchers(batch_code)`,
 		},
+		{
+			// v1.21.0 — voucher pause rules: pausable + pause expiry window
+			// (mirrors the pricing rules; applied at first redemption only)
+			"vouchers.pausable",
+			`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS pausable BOOLEAN NOT NULL DEFAULT TRUE;
+			 ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS expiration_hours INTEGER NOT NULL DEFAULT 0`,
+		},
+		{
+			// v1.20.0 — pricing: pausable vs consumable rates + pause expiry window
+			"pricing.pausable",
+			`ALTER TABLE pricing ADD COLUMN IF NOT EXISTS pausable BOOLEAN NOT NULL DEFAULT TRUE`,
+		},
+		{
+			"pricing.expiration_hours",
+			`ALTER TABLE pricing ADD COLUMN IF NOT EXISTS expiration_hours INTEGER NOT NULL DEFAULT 0`,
+		},
+		{
+			// sessions snapshot of the purchased rate's pause behaviour
+			"sessions.pausable",
+			`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS pausable BOOLEAN NOT NULL DEFAULT TRUE`,
+		},
+		{
+			"sessions.expiration_hours",
+			`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expiration_hours INTEGER NOT NULL DEFAULT 0`,
+		},
+		{
+			// absolute wall-clock deadline a paused session must be resumed by
+			"sessions.pause_expires_at",
+			`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS pause_expires_at TIMESTAMPTZ`,
+		},
 	}
 
 	for _, f := range fixes {
@@ -133,12 +163,14 @@ type GPIOConfig struct {
 }
 
 type Pricing struct {
-	ID        int       `json:"id"`
-	CoinValue int       `json:"coin_value"`
-	Minutes   int       `json:"minutes"`
-	Active    bool      `json:"active"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID              int       `json:"id"`
+	CoinValue       int       `json:"coin_value"`
+	Minutes         int       `json:"minutes"`
+	Active          bool      `json:"active"`
+	Pausable        bool      `json:"pausable"`          // false = consumable (no Pause button in portal)
+	ExpirationHours int       `json:"expiration_hours"` // max wall-clock pause window before forced expiry (0 = frozen forever)
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type CoinEvent struct {
@@ -165,6 +197,9 @@ type Session struct {
 	PausedAt                *time.Time `json:"paused_at,omitempty"`
 	RemainingSecondsAtPause *int       `json:"remaining_seconds_at_pause,omitempty"`
 	PauseCount              int        `json:"pause_count"`
+	Pausable                bool       `json:"pausable"`                 // false = consumable (no Pause button in portal)
+	ExpirationHours         int        `json:"expiration_hours"`         // max wall-clock pause window (0 = frozen while paused)
+	PauseExpiresAt          *time.Time `json:"pause_expires_at,omitempty"` // absolute deadline a paused session must be resumed by
 	ShapedMbps              *int       `json:"shaped_mbps,omitempty"`
 	SessionToken            string     `json:"session_token,omitempty"`
 	QdiscInfo               *QdiscInfo `json:"qdisc_info,omitempty"`
@@ -192,6 +227,8 @@ type Voucher struct {
 	Status          string     `json:"status"`
 	Price           float64    `json:"price"`
 	Notes           string     `json:"notes"`
+	Pausable        *bool      `json:"pausable,omitempty"`   // nil = legacy row, treated as pausable
+	ExpirationHours int        `json:"expiration_hours"`     // pause deadline after first use (0 = none)
 	RedeemedAt      *time.Time `json:"redeemed_at,omitempty"`
 	RedeemedMAC     string     `json:"redeemed_mac,omitempty"`
 	SessionID       *int       `json:"session_id,omitempty"`
@@ -397,9 +434,11 @@ type CoinEventRequest struct {
 }
 
 type PricingRequest struct {
-	CoinValue int   `json:"coin_value"`
-	Minutes   int   `json:"minutes"`
-	Active    *bool `json:"active,omitempty"`
+	CoinValue       int   `json:"coin_value"`
+	Minutes         int   `json:"minutes"`
+	Active          *bool `json:"active,omitempty"`
+	Pausable        *bool `json:"pausable,omitempty"`
+	ExpirationHours int   `json:"expiration_hours,omitempty"`
 }
 
 type SettingsRequest struct {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -67,9 +68,11 @@ var backgroundImageRe = regexp.MustCompile(`^/portal-assets/[A-Za-z0-9._-]+$`)
 // Only these image types are accepted; the extension is derived from the
 // SNIFFED content type, never from the uploaded filename.
 var backgroundExtByMIME = map[string]string{
-	"image/jpeg": "jpg",
-	"image/png":  "png",
-	"image/webp": "webp",
+	"image/jpeg":  "jpg",
+	"image/pjpeg": "jpg",
+	"image/png":   "png",
+	"image/x-png": "png",
+	"image/webp":  "webp",
 }
 
 // backgroundExts lists every extension a stored background can have.
@@ -267,10 +270,24 @@ func (h *AppearanceHandler) uploadBackground(w http.ResponseWriter, r *http.Requ
 
 	ctype := http.DetectContentType(head)
 	ext, ok := backgroundExtByMIME[ctype]
+	if !ok || ctype == "application/octet-stream" {
+		origExt := strings.ToLower(filepath.Ext(header.Filename))
+		switch origExt {
+		case ".jpg", ".jpeg":
+			ext = "jpg"
+			ok = true
+		case ".png":
+			ext = "png"
+			ok = true
+		case ".webp":
+			ext = "webp"
+			ok = true
+		}
+	}
 	if !ok {
 		sendJSON(w, http.StatusBadRequest, models.APIResponse{
 			Success: false,
-			Message: fmt.Sprintf("Unsupported image type %q — use jpg, png or webp", ctype),
+			Message: fmt.Sprintf("Unsupported image type %q (detected %q) — use jpg, png or webp", header.Filename, ctype),
 		})
 		return
 	}
@@ -383,11 +400,19 @@ func (h *AppearanceHandler) setBackgroundImage(path string) error {
 	}
 
 	cfg.BackgroundImage = path
-	cfg.UpdatedAt = ""
+	cfg.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	doc, err := json.Marshal(cfg)
 	if err != nil {
 		return err
 	}
+
+	_, err = h.DB.Exec(`
+		INSERT INTO system_settings (key, value, updated_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+	`, appearanceSettingKey, string(doc))
+	return err
+}
 
 // HeaderImage handles /api/admin/portal/header-image (admin auth):
 // POST uploads a new header image (max 5 MB), DELETE removes it.
@@ -432,10 +457,24 @@ func (h *AppearanceHandler) uploadHeaderImage(w http.ResponseWriter, r *http.Req
 
 	ctype := http.DetectContentType(head)
 	ext, ok := backgroundExtByMIME[ctype]
+	if !ok || ctype == "application/octet-stream" {
+		origExt := strings.ToLower(filepath.Ext(header.Filename))
+		switch origExt {
+		case ".jpg", ".jpeg":
+			ext = "jpg"
+			ok = true
+		case ".png":
+			ext = "png"
+			ok = true
+		case ".webp":
+			ext = "webp"
+			ok = true
+		}
+	}
 	if !ok {
 		sendJSON(w, http.StatusBadRequest, models.APIResponse{
 			Success: false,
-			Message: fmt.Sprintf("Unsupported image type %q — use jpg, png or webp", ctype),
+			Message: fmt.Sprintf("Unsupported image type %q (detected %q) — use jpg, png or webp", header.Filename, ctype),
 		})
 		return
 	}

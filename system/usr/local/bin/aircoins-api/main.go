@@ -3,7 +3,6 @@ package main
 import (
 	"aircoins-api/handlers"
 	"aircoins-api/models"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -320,11 +319,7 @@ func main() {
 	mux.Handle("/api/admin/updater/downloaded", adminProtected(updaterHandler.CheckDownloadedFile))
 
 	// Health check
-	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"ok","version":"%s"}`, Version)
-	})
+	mux.HandleFunc("/api/health", handlers.SystemHealth(Version))
 
 	// Recover iptables auth state for surviving sessions (reboot safety)
 	// and enforce wall-clock expiry every 30s in the background.

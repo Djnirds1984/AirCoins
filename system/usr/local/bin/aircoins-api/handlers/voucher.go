@@ -98,11 +98,13 @@ func (h *VoucherHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Count   int     `json:"count"`
-		Minutes int     `json:"minutes"`
-		Plan    string  `json:"plan"` // 'time' (default) or 'monthly'
-		Price   float64 `json:"price"`
-		Notes   string  `json:"notes"`
+		Count           int     `json:"count"`
+		Minutes         int     `json:"minutes"`
+		Plan            string  `json:"plan"` // 'time' (default) or 'monthly'
+		Price           float64 `json:"price"`
+		Notes           string  `json:"notes"`
+		Pausable        *bool   `json:"pausable"`        // nil = default pausable
+		ExpirationHours int     `json:"expiration_hours"` // pause deadline after first use
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid request body"})
@@ -131,6 +133,17 @@ func (h *VoucherHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	if req.Plan == "monthly" || req.Minutes >= 43200 {
 		plan = "monthly"
 	}
+	pausable := true
+	if req.Pausable != nil {
+		pausable = *req.Pausable
+	}
+	if req.ExpirationHours < 0 || req.ExpirationHours > 87600 {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "expiration_hours out of range"})
+		return
+	}
+	if !pausable {
+		req.ExpirationHours = 0 // consumable vouchers cannot pause
+	}
 
 	codes := make([]string, 0, req.Count)
 	batchCode, err := generateBatchCode(h.DB)
@@ -147,9 +160,9 @@ func (h *VoucherHandler) Generate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if _, err := h.DB.Exec(`
-			INSERT INTO vouchers (code, batch_code, duration_minutes, plan, status, price, notes)
-			VALUES ($1, $2, $3, $4, 'unused', $5, $6)
-		`, code, batchCode, req.Minutes, plan, req.Price, req.Notes); err != nil {
+			INSERT INTO vouchers (code, batch_code, duration_minutes, plan, status, price, notes, pausable, expiration_hours)
+			VALUES ($1, $2, $3, $4, 'unused', $5, $6, $7, $8)
+		`, code, batchCode, req.Minutes, plan, req.Price, req.Notes, pausable, req.ExpirationHours); err != nil {
 			log.Printf("voucher insert failed: %v", err)
 			sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to save voucher"})
 			return
@@ -237,6 +250,7 @@ func (h *VoucherHandler) List(w http.ResponseWriter, r *http.Request) {
 	args = append(args, limit, offset)
 	rows, err := h.DB.Query(`
 		SELECT id, code, COALESCE(batch_code, ''), duration_minutes, plan, status, price, notes,
+		       COALESCE(pausable, TRUE), expiration_hours,
 		       redeemed_at, COALESCE(redeemed_mac, ''), session_id,
 		       COALESCE(session_token, ''), created_at
 		FROM vouchers
@@ -255,7 +269,7 @@ func (h *VoucherHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var v models.Voucher
 		if err := rows.Scan(&v.ID, &v.Code, &v.BatchCode, &v.DurationMinutes, &v.Plan, &v.Status,
-			&v.Price, &v.Notes, &v.RedeemedAt, &v.RedeemedMAC, &v.SessionID,
+			&v.Price, &v.Notes, &v.Pausable, &v.ExpirationHours, &v.RedeemedAt, &v.RedeemedMAC, &v.SessionID,
 			&v.SessionToken, &v.CreatedAt); err != nil {
 			log.Printf("voucher scan failed: %v", err)
 			continue
@@ -305,11 +319,12 @@ func (h *VoucherHandler) GetOne(w http.ResponseWriter, r *http.Request, id int) 
 	var v models.Voucher
 	err := h.DB.QueryRow(`
 		SELECT id, code, COALESCE(batch_code, ''), duration_minutes, plan, status, price, notes,
+		       COALESCE(pausable, TRUE), expiration_hours,
 		       redeemed_at, COALESCE(redeemed_mac, ''), session_id,
 		       COALESCE(session_token, ''), created_at
 		FROM vouchers WHERE id = $1
 	`, id).Scan(&v.ID, &v.Code, &v.BatchCode, &v.DurationMinutes, &v.Plan, &v.Status,
-		&v.Price, &v.Notes, &v.RedeemedAt, &v.RedeemedMAC, &v.SessionID,
+		&v.Price, &v.Notes, &v.Pausable, &v.ExpirationHours, &v.RedeemedAt, &v.RedeemedMAC, &v.SessionID,
 		&v.SessionToken, &v.CreatedAt)
 	if err == sql.ErrNoRows {
 		sendJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "Voucher not found"})
@@ -531,17 +546,19 @@ func (h *SessionHandler) RedeemVoucher(w http.ResponseWriter, r *http.Request) {
 	// Atomic claim: only ONE caller can flip a voucher from unused to
 	// used. This is the double-redemption guard.
 	var (
-		voucherID int
-		minutes   int
-		plan      string
-		price     float64
+		voucherID       int
+		minutes         int
+		plan            string
+		price           float64
+		pausable        bool
+		expirationHours int
 	)
 	err := h.DB.QueryRow(`
 		UPDATE vouchers
 		SET status = 'used', redeemed_at = NOW(), redeemed_mac = $2
 		WHERE code = $1 AND status = 'unused'
-		RETURNING id, duration_minutes, plan, price
-	`, code, clientMAC).Scan(&voucherID, &minutes, &plan, &price)
+		RETURNING id, duration_minutes, plan, price, COALESCE(pausable, TRUE), expiration_hours
+	`, code, clientMAC).Scan(&voucherID, &minutes, &plan, &price, &pausable, &expirationHours)
 	if err == sql.ErrNoRows {
 		if redeemFailAdd(clientIP) {
 			log.Printf("voucher redeem: throttle tripped for %s", clientIP)
@@ -556,8 +573,10 @@ func (h *SessionHandler) RedeemVoucher(w http.ResponseWriter, r *http.Request) {
 
 	// Credit the session (create or extend the caller's existing one)
 	// using the exact same path as coin payments. The caller's roaming
-	// token is passed through so the voucher binds to it.
-	session, extended, err := h.creditSession(clientIP, clientMAC, req.SessionToken, 0, minutes, nil)
+	// token is passed through so the voucher binds to it. The voucher's
+	// pause rules are applied at FIRST redemption — an unused voucher
+	// never ages; the pause-expiry clock starts when the code is used.
+	session, extended, err := h.creditSession(clientIP, clientMAC, req.SessionToken, 0, minutes, nil, pausable, expirationHours)
 	if err != nil {
 		// Roll the voucher back to unused so a transient failure does
 		// not eat a paid code.
@@ -615,6 +634,8 @@ func (h *SessionHandler) RedeemVoucher(w http.ResponseWriter, r *http.Request) {
 			"plan":             plan,
 			"duration_minutes": minutes,
 			"price":            price,
+			"pausable":         pausable,
+			"expiration_hours": expirationHours,
 		},
 	})
 }

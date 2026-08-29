@@ -634,6 +634,16 @@ ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS batch_code VARCHAR(20) NOT NULL DE
 CREATE INDEX IF NOT EXISTS idx_vouchers_batch ON vouchers(batch_code);
 
 -- ============================================
+-- 019 - VOUCHERS: pause rules (pausable + pause expiry window)
+-- ============================================
+-- Mirrors the pricing rules. Stored on the voucher at generation time and
+-- applied to the session at FIRST redemption only — an unused voucher
+-- never ages, the pause-expiry clock starts when the code is first used.
+-- Self-healed by the API in EnsureSchema for OTA updates.
+ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS pausable BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS expiration_hours INTEGER NOT NULL DEFAULT 0;
+
+-- ============================================
 -- COMPLETION
 -- ============================================
 \echo 'Migrations applied.'

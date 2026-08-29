@@ -41,17 +41,20 @@ const remainingSQL = `GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW())))::int
 
 // sessionRow holds the common columns returned by session lookups.
 type sessionRow struct {
-	id         int
-	mac        string
-	ip         string
-	coins      int
-	total      int
-	remaining  int
-	startedAt  time.Time
-	expiresAt  time.Time
-	pausedAt   sql.NullTime
-	shapedMbps *int
-	token      string
+	id             int
+	mac            string
+	ip             string
+	coins          int
+	total          int
+	remaining      int
+	startedAt      time.Time
+	expiresAt      time.Time
+	pausedAt       sql.NullTime
+	shapedMbps     *int
+	token          string
+	pausable       bool
+	expirationHrs  int
+	pauseDeadline  sql.NullTime
 }
 
 // sessionMutexes serializes concurrent MAC migrations for the same session.
@@ -63,7 +66,8 @@ var sessionMutexes sync.Map
 func lookupSessionByTokenOrMAC(db *sql.DB, token, mac, ip string) (*sessionRow, string, error) {
 	lookupSQL := `SELECT id, COALESCE(client_mac,''), COALESCE(client_ip,''),
 		coins_inserted, total_seconds, ` + remainingSQL + `,
-		started_at, expires_at, paused_at, shaped_mbps, COALESCE(session_token,'')
+		started_at, expires_at, paused_at, shaped_mbps, COALESCE(session_token,''),
+		COALESCE(pausable, true), COALESCE(expiration_hours, 0), pause_expires_at
 		FROM sessions
 		WHERE status = 'active' AND (paused_at IS NOT NULL OR expires_at > NOW())`
 
@@ -72,7 +76,8 @@ func lookupSessionByTokenOrMAC(db *sql.DB, token, mac, ip string) (*sessionRow, 
 		var s sessionRow
 		err := db.QueryRow(lookupSQL+` AND session_token = $1 LIMIT 1`, token).
 			Scan(&s.id, &s.mac, &s.ip, &s.coins, &s.total, &s.remaining,
-				&s.startedAt, &s.expiresAt, &s.pausedAt, &s.shapedMbps, &s.token)
+				&s.startedAt, &s.expiresAt, &s.pausedAt, &s.shapedMbps, &s.token,
+				&s.pausable, &s.expirationHrs, &s.pauseDeadline)
 		if err == nil {
 			return &s, "token", nil
 		}
@@ -86,7 +91,8 @@ func lookupSessionByTokenOrMAC(db *sql.DB, token, mac, ip string) (*sessionRow, 
 		var s sessionRow
 		err := db.QueryRow(lookupSQL+` AND client_mac = $1 ORDER BY started_at DESC LIMIT 1`, mac).
 			Scan(&s.id, &s.mac, &s.ip, &s.coins, &s.total, &s.remaining,
-				&s.startedAt, &s.expiresAt, &s.pausedAt, &s.shapedMbps, &s.token)
+				&s.startedAt, &s.expiresAt, &s.pausedAt, &s.shapedMbps, &s.token,
+				&s.pausable, &s.expirationHrs, &s.pauseDeadline)
 		if err == nil {
 			return &s, "mac", nil
 		}
@@ -100,7 +106,8 @@ func lookupSessionByTokenOrMAC(db *sql.DB, token, mac, ip string) (*sessionRow, 
 		var s sessionRow
 		err := db.QueryRow(lookupSQL+` AND client_ip = $1 ORDER BY started_at DESC LIMIT 1`, ip).
 			Scan(&s.id, &s.mac, &s.ip, &s.coins, &s.total, &s.remaining,
-				&s.startedAt, &s.expiresAt, &s.pausedAt, &s.shapedMbps, &s.token)
+				&s.startedAt, &s.expiresAt, &s.pausedAt, &s.shapedMbps, &s.token,
+				&s.pausable, &s.expirationHrs, &s.pauseDeadline)
 		if err == nil {
 			return &s, "ip", nil
 		}
@@ -248,12 +255,12 @@ func (h *SessionHandler) unprocessedWindowCoins() windowCoins {
 
 		minutes, cached := minutesByValue[value]
 		if !cached {
-			resolved, _, perr := MinutesForAmount(h.DB, value)
+			m, perr := MinutesForAmount(h.DB, value)
 			if perr != nil {
 				log.Printf("Error resolving pricing for P%d: %v", value, perr)
-				resolved = 0
+				m = PricingMatch{}
 			}
-			minutes = resolved
+			minutes = m.Minutes
 			minutesByValue[value] = minutes
 		}
 
@@ -355,7 +362,17 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, extended, err := h.creditSession(clientIP, clientMAC, sessionToken, coins.totalValue, coins.totalMinutes, coins.ids)
+	// Resolve the pause rules for the purchase: snapshot the matched rate's
+	// pausable flag and expiration window so the session knows whether the
+	// portal may show a Pause button and when a paused session must be
+	// force-expired if the user stays away too long.
+	pricingMatch, perr := MinutesForAmount(h.DB, coins.totalValue)
+	if perr != nil {
+		log.Printf("Error resolving rate rules for P%d: %v", coins.totalValue, perr)
+		pricingMatch = PricingMatch{Pausable: true}
+	}
+
+	session, extended, err := h.creditSession(clientIP, clientMAC, sessionToken, coins.totalValue, coins.totalMinutes, coins.ids, pricingMatch.Pausable, pricingMatch.ExpirationHours)
 	if err != nil {
 		// Check if the error is a ban rejection (F6: ban check inside tx)
 		if banErr, ok := err.(*banActiveError); ok {
@@ -406,7 +423,7 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 // creditSession creates a new active session or extends the caller's
 // existing one, and marks the credited coin_events processed — all in one
 // transaction so a crash can neither double-credit nor eat coins.
-func (h *SessionHandler) creditSession(clientIP, clientMAC, sessionToken string, coinValue, minutes int, eventIDs []int64) (map[string]interface{}, bool, error) {
+func (h *SessionHandler) creditSession(clientIP, clientMAC, sessionToken string, coinValue, minutes int, eventIDs []int64, pausable bool, expirationHours int) (map[string]interface{}, bool, error) {
 	addSeconds := minutes * 60
 
 	tx, err := h.DB.Begin()
@@ -492,8 +509,9 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC, sessionToken string,
 		err = tx.QueryRow(`
 			INSERT INTO sessions (client_ip, client_mac, coins_inserted, total_seconds,
 			                      remaining_seconds, status, started_at, activated_at, expires_at,
-			                      paused_at, remaining_seconds_at_pause, pause_count, session_token)
-			VALUES ($1, $2, $3::int, $4::int, $4::int, 'active', NOW(), NOW(), NOW() + ($4::int * INTERVAL '1 second'), NULL, NULL, 0, $5)
+			                      paused_at, remaining_seconds_at_pause, pause_count, session_token,
+			                      pausable, expiration_hours)
+			VALUES ($1, $2, $3::int, $4::int, $4::int, 'active', NOW(), NOW(), NOW() + ($4::int * INTERVAL '1 second'), NULL, NULL, 0, $5, $6, $7)
 			ON CONFLICT (client_mac) WHERE client_mac IS NOT NULL AND client_mac <> '' AND client_mac <> '-'
 			DO UPDATE SET
 			    client_ip = EXCLUDED.client_ip,
@@ -508,18 +526,22 @@ func (h *SessionHandler) creditSession(clientIP, clientMAC, sessionToken string,
 			    paused_at = NULL,
 			    remaining_seconds_at_pause = NULL,
 			    pause_count = 0,
+			    pausable = EXCLUDED.pausable,
+			    expiration_hours = EXCLUDED.expiration_hours,
+			    pause_expires_at = NULL,
 			    session_token = COALESCE(NULLIF(sessions.session_token, ''), EXCLUDED.session_token)
 			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at, COALESCE(session_token, '')
-		`, clientIP, clientMAC, coinValue, addSeconds, sessionToken).
+		`, clientIP, clientMAC, coinValue, addSeconds, sessionToken, pausable, expirationHours).
 			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt, &tokenOut)
 	} else {
 		// No resolvable MAC: excluded from the unique index, plain insert.
 		err = tx.QueryRow(`
 			INSERT INTO sessions (client_ip, client_mac, coins_inserted, total_seconds,
-			                      remaining_seconds, status, started_at, activated_at, expires_at)
-			VALUES ($1, $2, $3::int, $4::int, $4::int, 'active', NOW(), NOW(), NOW() + ($4::int * INTERVAL '1 second'))
+			                      remaining_seconds, status, started_at, activated_at, expires_at,
+			                      pausable, expiration_hours)
+			VALUES ($1, $2, $3::int, $4::int, $4::int, 'active', NOW(), NOW(), NOW() + ($4::int * INTERVAL '1 second'), $5, $6)
 			RETURNING id, coins_inserted, total_seconds, `+remainingSQL+`, expires_at, ''
-		`, clientIP, clientMAC, coinValue, addSeconds).
+		`, clientIP, clientMAC, coinValue, addSeconds, pausable, expirationHours).
 			Scan(&id, &coinsTotal, &totalSeconds, &remaining, &expiresAt, &tokenOut)
 	}
 	if err != nil {
@@ -616,16 +638,23 @@ func (h *SessionHandler) Status(w http.ResponseWriter, r *http.Request) {
 				remaining = int(snap.Int64)
 			}
 		}
+		pauseExpiresAt := ""
+		if sess.pauseDeadline.Valid {
+			pauseExpiresAt = sess.pauseDeadline.Time.Format(time.RFC3339)
+		}
 		response["session"] = map[string]interface{}{
-			"id":         sess.id,
-			"status":     "active",
-			"coins":      sess.coins,
-			"total":      sess.total,
-			"remaining":  remaining,
-			"started":    sess.startedAt.Unix(),
-			"mac":        sess.mac,
-			"expires_at": sess.expiresAt.Format(time.RFC3339),
-			"paused":     paused,
+			"id":                 sess.id,
+			"status":             "active",
+			"coins":              sess.coins,
+			"total":              sess.total,
+			"remaining":          remaining,
+			"started":            sess.startedAt.Unix(),
+			"mac":                sess.mac,
+			"expires_at":         sess.expiresAt.Format(time.RFC3339),
+			"paused":             paused,
+			"pausable":           sess.pausable,
+			"expiration_hours":   sess.expirationHrs,
+			"pause_expires_at":   pauseExpiresAt,
 		}
 	}
 
@@ -706,7 +735,8 @@ func (h *SessionHandler) GetCurrent(w http.ResponseWriter, r *http.Request) {
 	var session models.Session
 	err := h.DB.QueryRow(`
 		SELECT id, client_ip, client_mac, coins_inserted, total_seconds,
-		       `+remainingSQL+`, status, started_at, activated_at, expired_at, expires_at
+		       `+remainingSQL+`, status, started_at, activated_at, expired_at, expires_at,
+		       COALESCE(pausable, true), COALESCE(expiration_hours, 0), pause_expires_at
 		FROM sessions
 		WHERE status = 'active' AND expires_at > NOW()
 		  AND (($1 <> '' AND client_mac = $1) OR client_ip = $2)
@@ -716,6 +746,7 @@ func (h *SessionHandler) GetCurrent(w http.ResponseWriter, r *http.Request) {
 		&session.ID, &session.ClientIP, &session.ClientMAC, &session.CoinsInserted,
 		&session.TotalSeconds, &session.RemainingSeconds, &session.Status,
 		&session.StartedAt, &session.ActivatedAt, &session.ExpiredAt, &session.ExpiresAt,
+		&session.Pausable, &session.ExpirationHours, &session.PauseExpiresAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -761,7 +792,9 @@ func (h *SessionHandler) AdminCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientMAC := resolveClientMAC(req.ClientIP)
-	session, extended, err := h.creditSession(req.ClientIP, clientMAC, "", req.Coins, req.Minutes, nil)
+	// Admin-created sessions default to a pausable rate with no pause-expiry
+	// window (legacy behaviour) unless the operator sets otherwise.
+	session, extended, err := h.creditSession(req.ClientIP, clientMAC, "", req.Coins, req.Minutes, nil, true, 0)
 	if err != nil {
 		log.Printf("Error creating admin session for %s: %v", req.ClientIP, err)
 		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to create session"})
@@ -1015,18 +1048,30 @@ func (h *SessionHandler) Pause(w http.ResponseWriter, r *http.Request) {
 	var id int
 	var expiresAt time.Time
 	var pauseCount sql.NullInt64
+	var pausable bool
+	var expirationHours int
 	err := h.DB.QueryRow(`
-		SELECT id, expires_at, COALESCE(pause_count, 0) FROM sessions
+		SELECT id, expires_at, COALESCE(pause_count, 0), COALESCE(pausable, true), COALESCE(expiration_hours, 0) FROM sessions
 		WHERE status = 'active' AND expires_at > NOW() AND paused_at IS NULL
 		  AND client_mac = $1
 		ORDER BY started_at DESC LIMIT 1
-	`, clientMAC).Scan(&id, &expiresAt, &pauseCount)
+	`, clientMAC).Scan(&id, &expiresAt, &pauseCount, &pausable, &expirationHours)
 	if err == sql.ErrNoRows {
 		sendJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "No active non-paused session found"})
 		return
 	} else if err != nil {
 		log.Printf("Pause: query failed: %v", err)
 		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to pause session"})
+		return
+	}
+
+	// Consumable rates (pausable = false) cannot be paused: there is no
+	// Pause button in the portal and the backend enforces the same rule.
+	if !pausable {
+		sendJSON(w, http.StatusForbidden, models.APIResponse{
+			Success: false,
+			Message: "This rate is consumable and cannot be paused",
+		})
 		return
 	}
 
@@ -1044,15 +1089,25 @@ func (h *SessionHandler) Pause(w http.ResponseWriter, r *http.Request) {
 		remaining = 0
 	}
 
+	// When the rate carries a pause-expiry window, set an absolute wall-clock
+	// deadline (paused_at + expiration_hours). If the user stays paused past
+	// it, ExpireOverduePausedSessions forces expiry and the user must insert
+	// coin again. expiration_hours = 0 means frozen indefinitely (legacy).
+	var pauseDeadline interface{} = nil
+	if expirationHours > 0 {
+		pauseDeadline = time.Now().Add(time.Duration(expirationHours) * time.Hour)
+	}
+
 	// F2: Tight WHERE clause prevents pausing an already-expired session.
 	// RowsAffected check catches the race where expiry ran between the
 	// SELECT above and this UPDATE.
 	res, err := h.DB.Exec(`
 		UPDATE sessions
 		SET paused_at = NOW(), remaining_seconds_at_pause = $1,
-		    pause_count = COALESCE(pause_count, 0) + 1
-		WHERE id = $2 AND status = 'active' AND expires_at > NOW() AND paused_at IS NULL
-	`, remaining, id)
+		    pause_count = COALESCE(pause_count, 0) + 1,
+		    pause_expires_at = $2
+		WHERE id = $3 AND status = 'active' AND expires_at > NOW() AND paused_at IS NULL
+	`, remaining, pauseDeadline, id)
 	if err != nil {
 		log.Printf("Pause: update failed: %v", err)
 		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to pause session"})
@@ -1098,12 +1153,13 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 
 	// Find the active, currently-paused session
 	var id, remainingAtPause int
+	var pauseDeadline sql.NullTime
 	err := h.DB.QueryRow(`
-		SELECT id, COALESCE(remaining_seconds_at_pause, 0) FROM sessions
+		SELECT id, COALESCE(remaining_seconds_at_pause, 0), pause_expires_at FROM sessions
 		WHERE status = 'active' AND paused_at IS NOT NULL
 		  AND client_mac = $1
 		ORDER BY started_at DESC LIMIT 1
-	`, clientMAC).Scan(&id, &remainingAtPause)
+	`, clientMAC).Scan(&id, &remainingAtPause, &pauseDeadline)
 	if err == sql.ErrNoRows {
 		sendJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "No active paused session found"})
 		return
@@ -1113,13 +1169,27 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If the session's pause window has already elapsed (the user stayed
+	// paused longer than the rate's expiration_hours), the purchase is
+	// forfeited: remaining becomes 0 and the user must insert coin again.
+	if pauseDeadline.Valid && pauseDeadline.Time.Before(time.Now()) {
+		forceExpirePaused(h.DB, id, clientIP, clientMAC, "pause-window-expired")
+		sendJSON(w, http.StatusOK, map[string]interface{}{
+			"success":      true,
+			"expired":      true,
+			"remaining":    0,
+			"message":      "Your paused session expired — insert coin again to regain internet access.",
+		})
+		return
+	}
+
 	newExpiresAt := time.Now().Add(time.Duration(remainingAtPause) * time.Second)
 
 	// F7: Tight WHERE clause + RowsAffected check.
 	// pause_count is NOT reset on resume (only on fresh start).
 	res, err := h.DB.Exec(`
 		UPDATE sessions
-		SET paused_at = NULL, remaining_seconds_at_pause = NULL,
+		SET paused_at = NULL, remaining_seconds_at_pause = NULL, pause_expires_at = NULL,
 		    expires_at = NOW() + ($1::int * INTERVAL '1 second'),
 		    remaining_seconds = $1
 		WHERE id = $2 AND status = 'active' AND paused_at IS NOT NULL
@@ -1156,6 +1226,56 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 // ============================================
 // EXPIRY ENFORCEMENT
 // ============================================
+
+// forceExpirePaused expires a single paused session whose pause window has
+// elapsed and revokes the client's internet access. remaining is zeroed so
+// the user must insert coin again to regain internet.
+func forceExpirePaused(db *sql.DB, id int, ip, mac, reason string) {
+	_, err := db.Exec(`
+		UPDATE sessions
+		SET status = 'expired', expired_at = NOW(), remaining_seconds = 0,
+		    paused_at = NULL, remaining_seconds_at_pause = NULL, pause_expires_at = NULL
+		WHERE id = $1 AND status = 'active'
+	`, id)
+	if err != nil {
+		log.Printf("forceExpirePaused: update session %d failed: %v", id, err)
+		return
+	}
+	log.Printf("session %d force-expired (%s, ip=%s, mac=%s)", id, reason, ip, mac)
+	logAction(db, "INFO", "session", "Session "+strconv.Itoa(id)+" pause-expired ("+ip+") — user must insert coin again")
+	runCaptiveRules(db, "unauth", mac, reason)
+	EnsurePerDeviceClass(db, "", mac, ip, "remove")
+}
+
+// ExpireOverduePausedSessions forcibly expires every paused session whose
+// pause_expires_at deadline has passed. A user who pauses a time-limited rate
+// and does not resume before the rate's expiration_hours window forfeits the
+// remaining time and must insert coin again to regain internet.
+func ExpireOverduePausedSessions(db *sql.DB) int {
+	rows, err := db.Query(`
+		SELECT id, COALESCE(client_mac, ''), COALESCE(client_ip, '')
+		FROM sessions
+		WHERE status = 'active' AND paused_at IS NOT NULL
+		  AND pause_expires_at IS NOT NULL AND pause_expires_at <= NOW()
+	`)
+	if err != nil {
+		log.Printf("Error listing overdue paused sessions: %v", err)
+		return 0
+	}
+	defer rows.Close()
+
+	expired := 0
+	for rows.Next() {
+		var id int
+		var mac, ip string
+		if err := rows.Scan(&id, &mac, &ip); err != nil {
+			continue
+		}
+		forceExpirePaused(db, id, ip, mac, "pause-window-expired")
+		expired++
+	}
+	return expired
+}
 
 // ExpireOverdueSessions expires every active session whose expires_at has
 // passed (or that predates the expires_at column — legacy demo rows) and
@@ -1205,6 +1325,10 @@ func StartExpiryEnforcer(db *sql.DB) {
 	if n := ExpireOverdueSessions(db, "startup-recovery"); n > 0 {
 		log.Printf("startup recovery: expired %d overdue session(s)", n)
 	}
+	// Expire paused sessions whose pause window elapsed while offline.
+	if n := ExpireOverduePausedSessions(db); n > 0 {
+		log.Printf("startup recovery: expired %d overdue paused session(s)", n)
+	}
 
 	// Re-auth only active NON-PAUSED MACs. Paused sessions have their
 	// internet closed (captive-rules unauth on pause), so they must NOT
@@ -1232,6 +1356,8 @@ func StartExpiryEnforcer(db *sql.DB) {
 		defer ticker.Stop()
 		for range ticker.C {
 			ExpireOverdueSessions(db, "expire")
+			// Forcibly expire paused sessions whose pause window elapsed.
+			ExpireOverduePausedSessions(db)
 			// Auto-clear expired bans (belt-and-brazes on top of
 			// the per-status-poll activeBan check).
 			CleanExpiredBans(db)

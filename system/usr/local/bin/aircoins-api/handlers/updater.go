@@ -113,7 +113,11 @@ func (h *UpdaterHandler) CheckForUpdate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	force := r.URL.Query().Get("force") == "true"
+	// Always force fetch when the check update button is pressed
+	force := true
+	if r.URL.Query().Get("force") == "false" {
+		force = false
+	}
 
 	manifest, err := h.fetchLatest(force)
 	if err != nil {

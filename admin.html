@@ -2031,6 +2031,20 @@
                         </div>
                     </div>
 
+                    <!-- Header Image -->
+                    <div class="settings-card">
+                        <div class="card-title">Portal Header Image</div>
+                        <div class="portal-bg-row">
+                            <div class="portal-bg-thumb" id="portal-header-thumb">none</div>
+                            <input type="file" id="portal-header-file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+                            <button class="btn btn-primary btn-sm" id="portal-header-upload-btn" onclick="uploadPortalHeaderImage()">Upload</button>
+                            <button class="btn btn-danger btn-sm" id="portal-header-remove-btn" onclick="removePortalHeaderImage()">Remove</button>
+                        </div>
+                        <div class="gpio-info-text" style="margin-top:12px;">
+                            JPG, PNG or WEBP, max 5 MB. Shown prominently in the captive portal header/logo area.
+                        </div>
+                    </div>
+
                     <!-- Portal Audio -->
                     <div class="settings-card">
                         <div class="card-title">Portal Audio</div>
@@ -4752,9 +4766,23 @@ const PORTAL_DARK_LEGACY = {
 // Currently edited (unsaved) appearance config
 var portalAppearance = null;
 
-function safePortalBg() {
-    var img = portalAppearance && portalAppearance.background_image;
+function safePortalHeader() {
+    var img = portalAppearance && portalAppearance.header_image;
     return (img && PORTAL_BG_RE.test(img)) ? img : '';
+}
+
+var portalHeaderVersion = Date.now();
+
+function updatePortalHeaderThumb() {
+    var thumb = document.getElementById('portal-header-thumb');
+    var img = safePortalHeader();
+    if (img) {
+        thumb.style.backgroundImage = 'url(\'' + img + '?t=' + portalHeaderVersion + '\')';
+        thumb.textContent = '';
+    } else {
+        thumb.style.backgroundImage = 'none';
+        thumb.textContent = 'none';
+    }
 }
 
 // <input type="color"> only accepts #rrggbb — expand #rgb shorthand
@@ -4876,6 +4904,7 @@ function syncPortalEditor() {
     });
     updateThemeSelection();
     updatePortalBgThumb();
+    updatePortalHeaderThumb();
     updatePortalPreview();
 }
 
@@ -4961,15 +4990,54 @@ async function uploadPortalBackground() {
     }
 }
 
-async function removePortalBackground() {
+async function uploadPortalHeaderImage() {
+    var input = document.getElementById('portal-header-file');
+    if (!input.files || !input.files[0]) {
+        showNotification('Choose an image file first', 'error');
+        return;
+    }
+    if (input.files[0].size > 5 * 1024 * 1024) {
+        showNotification('Image too large (max 5 MB)', 'error');
+        return;
+    }
+    var fd = new FormData();
+    fd.append('image', input.files[0]);
+    var btn = document.getElementById('portal-header-upload-btn');
+    btn.disabled = true;
     try {
-        await apiCall('DELETE', '/admin/portal/background');
-        if (portalAppearance) portalAppearance.background_image = '';
-        updatePortalBgThumb();
+        var res = await fetch(API_BASE + '/admin/portal/header-image', {
+            method: 'POST',
+            headers: authToken ? { 'Authorization': 'Bearer ' + authToken } : {},
+            body: fd
+        });
+        if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
+        var data = null;
+        try { data = await res.json(); } catch (_) {}
+        if (!res.ok || !data || !data.success) {
+            throw new Error((data && data.message) || ('Upload failed: HTTP ' + res.status));
+        }
+        portalAppearance.header_image = data.data.path;
+        portalHeaderVersion = Date.now();
+        input.value = '';
+        updatePortalHeaderThumb();
         updatePortalPreview();
-        showNotification('Background image removed', 'success');
+        showNotification('Header image uploaded', 'success');
     } catch (e) {
-        showNotification('Failed to remove background: ' + e.message, 'error');
+        showNotification(e.message, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function removePortalHeaderImage() {
+    try {
+        await apiCall('DELETE', '/admin/portal/header-image');
+        if (portalAppearance) portalAppearance.header_image = '';
+        updatePortalHeaderThumb();
+        updatePortalPreview();
+        showNotification('Header image removed', 'success');
+    } catch (e) {
+        showNotification('Failed to remove header image: ' + e.message, 'error');
     }
 }
 
@@ -6904,7 +6972,7 @@ async function loadUpdater() {
     badge.style.background = 'rgba(255,255,255,0.05)';
     badge.style.color = '#888';
     try {
-        var data = await apiCall('GET', '/admin/updater/check');
+        var data = await apiCall('GET', '/admin/updater/check?force=true');
         renderVersionCards(data);
     } catch (e) {
         el.innerHTML = '<div style="padding:20px;text-align:center;color:#f44336;">Failed to check: ' + escapeHtml(e.message) + '</div>';

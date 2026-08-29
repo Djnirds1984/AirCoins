@@ -485,6 +485,7 @@ func applyFQCodelPerDevice(db *sql.DB, iface string, rule QdiscRule) ([]string, 
 	// Fetch active sessions on this interface
 	macs := activeSessionMACs(db, iface)
 	var partialFailures []string
+
 	for _, mac := range macs {
 		// Use a stable classID derived from the MAC so add and remove are symmetric.
 		classID := macToClassID(mac)
@@ -499,13 +500,18 @@ func applyFQCodelPerDevice(db *sql.DB, iface string, rule QdiscRule) ([]string, 
 	return partialFailures, verr
 }
 
+// ensureIngressQdisc adds an ingress qdisc to the interface if not already present.
+func ensureIngressQdisc(iface string) {
+	// Simple check: see if ingress is already added
+	cmd := exec.Command("tc", "qdisc", "show", "dev", iface, "ingress")
+	out, _ := cmd.CombinedOutput()
+	if !strings.Contains(string(out), "ingress ffff:") {
+		runTC("qdisc", "add", "dev", iface, "handle", "ffff:", "ingress")
+	}
+}
+
 // addClientClass creates a per-MAC HTB class + fq_codel leaf + u32 filter.
 // The MAC is validated before being passed to tc; invalid MACs are rejected.
-//
-// NOTE: On egress of the portal interface (Pi → client = download), the
-// Ethernet destination MAC is the client's MAC, so the filter uses
-// "match ether dst <mac>".  The previous "match ether src" never matched
-// any traffic because the source MAC on egress is the Pi's own NIC MAC.
 func addClientClass(iface, mac string, classID int, rateArg string) error {
 	if !isValidMAC(mac) {
 		return fmt.Errorf("invalid MAC format: %q — skipping tc filter", mac)
@@ -518,11 +524,19 @@ func addClientClass(iface, mac string, classID int, rateArg string) error {
 	if err := runTC("qdisc", "add", "dev", iface, "parent", cid, "fq_codel"); err != nil {
 		return err
 	}
+	// Download (Egress)
 	if err := runTC("filter", "add", "dev", iface, "parent", "1:", "protocol", "ip",
 		"u32", "match", "ether", "dst", mac,
 		"flowid", cid); err != nil {
 		return err
 	}
+	
+	// Upload (Ingress Police)
+	ensureIngressQdisc(iface)
+	// Apply ingress policing (rate limit) to match upload speed
+	runTC("filter", "add", "dev", iface, "parent", "ffff:", "protocol", "ip",
+		"u32", "match", "ether", "src", mac,
+		"action", "police", "rate", rateArg, "burst", "10k", "drop")
 	return nil
 }
 
@@ -534,9 +548,14 @@ func delClientClass(iface, mac string, classID int) {
 		return
 	}
 	cid := fmt.Sprintf("1:%x", classID)
-	// Delete filter first, then qdisc, then class
+	// Delete egress filter
 	exec.Command("tc", "filter", "del", "dev", iface, "parent", "1:", "protocol", "ip",
 		"u32", "match", "ether", "dst", mac, "flowid", cid).Run()
+	
+	// Delete ingress filter (police)
+	exec.Command("tc", "filter", "del", "dev", iface, "parent", "ffff:", "protocol", "ip",
+		"u32", "match", "ether", "src", mac).Run()
+
 	exec.Command("tc", "qdisc", "del", "dev", iface, "parent", cid).Run()
 	exec.Command("tc", "class", "del", "dev", iface, "parent", "1:", "classid", cid).Run()
 }

@@ -6,6 +6,18 @@ All notable changes to AirCoins are documented in this file.
 
 ---
 
+## v1.19.2 — Upload Bandwidth Limits & Instant Updater Refresh
+
+**Release date:** August 2026
+
+### Fixed
+- **Upload Bandwidth Shaping** — Refactored traffic control (`qdisc.go`) to add `tc` ingress policing on client interfaces, properly enforcing per-device upload bandwidth limits.
+- **Updater Cache Bypass** — Updated the admin interface and updater handler to force a live fetch when clicking the **Check for Updates** button, removing the 1-hour caching delay.
+
+### Action required
+Update to v1.19.2 from Admin > System > Update, then reboot.
+
+
 ## v1.19.1 — Hotfix: License System Stability & Admin Access
 
 **Release date:** August 2026

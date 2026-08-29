@@ -118,6 +118,10 @@ func validateAppearance(a *models.PortalAppearance) error {
 		return fmt.Errorf("background_image must be empty or a filename under /%s/", portalAssetsDir)
 	}
 
+	if a.HeaderImage != "" && !backgroundImageRe.MatchString(a.HeaderImage) {
+		return fmt.Errorf("header_image must be empty or a filename under /%s/", portalAssetsDir)
+	}
+
 	return nil
 }
 
@@ -185,6 +189,7 @@ func (h *AppearanceHandler) SaveAppearance(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	req.BackgroundImage = stored.BackgroundImage
+	req.HeaderImage = stored.HeaderImage
 
 	if err := validateAppearance(&req); err != nil {
 		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: err.Error()})
@@ -378,6 +383,142 @@ func (h *AppearanceHandler) setBackgroundImage(path string) error {
 	}
 
 	cfg.BackgroundImage = path
+	cfg.UpdatedAt = ""
+	doc, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+
+// HeaderImage handles /api/admin/portal/header-image (admin auth):
+// POST uploads a new header image (max 5 MB), DELETE removes it.
+func (h *AppearanceHandler) HeaderImage(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		h.uploadHeaderImage(w, r)
+	case http.MethodDelete:
+		h.deleteHeaderImage(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (h *AppearanceHandler) uploadHeaderImage(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBackgroundBytes+64<<10)
+	if err := r.ParseMultipartForm(maxBackgroundBytes + 64<<10); err != nil {
+		sendJSON(w, http.StatusRequestEntityTooLarge, models.APIResponse{Success: false, Message: "Image too large (max 5 MB)"})
+		return
+	}
+	defer r.MultipartForm.RemoveAll()
+
+	file, header, err := r.FormFile("image")
+	if err != nil {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Missing 'image' file field"})
+		return
+	}
+	defer file.Close()
+
+	if header.Size > maxBackgroundBytes {
+		sendJSON(w, http.StatusRequestEntityTooLarge, models.APIResponse{Success: false, Message: "Image too large (max 5 MB)"})
+		return
+	}
+
+	head := make([]byte, 512)
+	n, err := file.Read(head)
+	if err != nil && err != io.EOF {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Failed to read image"})
+		return
+	}
+	head = head[:n]
+
+	ctype := http.DetectContentType(head)
+	ext, ok := backgroundExtByMIME[ctype]
+	if !ok {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{
+			Success: false,
+			Message: fmt.Sprintf("Unsupported image type %q — use jpg, png or webp", ctype),
+		})
+		return
+	}
+
+	assetsPath := filepath.Join(webRoot(), portalAssetsDir)
+	if err := os.MkdirAll(assetsPath, 0755); err != nil {
+		log.Printf("Error creating %s: %v", assetsPath, err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to create assets directory"})
+		return
+	}
+
+	tmp, err := os.CreateTemp(assetsPath, ".header-*")
+	if err != nil {
+		log.Printf("Error creating temp header image: %v", err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to save image"})
+		return
+	}
+	tmpName := tmp.Name()
+
+	_, err = tmp.Write(head)
+	if err == nil {
+		_, err = io.Copy(tmp, file)
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(tmpName)
+		log.Printf("Error writing header image: %v", err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to save image"})
+		return
+	}
+
+	finalName := "header." + ext
+	finalPath := filepath.Join(assetsPath, finalName)
+	os.Chmod(tmpName, 0644)
+	if err := os.Rename(tmpName, finalPath); err != nil {
+		os.Remove(tmpName)
+		log.Printf("Error renaming header image: %v", err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to save image"})
+		return
+	}
+
+	for _, other := range backgroundExts {
+		if other == ext {
+			continue
+		}
+		os.Remove(filepath.Join(assetsPath, "header."+other))
+	}
+
+	publicPath := "/" + portalAssetsDir + "/" + finalName
+	if err := h.setHeaderImage(publicPath); err != nil {
+		log.Printf("Error updating header_image in config: %v", err)
+	}
+
+	sendJSON(w, http.StatusOK, models.APIResponse{
+		Success: true,
+		Data:    map[string]string{"path": publicPath},
+	})
+}
+
+func (h *AppearanceHandler) deleteHeaderImage(w http.ResponseWriter, r *http.Request) {
+	assetsPath := filepath.Join(webRoot(), portalAssetsDir)
+	for _, ext := range backgroundExts {
+		os.Remove(filepath.Join(assetsPath, "header."+ext))
+	}
+
+	if err := h.setHeaderImage(""); err != nil {
+		log.Printf("Error clearing header_image in config: %v", err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to update appearance config"})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "Header image removed"})
+}
+
+func (h *AppearanceHandler) setHeaderImage(path string) error {
+	cfg, err := h.loadAppearance()
+	if err != nil {
+		return err
+	}
+
+	cfg.HeaderImage = path
 	cfg.UpdatedAt = ""
 	doc, err := json.Marshal(cfg)
 	if err != nil {

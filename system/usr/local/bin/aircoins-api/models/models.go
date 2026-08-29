@@ -332,6 +332,7 @@ type PortalAppearance struct {
 	Theme           string       `json:"theme"`
 	Colors          PortalColors `json:"colors"`
 	BackgroundImage string       `json:"background_image"`
+	HeaderImage     string       `json:"header_image,omitempty"`
 	UpdatedAt       string       `json:"updated_at,omitempty"`
 }
 

@@ -269,6 +269,7 @@ func main() {
 	mux.HandleFunc("/api/portal/appearance", appearanceHandler.GetAppearance)
 	mux.Handle("/api/admin/portal/appearance", adminProtected(appearanceHandler.SaveAppearance))
 	mux.Handle("/api/admin/portal/background", adminProtected(appearanceHandler.Background))
+	mux.Handle("/api/admin/portal/header-image", adminProtected(appearanceHandler.HeaderImage))
 
 	// Portal tap/pause rules + bans
 	mux.HandleFunc("/api/portal/tap-rules", appearanceHandler.GetTapRules)

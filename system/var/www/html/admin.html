@@ -7892,7 +7892,7 @@ async function loadBridges() {
         // Render per-bridge member management
         renderBridgeMembers(bridges);
 
-        // Also fetch VLANs for add-member dropdown
+        // Also fetch physical interfaces + VLANs for add-member dropdown
         loadAvailableVlansForBridge();
     } catch (e) {
         showNotification('Failed to load bridges: ' + e.message, 'error');
@@ -7901,16 +7901,51 @@ async function loadBridges() {
 
 async function loadAvailableVlansForBridge() {
     try {
-        const res = await apiCall('GET', '/vlan/list');
-        const vlans = res.vlans || [];
-        // Filter: VLANs with no IP, no portal, not already in a bridge
+        const [vlansRes, ifacesRes] = await Promise.all([
+            apiCall('GET', '/vlan/list'),
+            apiCall('GET', '/vlan/interfaces')
+        ]);
+        const vlans = vlansRes.vlans || [];
+        const ifaces = ifacesRes.interfaces || [];
+        // Names already used: bridge interfaces themselves and current members
         const allBridgeMembers = {};
+        const allBridgeNames = {};
         bridgeListCache.forEach(function(b) {
+            allBridgeNames[b.name] = true;
             (b.members || []).forEach(function(m) { allBridgeMembers[m] = true; });
         });
-        availableVlansForBridge = vlans.filter(function(v) {
-            return !v.ip && !v.has_portal && !allBridgeMembers[v.interface];
+        // Physical interfaces (onboard NICs, USB LAN adapters, enx*, eth*, end0, …)
+        // Shown even when unusable, with the reason marked on the label.
+        const physCands = ifaces.filter(function(i) {
+            return i.name !== 'lo' && !allBridgeNames[i.name] && !allBridgeMembers[i.name];
+        }).map(function(i) {
+            const hasIP = !!i.ip;
+            const down = i.state !== 'up';
+            return {
+                interface: i.name,
+                description: 'Physical' + (hasIP ? ' — has IP, release it first' : '') + (down ? ' — down' : ''),
+                ip: i.ip,
+                has_portal: false,
+                active: !down,
+                physical: true,
+                disabled: hasIP || down
+            };
         });
+        // VLAN sub-interfaces (value = the VLAN iface name itself, not its parent)
+        const vlanCands = vlans.filter(function(v) {
+            return !v.ip && !v.has_portal && !allBridgeMembers[v.name];
+        }).map(function(v) {
+            return {
+                interface: v.name,
+                description: v.description || ('VLAN ' + v.vlan_id),
+                ip: v.ip,
+                has_portal: v.has_portal,
+                active: v.active,
+                physical: false,
+                disabled: false
+            };
+        });
+        availableVlansForBridge = physCands.concat(vlanCands);
         // Re-render member dropdowns
         renderBridgeMembers(bridgeListCache);
     } catch (e) {
@@ -7937,9 +7972,12 @@ function renderBridgeMembers(bridges) {
                 '</span>';
         }).join('');
 
-        const vlanOpts = availableVlansForBridge.map(function(v) {
-            return '<option value="' + v.interface + '">' + v.interface + (v.description ? ' (' + v.description + ')' : '') + '</option>';
-        }).join('');
+        const optFor = function(v) {
+            return '<option value="' + v.interface + '"' + (v.disabled ? ' disabled' : '') + '>' +
+                v.interface + (v.description ? ' — ' + v.description : '') + '</option>';
+        };
+        const physOpts = availableVlansForBridge.filter(function(v) { return v.physical; }).map(optFor).join('');
+        const vlanOpts = availableVlansForBridge.filter(function(v) { return !v.physical; }).map(optFor).join('');
 
         return '<div style="margin-bottom:16px;padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;">' +
             '<div style="font-weight:600;color:#00d4ff;font-family:monospace;margin-bottom:8px;">' + b.name +
@@ -7950,8 +7988,9 @@ function renderBridgeMembers(bridges) {
             '</div>' +
             '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
             '<select id="bridge-add-member-' + b.name + '" style="padding:6px 32px 6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:#1a1a2e;color:#e0e0e0;color-scheme:dark;font-size:0.85em;min-width:140px;appearance:none;-webkit-appearance:none;background-image:url(data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2712%27%20height=%2712%27%20viewBox=%270%200%2012%2012%27%3E%3Cpath%20fill=%27%23e0e0e0%27%20d=%27M6%208L1%203h10z%27/%3E%3C/svg%3E);background-repeat:no-repeat;background-position:right%208px%20center;">' +
-            '<option value="">Select VLAN…</option>' +
-            vlanOpts +
+            '<option value="">Select interface…</option>' +
+            (physOpts ? '<optgroup label="Physical interfaces">' + physOpts + '</optgroup>' : '') +
+            (vlanOpts ? '<optgroup label="VLAN interfaces">' + vlanOpts + '</optgroup>' : '') +
             '</select>' +
             '<button class="btn btn-primary btn-sm" onclick="addBridgeMemberFromSelect(\'' + b.name + '\')">Add Member</button>' +
             '</div>' +

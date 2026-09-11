@@ -501,6 +501,25 @@ cp "$SYSTEM_DIR/usr/lib/cgi-bin/test_gpio" /usr/lib/cgi-bin/test_gpio
 chmod +x /usr/lib/cgi-bin/test_gpio
 chown root:www-data /usr/lib/cgi-bin/test_gpio
 
+cp "$SYSTEM_DIR/usr/lib/cgi-bin/get_gpio_config" /usr/lib/cgi-bin/get_gpio_config
+chmod +x /usr/lib/cgi-bin/get_gpio_config
+chown root:www-data /usr/lib/cgi-bin/get_gpio_config
+
+# GPIO master toggle platform default:
+#   x86 → OFF (no SBC GPIO header), SBC (ARM) → ON
+# Only sets the key when absent — never overrides an explicit choice.
+mkdir -p /var/lib/pisowifi
+touch /var/lib/pisowifi/gpio_config 2>/dev/null || true
+if ! grep -q '^GPIO_ENABLED=' /var/lib/pisowifi/gpio_config 2>/dev/null; then
+    if [ "$IS_X86" = true ]; then
+        echo "GPIO_ENABLED=false" >> /var/lib/pisowifi/gpio_config
+        echo -e "  GPIO master toggle: ${YELLOW}OFF${NC} (x86 — no SBC GPIO header)"
+    else
+        echo "GPIO_ENABLED=true" >> /var/lib/pisowifi/gpio_config
+        echo -e "  GPIO master toggle: ${GREEN}ON${NC} (SBC board)"
+    fi
+fi
+
 # Enable CGI in lighttpd (fallback if not already in config)
 if ! grep -q "mod_cgi" /etc/lighttpd/lighttpd.conf 2>/dev/null; then
     cat >> /etc/lighttpd/lighttpd.conf << 'CGIEOF'

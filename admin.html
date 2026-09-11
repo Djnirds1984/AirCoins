@@ -2388,6 +2388,20 @@
                 <div class="settings-form">
                     <div class="settings-row">
                         <div class="settings-field">
+                            <label for="gpio-master-enabled">Enable GPIO (SBC boards)</label>
+                            <label class="gpio-master-toggle" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                <input type="checkbox" id="gpio-master-enabled" onchange="onGpioMasterToggle(this)">
+                                <span id="gpio-master-state" style="font-weight:bold;color:#00d4ff;">On</span>
+                            </label>
+                        </div>
+                        <div class="settings-field" style="flex:2;">
+                            <label>Platform</label>
+                            <div id="gpio-platform-notice" class="gpio-info-text" style="display:none;"></div>
+                        </div>
+                    </div>
+                    <div id="gpio-card-body" style="transition:opacity:.2s;">
+                    <div class="settings-row">
+                        <div class="settings-field">
                             <label for="gpio-board-model">SBC Board Model</label>
                             <select id="gpio-board-model" onchange="onBoardModelChange()">
                                 <option value="auto">Auto-Detect</option>
@@ -2475,6 +2489,7 @@
                         <button class="btn btn-primary" onclick="saveGpioConfig()">Save GPIO Config</button>
                     </div>
                     <div id="gpio-test-result" class="gpio-info-text" style="display:none;"></div>
+                    </div><!-- /gpio-card-body (dimmed when the master toggle is off) -->
                 </div>
             </div>
 
@@ -4664,6 +4679,93 @@ function onRelayEnabledChange() {
     document.getElementById('gpio-relay-intensity').disabled = !enabled;
 }
 
+// ============================================================
+// GPIO MASTER TOGGLE (SBC GPIO on/off)
+// ============================================================
+// Off turns the whole GPIO feature (coin listener + relay light) off.
+// x86 Debian has no SBC GPIO header — install.sh defaults the toggle
+// off there; SBC boards (Orange Pi / Raspberry Pi) default on.
+var gpioMasterBusy = false;
+
+function onGpioEnabledFieldsChange() {
+    var enabled = document.getElementById('gpio-master-enabled').checked;
+    var ids = ['gpio-board-model', 'gpio-pin', 'gpio-pulse-mode', 'gpio-debounce-ms',
+               'gpio-relay-pin', 'gpio-relay-enabled', 'gpio-relay-intensity'];
+    for (var i = 0; i < ids.length; i++) {
+        var el = document.getElementById(ids[i]);
+        if (el) el.disabled = !enabled;
+    }
+    document.getElementById('gpio-master-state').textContent = enabled ? 'On' : 'Off';
+    document.getElementById('gpio-master-state').style.color = enabled ? '#00d4ff' : '#888';
+    document.getElementById('gpio-card-body').style.opacity = enabled ? '1' : '0.45';
+    // Keep the relay sub-state consistent while dimmed
+    if (enabled) onRelayEnabledChange();
+}
+
+async function onGpioMasterToggle(cb) {
+    if (gpioMasterBusy) { cb.checked = !cb.checked; return; }
+    var enabled = cb.checked;
+    if (!enabled && !confirm('Turn GPIO off?\n\nThe GPIO coin listener and relay light stop — coin insertions no longer register.\nUse this on x86 Debian: no SBC GPIO header is needed there.')) {
+        cb.checked = true;
+        return;
+    }
+    if (enabled && !confirm('Turn GPIO on?\n\nThe GPIO coin listener starts on the configured physical pin (SBC boards only).\nOn x86 Debian there is no GPIO header — leave GPIO off there.')) {
+        cb.checked = false;
+        return;
+    }
+    gpioMasterBusy = true;
+    try {
+        // Write the master state via the panel CGI (bypasses the prebuilt
+        // API, which may not persist GPIO_ENABLED), then apply immediately
+        // with the existing listener restart endpoint. Partial POST: the
+        // CGI preserves the configured pin/mode/debounce/relay values.
+        var res = await fetch('/cgi-bin/set_gpio_config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gpio_enabled: enabled })
+        });
+        if (!res.ok) throw new Error('CGI error: ' + res.status);
+        try {
+            await apiCall('POST', '/system/services/gpio-coin-listener/restart');
+            showNotification('GPIO ' + (enabled ? 'enabled' : 'disabled') + ' — coin listener restarted', 'success');
+        } catch (_) {
+            showNotification('GPIO master toggle saved. Restart GPIO listener to apply.', 'success');
+        }
+    } catch (e) {
+        showNotification('Failed to toggle GPIO: ' + e.message, 'error');
+        cb.checked = !enabled;
+    }
+    gpioMasterBusy = false;
+    onGpioEnabledFieldsChange();
+}
+
+async function loadGpioMasterState() {
+    try {
+        var res = await fetch('/cgi-bin/get_gpio_config');
+        if (!res.ok) throw new Error('CGI error: ' + res.status);
+        var cfg = await res.json();
+        var cb = document.getElementById('gpio-master-enabled');
+        cb.checked = !!cfg.gpio_enabled;
+
+        // Platform notice: x86 / no usable GPIO method → no SBC GPIO header
+        var noticeEl = document.getElementById('gpio-platform-notice');
+        var model = cfg.board_model || 'unknown';
+        var method = cfg.gpio_method || 'none';
+        if (cfg.gpio_available === false) {
+            noticeEl.textContent = 'Detected: ' + model + ' (GPIO: ' + method + '). x86 platform — no SBC GPIO header. Leave GPIO off; enable only on SBC boards.';
+            noticeEl.className = 'gpio-info-text';
+            noticeEl.style.display = 'block';
+        } else {
+            noticeEl.textContent = 'Detected: ' + model + ' (GPIO: ' + method + ')';
+            noticeEl.className = 'gpio-info-text success';
+            noticeEl.style.display = 'block';
+        }
+    } catch (e) {
+        // CGI unavailable (pre-deploy): keep toggle state as-is, no notice
+    }
+    onGpioEnabledFieldsChange();
+}
+
 async function loadSettings() {
     try {
         // Load WAN config
@@ -4746,6 +4848,9 @@ async function loadSettings() {
     } catch (e) {
         if (e.message !== 'Unauthorized') showNotification('Failed to load GPIO config', 'error');
     }
+
+    // GPIO master toggle + platform notice (x86 → off)
+    await loadGpioMasterState();
 
     // Load VLANs, then the portal servers layered on top of them
     loadVLANs();
@@ -5028,6 +5133,23 @@ async function saveGpioConfig() {
         } catch (re) {
             showNotification('GPIO config saved. Restart GPIO listener to apply.', 'success');
         }
+
+        // Re-assert the master toggle after the API save: the API may
+        // rewrite gpio_config without the GPIO_ENABLED key, which would
+        // silently flip the toggle back to the listener default (on).
+        try {
+            var masterOn = document.getElementById('gpio-master-enabled').checked;
+            var mcgi = await fetch('/cgi-bin/set_gpio_config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ gpio_enabled: masterOn })
+            });
+            if (mcgi.ok && !masterOn) {
+                // Off needs a listener restart to take effect (the API
+                // restart above already ran with the key momentarily unset)
+                await apiCall('POST', '/system/services/gpio-coin-listener/restart');
+            }
+        } catch (_) {}
     } catch (e) {
         showNotification('Failed to save GPIO config: ' + e.message, 'error');
     }

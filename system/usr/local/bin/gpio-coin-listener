@@ -131,6 +131,27 @@ log() {
 }
 
 # ============================================
+# MASTER GPIO TOGGLE
+# ============================================
+# Admin > Settings > GPIO "Enable GPIO" master switch (GPIO_ENABLED in
+# gpio_config). Off turns the whole GPIO feature (coin listener + relay
+# light) off — e.g. x86 Debian has no SBC GPIO header and does not need
+# it. Default is true (on) when the key is absent, so SBC boards keep
+# working across upgrades; install.sh writes false explicitly on x86.
+case "${GPIO_ENABLED:-true}" in
+    1|true|TRUE|True|yes|YES|on|ON) GPIO_ENABLED=true ;;
+    *)                              GPIO_ENABLED=false ;;
+esac
+# This check runs BEFORE the cleanup trap is installed: nothing was armed
+# yet, so exiting here touches no GPIO/relay/armed state. Exit 0 is a
+# clean stop for systemd (Restart=on-failure does not loop on exit 0).
+if [ "$GPIO_ENABLED" = "false" ]; then
+    log "gpio-coin-listener: GPIO disabled by master toggle (Enable GPIO = off), exiting"
+    exit 0
+fi
+log "gpio-coin-listener: master toggle on (board=$BOARD_MODEL, method=$GPIO_METHOD)"
+
+# ============================================
 # CLEANUP ON EXIT
 # ============================================
 cleanup() {

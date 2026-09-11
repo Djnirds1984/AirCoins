@@ -37,22 +37,32 @@ echo "Go version: $GO_VERSION"
 
 # --- Cross-compile ---
 echo ""
-echo "[1/4] Cross-compiling aircoins-api for linux/arm/7..."
+echo "[1/4] Cross-compiling aircoins-api for linux/arm/7 and linux/amd64..."
 cd "$GO_SRC_DIR"
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build \
     -ldflags "-s -w -X main.Version=v${VERSION}" \
     -o aircoins-api .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags "-s -w -X main.Version=v${VERSION}" \
+    -o aircoins-api-x64 .
 cd "$SCRIPT_DIR"
 
-# Validate binary
+# Validate binaries
 if ! file "$GO_SRC_DIR/aircoins-api" | grep -q "ELF"; then
-    echo "ERROR: Compiled binary is not a valid ELF executable."
-    rm -f "$GO_SRC_DIR/aircoins-api"
+    echo "ERROR: ARM binary is not a valid ELF executable."
+    rm -f "$GO_SRC_DIR/aircoins-api" "$GO_SRC_DIR/aircoins-api-x64"
+    exit 1
+fi
+if ! file "$GO_SRC_DIR/aircoins-api-x64" | grep -q "ELF"; then
+    echo "ERROR: x64 binary is not a valid ELF executable."
+    rm -f "$GO_SRC_DIR/aircoins-api" "$GO_SRC_DIR/aircoins-api-x64"
     exit 1
 fi
 
 BINARY_SIZE=$(du -h "$GO_SRC_DIR/aircoins-api" | cut -f1)
-echo "  ✓ Binary compiled: ${BINARY_SIZE} (ELF ARM)"
+X64_SIZE=$(du -h "$GO_SRC_DIR/aircoins-api-x64" | cut -f1)
+echo "  ✓ ARM binary compiled: ${BINARY_SIZE} (ELF ARM)"
+echo "  ✓ x64 binary compiled: ${X64_SIZE} (ELF x86-64, no GPIO — Sub-Vendo coinslots only)"
 
 # --- Assemble tarball ---
 echo ""
@@ -70,6 +80,13 @@ for f in install.sh aircoins-recover.sh .env.example index.html admin.html DEPLO
         echo "  WARNING: $f not found, skipping"
     fi
 done
+
+# Copy NodeMCU firmware (Sub-Vendo units)
+if [ -d "$SCRIPT_DIR/firmware" ]; then
+    mkdir -p "$TARBALL_DIR/firmware"
+    (cd "$SCRIPT_DIR/firmware" && tar cf - .) | (cd "$TARBALL_DIR/firmware" && tar xf -)
+    echo "  ✓ NodeMCU firmware included (firmware/)"
+fi
 
 # Copy system/ directory (excluding .env, .git, dev artifacts)
 if command -v rsync &>/dev/null; then
@@ -118,7 +135,7 @@ sha256sum "$TARBALL_PATH" > "$CHECKSUM_PATH"
 
 # Clean up
 rm -rf "$STAGING_DIR"
-rm -f "$GO_SRC_DIR/aircoins-api"
+rm -f "$GO_SRC_DIR/aircoins-api" "$GO_SRC_DIR/aircoins-api-x64"
 
 TARBALL_SIZE=$(du -h "$TARBALL_PATH" | cut -f1)
 FILE_COUNT=$(tar tzf "$TARBALL_PATH" | wc -l)

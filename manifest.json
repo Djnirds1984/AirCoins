@@ -1,44 +1,44 @@
 ﻿{
-    "version":  "v1.21.1",
-    "release_notes":  "- **Voucher printing fixed**: explicit A4 portrait `@page` size (no longer inherits the browser\u0027s last-used Landscape setting) and a fixed 2-column print grid, so vouchers fill the page instead of one-per-sheet.",
-    "sha256":  "0ed1ab47baf25b049af69edb5be8652d76c3c6361b7e49fed47fa1cb64c3216a",
-    "tarball":  "releases/aircoins-v1.21.1.tar.gz",
+    "version":  "v1.29.0",
+    "release_notes":  "- **Feature: Relay / light pin (additional GPIO pin, default pin 5)** â€” A second selectable GPIO pin that lights/blinks while a customer is inserting coins (Insert Coin pressed â†’ armed window open). Each detected coin triggers a quick confirmation flash; relay turns off when the window closes. Adjustable blink tempo 1 (slow) .. 10 (fast \"dance\"). Settable from Admin \u003e Settings \u003e GPIO just like the coin pin; disabled by default.",
+    "sha256":  "8bf06cff122bc6ba075cc7675e34b96943a2f328e7d22c23d9b8f96229183ae7",
+    "tarball":  "releases/aircoins-v1.29.0.tar.gz",
     "versions":  [
                      {
-                         "released_at":  "2026-08-29T09:05:45Z",
-                         "sha256":  "0ed1ab47baf25b049af69edb5be8652d76c3c6361b7e49fed47fa1cb64c3216a",
-                         "version":  "v1.21.1",
-                         "release_notes":  "- **Voucher printing fixed**: explicit A4 portrait `@page` size (no longer inherits the browser\u0027s last-used Landscape setting) and a fixed 2-column print grid, so vouchers fill the page instead of one-per-sheet.",
-                         "tarball":  "releases/aircoins-v1.21.1.tar.gz"
+                         "released_at":  "2026-09-11T02:08:57Z",
+                         "sha256":  "8bf06cff122bc6ba075cc7675e34b96943a2f328e7d22c23d9b8f96229183ae7",
+                         "version":  "v1.29.0",
+                         "release_notes":  "- **Feature: Relay / light pin (additional GPIO pin, default pin 5)** â€” A second selectable GPIO pin that lights/blinks while a customer is inserting coins (Insert Coin pressed â†’ armed window open). Each detected coin triggers a quick confirmation flash; relay turns off when the window closes. Adjustable blink tempo 1 (slow) .. 10 (fast \"dance\"). Settable from Admin \u003e Settings \u003e GPIO just like the coin pin; disabled by default.",
+                         "tarball":  "releases/aircoins-v1.29.0.tar.gz"
                      },
                      {
-                         "released_at":  "2026-08-29T08:54:32Z",
-                         "sha256":  "e0c4917449cf5ff33f38074deca78d6b2d37c9dcba10027d18712cd71ac1014a",
-                         "version":  "v1.21.0",
-                         "release_notes":  "- **Vouchers inherit the coin-rate pause rules**: the generator now has Rate Type (Pausable/Consumable) and Pause Expiry (hours/days, disabled for consumables). Rules are stored on the voucher and applied to the session at FIRST redemption only â€” an unused voucher never ages, the pause-expiry clock starts when the code is first used.\n- Voucher table shows pause-rule badges (â± expiry window / C = consumable).\n- New migration: `vouchers.pausable`, `vouchers.expiration_hours`.",
-                         "tarball":  "releases/aircoins-v1.21.0.tar.gz"
+                         "released_at":  "2026-09-10T02:24:31Z",
+                         "sha256":  "17eb17f73ccf3b838735b57e1b6f680b7c916d2d04c3ef5d7eb586e5b9e8eec2",
+                         "version":  "v1.28.1",
+                         "release_notes":  "- **Fix: \"Done Paying\" no longer hangs at \"Starting session...\"** â€” The session-start handler sent its response only AFTER running the blocking `aircoins-captive-rules auth \u003cmac\u003e` subprocess (which since v1.27.0 also starts the DNS forwarder). If that subprocess was slow, the portal stayed frozen on \"Starting session...\". The response is now sent first and the firewall/TC work runs in the background, so Done Paying completes instantly. The frontend also gained a 25s failsafe so the modal can never hang indefinitely.\n- **Change: Post-payment redirect is now automatic (no modal)** â€” After a successful coin payment or voucher redemption, instead of showing a \"Connected\" modal with a button, the portal now auto-redirects the client to the configured post-payment URL (after a short 0.8s delay). No-op when no redirect_url is set.",
+                         "tarball":  "releases/aircoins-v1.28.1.tar.gz"
                      },
                      {
-                         "released_at":  "2026-08-29T08:38:28Z",
-                         "sha256":  "a234219b4f6945b06ee92b1f7d6c8e706af40c5c33ef0969a191a41b10d07f4c",
-                         "version":  "v1.20.5",
-                         "release_notes":  "- Pricing: coin resolution is now deterministic when two active tiers share the same coin value â€” the longest-duration tier wins (previously an old short tier could arbitrarily steal coins, e.g. a P1=240min tier shadowing a new P1=3-day tier).\n- Pricing: admin UI warns when adding a tier for a coin value that already has an active tier.",
-                         "tarball":  "releases/aircoins-v1.20.5.tar.gz"
+                         "released_at":  "2026-09-08T12:23:37Z",
+                         "sha256":  "b4b1a0dcaa954c68f7d63d70af5a45d30e90e1ae38d272f377bc2f4b7ea89920",
+                         "version":  "v1.28.0",
+                         "release_notes":  "- **Feature: Post-payment redirect / landing link** Ã¢â‚¬â€ A new \"Post-Payment Redirect\" setting in the Portal page lets the operator enter an absolute http/https URL (a landing page, thank-you page, promo link, or IP). When set, after a client finishes inserting coins and gains internet (or redeems a voucher), the portal shows a \"Connected\" modal with a button that opens the configured link in a new tab. Leave the field blank to disable (default Ã¢â‚¬â€ no behavior change).\n- Backend: `redirect_url` added to the portal appearance config, validated as an absolute http(s) URL and persisted with the theme/colors. Backward compatible Ã¢â‚¬â€ old saved configs simply have no redirect.",
+                         "tarball":  "releases/aircoins-v1.28.0.tar.gz"
                      },
                      {
-                         "released_at":  "2026-08-29T08:25:08Z",
-                         "sha256":  "3fd032de749e7fca0483123ac42e5422e135e55d347afbb7855ab693eb677242",
-                         "version":  "v1.20.4",
-                         "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- VLAN Management no longer shows working VLANs as \"Down\": VLAN interfaces already live in the kernel but missed by the `ip -d link show type vlan` parse are now recognized by the heal path, and bridge/VLAN interfaces without an IP address report link up via the kernel `LOWER_UP` flag instead of the misleading RFC 2863 operstate.\n\n---",
-                         "tarball":  "releases/aircoins-v1.20.4.tar.gz"
+                         "released_at":  "2026-09-08T11:28:36Z",
+                         "sha256":  "6c4fb33a8a8864c31cf1b3b79e4d07f08723195d401eac998b49279f07c16c04",
+                         "version":  "v1.27.0",
+                         "release_notes":  "- **Architecture: ISP-independent DNS for authorized clients (no more DNS lock-in)** ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Authorized clients\u0027 DNS was DNAT\u0027ed directly to the ISP\u0027s DNS server, with the ISP\u0027s IP frozen into each per-MAC iptables rule at authorization time. Moving the unit to another ISP left every rule pointing at a dead DNS, breaking all apps until a refresh. Now a second dnsmasq instance (\"clean DNS forwarder\") listens on port 5353: no captive hijack, no DHCP ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â it just forwards queries upstream using /etc/resolv.conf, which DHCP/systemd-resolved updates automatically when the ISP changes. Authorized clients\u0027 DNS is REDIRECTed to this local forwarder (iptables REDIRECT carries no IP at all), so per-MAC rules can NEVER go stale. Plug the unit into any ISP ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â clients\u0027 apps work immediately, no refresh needed.\n- The forwarder service (`aircoins-dns-forwarder.service`) is created and started automatically by `aircoins-captive-rules` on first auth/refresh, and survives reboots.\n- `refresh` now serves as a one-time migration: it rebuilds all tracked MACs\u0027 old ISP-DNS DNAT rules into forwarder REDIRECT rules. The boot DNS watcher (v1.26.8) and the manual Refresh DNS button remain as harmless safety nets.",
+                         "tarball":  "releases/aircoins-v1.27.0.tar.gz"
                      },
                      {
-                         "released_at":  "2026-08-29T08:07:00Z",
-                         "sha256":  "aa7947252d99e8908b018bbb8f7fec422a01fb495817ba6b3771fa0f05a65462",
-                         "version":  "v1.20.3",
-                         "release_notes":  "**Release date:** August 2026\n\n### Changed\n- Pricing tab: duration and pause-expiry inputs now use **Minutes / Hours / Days** unit dropdowns (add form and inline edit row), matching the CCNDS panel layout. Values are converted to minutes/hours on save.\n- Consumable rates: both the expiry input and its unit dropdown are disabled (and forced to 0) when Rate Type is **Consumable**, in the add form and the edit row.\n\n---",
-                         "tarball":  "releases/aircoins-v1.20.3.tar.gz"
+                         "released_at":  "2026-09-08T11:16:22Z",
+                         "sha256":  "4d2f273a21154086547bad87c73f61d8b6f139f4d24a25f45c360f5840165501",
+                         "version":  "v1.26.9",
+                         "release_notes":  "- **Critical fix: DNS refresh was a silent no-op** ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â `aircoins-captive-rules refresh` compared the freshly detected DNS against `UPSTREAM_DNS`, but that variable is re-detected at the top of the same script run, so the comparison was ALWAYS equal and refresh always exited with \"DNS unchanged - no refresh needed\" without touching any iptables rule. This is why neither the automatic boot watcher nor the manual button restored internet after an ISP change. Refresh now unconditionally rebuilds the per-MAC DNS DNAT rules (and probe/forward rules) for every tracked authorized client with the currently detected DNS ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â rewriting an already-correct rule is harmless. This fix also makes v1.26.8\u0027s automatic boot watcher actually effective.",
+                         "tarball":  "releases/aircoins-v1.26.9.tar.gz"
                      }
                  ],
-    "released_at":  "2026-08-29T09:05:45Z"
+    "released_at":  "2026-09-11T02:08:57Z"
 }

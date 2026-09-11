@@ -98,6 +98,12 @@ func main() {
 	// for static/VLAN modes so the WAN settings survive reboots.
 	handlers.RestoreWANOnBoot()
 
+	// Watch the upstream DNS: one pass ~30s after boot (so a unit plugged
+	// in at a new location auto-detects that ISP's DNS and refreshes all
+	// tracked authorized clients), then poll every 60s to catch ISP DNS
+	// changes while running. See handlers/dnswatch.go.
+	go handlers.StartDNSWatcher()
+
 	// Ensure the audio upload directory exists.
 	if err := handlers.EnsureAudioDir(); err != nil {
 		log.Printf("WARNING: audio directory not available: %v", err)
@@ -111,6 +117,15 @@ func main() {
 	systemHandler := &handlers.SystemHandler{DB: models.DB}
 	reportsHandler := &handlers.ReportsHandler{DB: models.DB}
 	coinslotHandler := &handlers.CoinslotHandler{DB: models.DB}
+	subvendoHandler := &handlers.SubVendoHandler{DB: models.DB}
+	// Shared token for all NodeMCU sub-vendo units (set via AIRCOINS_SUBVENDO_TOKEN env).
+	// Units send this token as Bearer on /register, /state, /coins.
+	if t := os.Getenv("AIRCOINS_SUBVENDO_TOKEN"); t != "" {
+		handlers.SetSharedSubvendoToken(t)
+	} else {
+		handlers.SetSharedSubvendoToken("aircoins-subvendo-shared-token")
+		log.Println("[subvendo] WARNING: using default shared token. Set AIRCOINS_SUBVENDO_TOKEN env for production.")
+	}
 	appearanceHandler := &handlers.AppearanceHandler{DB: models.DB}
 	qdiscHandler := &handlers.QdiscHandler{DB: models.DB}
 	sessionAdminHandler := &handlers.SessionAdminHandler{DB: models.DB}
@@ -194,15 +209,32 @@ func main() {
 	mux.Handle("/api/admin/vouchers/generate", adminProtected(voucherHandler.Generate))
 	mux.Handle("/api/admin/vouchers/", adminProtected(voucherHandler.Dispatch))
 
+	// Sub-vendo admin routes (NodeMCU remote coin slots — registration + approval model)
+	mux.Handle("/api/admin/subvendos", adminProtected(subvendoHandler.List))
+	mux.Handle("/api/admin/subvendos/accept", adminProtected(subvendoHandler.Accept))
+	mux.Handle("/api/admin/subvendos/reject", adminProtected(subvendoHandler.Reject))
+	mux.Handle("/api/admin/subvendos/", adminProtected(subvendoHandler.Dispatch))
+	// SSID → VLAN map (admin-managed, auto-binds registering units to their VLAN)
+	mux.Handle("/api/admin/ssid-vlan-map", adminProtected(subvendoHandler.SSIDVLANMap))
+	mux.Handle("/api/admin/ssid-vlan-map/", adminProtected(subvendoHandler.SSIDVLANMapDelete))
+
 	// GPIO routes
 	mux.HandleFunc("/api/gpio/config", gpioHandler.Config)
 	mux.HandleFunc("/api/gpio/test", gpioHandler.Test)
 	mux.HandleFunc("/api/gpio/coin", gpioHandler.Coin)
 
 	// Coin slot arm/disarm routes (PUBLIC - used by captive portal customers)
+	mux.HandleFunc("/api/coinslot/options", coinslotHandler.Options)
 	mux.HandleFunc("/api/coinslot/arm", coinslotHandler.Arm)
 	mux.HandleFunc("/api/coinslot/disarm", coinslotHandler.Disarm)
 	mux.HandleFunc("/api/coinslot/status", coinslotHandler.Status)
+
+	// Sub-vendo device routes (PUBLIC but shared-token authenticated;
+	// NodeMCU units register with device_id + SSID, admin accepts, then poll/report)
+	mux.HandleFunc("/api/subvendo/register", subvendoHandler.Register)
+	mux.HandleFunc("/api/subvendo/state", subvendoHandler.State)
+	mux.HandleFunc("/api/subvendo/approved", subvendoHandler.Approved)
+	mux.HandleFunc("/api/subvendo/coins", subvendoHandler.Coins)
 
 	// Probe release responder (PUBLIC). Not browsed by humans:
 	// aircoins-captive-rules auth installs per-MAC REDIRECT rules that
@@ -252,6 +284,9 @@ func main() {
 		}
 	}))
 	mux.Handle("/api/admin/wan/available-vlans", adminProtected(handlers.WANAvailableVLANs))
+
+	// Captive portal DNS refresh route (update DNS rules for all authorized clients after ISP change)
+	mux.Handle("/api/admin/captive/refresh-dns", adminProtected(handlers.RefreshDNSHandler))
 
 	// Portal server routes (hotspot stack: portal IP + DHCP + DNS hijack
 	// + captive rules on a chosen interface)

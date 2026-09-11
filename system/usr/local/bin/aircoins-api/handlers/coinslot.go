@@ -38,7 +38,10 @@ const (
 )
 
 // Arm handles POST /api/coinslot/arm
-// Body: {"duration_sec": 60} (optional, default 60, max 300)
+// Body: {"duration_sec": 60, "coinslot": "auto"} (optional)
+//   coinslot: "auto" (default) — prefer sub-vendo on VLAN, fall back to GPIO
+//            "gpio"           — arm the local GPIO coinslot
+//            "subvendo:N"     — arm a specific sub-vendo (must be on caller's VLAN)
 // Anti-abuse: each arm call counts as a tap in the sliding window for
 // the caller's MAC. Exceeding max_taps in window_seconds triggers a
 // per-device ban (ban_seconds long) and a 403 response.
@@ -82,10 +85,14 @@ func (h *CoinslotHandler) Arm(w http.ResponseWriter, r *http.Request) {
 
 	// --- Parse body BEFORE acquiring lock (body is optional) -----------
 	var req struct {
-		DurationSec int `json:"duration_sec"`
+		DurationSec int    `json:"duration_sec"`
+		Coinslot    string `json:"coinslot"`
 	}
 	if r.Body != nil {
 		json.NewDecoder(r.Body).Decode(&req)
+	}
+	if req.Coinslot == "" {
+		req.Coinslot = "auto"
 	}
 
 	// --- Per-VLAN pay lock: HOLD across arm→start lifecycle -----------
@@ -139,6 +146,90 @@ func (h *CoinslotHandler) Arm(w http.ResponseWriter, r *http.Request) {
 	armedAt := time.Now().Unix()
 	expiresAt := armedAt + int64(duration)
 
+	// Resolve the caller's VLAN and the sub-vendo bound to it (if any).
+	// The mapping is server-side (never a client-supplied parameter), which
+	// is what makes one VLAN = one coinslot and units mutually invisible.
+	iface := resolveVLAN(clientIP)
+	svID, svErr := subvendoIDForVLAN(h.DB, iface)
+	if svErr != nil {
+		log.Printf("[subvendo] lookup for %s: %v", iface, svErr)
+		svID = 0
+	}
+
+	// Determine which coinslot to arm based on the "coinslot" parameter:
+	//   "auto"        — prefer ANY online sub-vendo, fall back to GPIO
+	//   "gpio"        — force local GPIO (only if hasLocalGPIO)
+	//   "subvendo:N"  — force a specific sub-vendo by id (no VLAN check)
+	targetSvID := int64(0)
+	switch req.Coinslot {
+	case "auto":
+		targetSvID = svID
+		if targetSvID == 0 {
+			// No unit bound to this caller's VLAN — fall back to any online unit.
+			if units, err := subvendosForVLAN(h.DB, ""); err == nil && len(units) > 0 {
+				targetSvID = units[0].ID
+			}
+		}
+	case "gpio":
+		if !hasLocalGPIO() {
+			sendJSON(w, http.StatusNotImplemented, map[string]interface{}{
+				"armed":  false,
+				"code":   "no_gpio",
+				"message": "This server has no local GPIO coinslot.",
+			})
+			return
+		}
+		targetSvID = 0 // GPIO
+	default:
+		if strings.HasPrefix(req.Coinslot, "subvendo:") {
+			id, perr := strconv.ParseInt(strings.TrimPrefix(req.Coinslot, "subvendo:"), 10, 64)
+			if perr != nil || id <= 0 {
+				sendJSON(w, http.StatusBadRequest, map[string]interface{}{
+					"armed":  false,
+					"code":   "invalid_coinslot",
+					"message": "Invalid coinslot identifier.",
+				})
+				return
+			}
+			// SIMPLIFIED MODEL (v1.25.0): no VLAN check — any online unit is armable.
+			targetSvID = id
+		} else {
+			sendJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"armed":  false,
+				"code":   "invalid_coinslot",
+				"message": "Invalid coinslot. Use 'auto', 'gpio', or 'subvendo:N'.",
+			})
+			return
+		}
+	}
+
+	if targetSvID > 0 {
+		if err := armSubvendo(h.DB, targetSvID, duration); err != nil {
+			log.Printf("[subvendo #%d] arm: %v", targetSvID, err)
+			sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"armed": false, "error": "Failed to arm coin slot",
+			})
+			return
+		}
+		// Arm succeeded — don't release the lock in the defer (Start will).
+		lockHeld = false
+		sendJSON(w, http.StatusOK, map[string]interface{}{
+			"armed": true, "armed_at": armedAt, "expires_at": expiresAt,
+			"pay_ticket": ticket, "coinslot": req.Coinslot,
+		})
+		return
+	}
+
+	// No sub-vendo target — arm local GPIO.
+	if !hasLocalGPIO() {
+		sendJSON(w, http.StatusNotImplemented, map[string]interface{}{
+			"armed":   false,
+			"code":    "no_coinslot",
+			"message": "No coinslot configured for this network. Please contact the operator.",
+		})
+		return
+	}
+
 	if err := os.MkdirAll(filepath.Dir(armedFile), 0755); err != nil {
 		sendJSON(w, http.StatusInternalServerError, map[string]interface{}{
 			"armed": false, "error": "Failed to create runtime dir",
@@ -169,21 +260,113 @@ func (h *CoinslotHandler) Arm(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Options handles GET /api/coinslot/options
+// Returns the coinslot choices available on the caller's VLAN so the
+// captive portal can render a dropdown (or auto-select when there is
+// only one). This is the endpoint that makes multi-vendo deployments
+// work on a single VLAN — the portal learns what it can arm without
+// ever being able to reach into another VLAN's unit.
+//
+// Response shape:
+//   {
+//     "default": "auto",
+//     "gpio": true,            // server has a local GPIO coinslot
+//     "subvendo": {            // null when no sub-vendo on this VLAN
+//        "id": 3, "name": "Vendo A", "status": "online", "coin_value": 1
+//     }
+//   }
+func (h *CoinslotHandler) Options(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodOptions {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	resp := map[string]interface{}{
+		"default": "auto",
+		"gpio":    hasLocalGPIO(),
+		"vlan":    resolveVLAN(clientIPFromRequest(r)),
+	}
+
+	iface := resolveVLAN(clientIPFromRequest(r))
+	units, err := subvendosForVLAN(h.DB, iface)
+	if err == nil && len(units) > 0 {
+		subvendos := []map[string]interface{}{}
+		for _, u := range units {
+			status := "offline"
+			if u.Online {
+				status = "online"
+			}
+			subvendos = append(subvendos, map[string]interface{}{
+				"id":         u.ID,
+				"name":       u.Name,
+				"status":     status,
+				"coin_value": 1, // NodeMCU: 1 pulse = 1 peso
+			})
+		}
+		resp["subvendos"] = subvendos
+		resp["default"] = "auto"
+		if len(subvendos) == 1 && !hasLocalGPIO() {
+			resp["default"] = "subvendo:" + strconv.FormatInt(units[0].ID, 10)
+		}
+	} else {
+		resp["subvendos"] = []map[string]interface{}{}
+	}
+
+	sendJSON(w, http.StatusOK, resp)
+}
+
 // Disarm handles POST /api/coinslot/disarm
+// Body: {"coinslot": "auto"} (optional)
+//   "auto"        — disarm whichever slot is armed on this VLAN
+//   "gpio"        — disarm only local GPIO
+//   "subvendo:N"  — disarm only that sub-vendo (must be on caller's VLAN)
 func (h *CoinslotHandler) Disarm(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	os.Remove(armedFile)
-	os.Remove(armedAtFile)
+	clientIP := clientIPFromRequest(r)
+	vlan := resolveVLAN(clientIP)
+
+	var req struct {
+		Coinslot string `json:"coinslot"`
+	}
+	if r.Body != nil {
+		json.NewDecoder(r.Body).Decode(&req)
+	}
+	if req.Coinslot == "" {
+		req.Coinslot = "auto"
+	}
+
+	// Determine which slot to disarm. Same switch as Arm — keeping the
+	// two in sync means the portal can always reverse an arm.
+	iface := clientIP
+	svID, _ := subvendoIDForVLAN(h.DB, resolveVLAN(iface))
+
+	switch req.Coinslot {
+	case "auto":
+		// Disarm whichever is armed: sub-vendo first, then GPIO.
+		if svID > 0 {
+			disarmSubvendo(h.DB, svID)
+		}
+		os.Remove(armedFile)
+		os.Remove(armedAtFile)
+	case "gpio":
+		os.Remove(armedFile)
+		os.Remove(armedAtFile)
+	default:
+		if strings.HasPrefix(req.Coinslot, "subvendo:") {
+			id, _ := strconv.ParseInt(strings.TrimPrefix(req.Coinslot, "subvendo:"), 10, 64)
+			if id > 0 {
+				disarmSubvendo(h.DB, id)
+			}
+		}
+	}
 
 	// Release the per-VLAN lock if this client still holds it
 	// (e.g. user cancelled the modal before tapping Done Paying).
 	// PayLockRelease is safe to call even if no lock is held.
-	clientIP := clientIPFromRequest(r)
-	vlan := resolveVLAN(clientIP)
 	if vlan != "" {
 		PayLockRelease(clientIP, vlan)
 	}
@@ -193,22 +376,58 @@ func (h *CoinslotHandler) Disarm(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Status handles GET /api/coinslot/status
+// Status handles GET /api/coinslot/status?coinslot=auto|gpio|subvendo:N
+// The coinslot query param tells the server which slot's window to report.
+// Without it, the server falls back to "auto" (sub-vendo on VLAN, else GPIO).
 func (h *CoinslotHandler) Status(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	armed, expiresAt := readArmedState()
-	armedAt := readArmedAt(expiresAt)
-
 	// Coins detected since this window was armed. The GPIO listener posts
 	// every pulse to POST /api/gpio/coin, which inserts a coin_events row
 	// — that table is the only source of truth the portal can poll.
+	iface := resolveVLAN(clientIPFromRequest(r))
+	svID, svErr := subvendoIDForVLAN(h.DB, iface)
+	if svErr != nil {
+		svID = 0
+	}
+
+	coinslot := r.URL.Query().Get("coinslot")
+	if coinslot == "" {
+		coinslot = "auto"
+	}
+
+	// Resolve which slot to report on. SIMPLIFIED MODEL (v1.25.0): the
+	// requested sub-vendo is honored regardless of VLAN.
+	targetSvID := int64(0)
+	switch coinslot {
+	case "auto":
+		targetSvID = svID
+	case "gpio":
+		targetSvID = 0
+	default:
+		if strings.HasPrefix(coinslot, "subvendo:") {
+			id, _ := strconv.ParseInt(strings.TrimPrefix(coinslot, "subvendo:"), 10, 64)
+			targetSvID = id // any unit; no VLAN check
+		}
+	}
+
 	coins := emptyCoinWindow()
-	if armed {
-		coins = h.coinsSinceArm(armedAt)
+	var armed bool
+	var armedAt, expiresAt int64
+	if targetSvID > 0 {
+		armed, armedAt, expiresAt = subvendoArmWindow(h.DB, targetSvID)
+		if armed {
+			coins = h.coinsSinceArm(armedAt, "subvendo:"+strconv.FormatInt(targetSvID, 10))
+		}
+	} else {
+		armed, expiresAt = readArmedState()
+		armedAt = readArmedAt(expiresAt)
+		if armed {
+			coins = h.coinsSinceArm(armedAt, "local_gpio")
+		}
 	}
 
 	sendJSON(w, http.StatusOK, map[string]interface{}{
@@ -246,7 +465,10 @@ func emptyCoinWindow() coinWindow {
 // coinsSinceArm aggregates the coin_events rows recorded after armedAt.
 // Minutes come from the pricing table (the same resolution used when the
 // backend credits time), so an unpriced coin is listed with 0 minutes.
-func (h *CoinslotHandler) coinsSinceArm(armedAt int64) coinWindow {
+// source restricts the window to one coinslot ('local_gpio' or
+// 'subvendo:<id>') — sub-vendo coins never leak into local windows and
+// vice versa.
+func (h *CoinslotHandler) coinsSinceArm(armedAt int64, source string) coinWindow {
 	window := emptyCoinWindow()
 	if h.DB == nil || armedAt <= 0 {
 		return window
@@ -267,9 +489,10 @@ func (h *CoinslotHandler) coinsSinceArm(armedAt int64) coinWindow {
 		       GREATEST(0, EXTRACT(EPOCH FROM (NOW() - detected_at)))::int AS age_sec
 		FROM coin_events
 		WHERE detected_at >= NOW() - ($1::int * INTERVAL '1 second')
+		  AND source = $3
 		ORDER BY id ASC
 		LIMIT $2
-	`, windowAge, maxWindowCoins)
+	`, windowAge, maxWindowCoins, source)
 	if err != nil {
 		log.Printf("Error fetching coin events since arm: %v", err)
 		return window

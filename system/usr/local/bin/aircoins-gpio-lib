@@ -1,12 +1,12 @@
-#!/bin/bash
+﻿#!/bin/bash
 # ============================================
-# AirCoins GPIO Library — board-aware GPIO abstraction
+# AirCoins GPIO Library â€” board-aware GPIO abstraction
 # ============================================
 # Source this file: source /usr/local/bin/aircoins-gpio-lib
 #
 # PIN NUMBERING
 #   Every public function in this library takes the PHYSICAL HEADER PIN
-#   number (the number printed on the 40-pin header, 1..40) — never a
+#   number (the number printed on the 40-pin header, 1..40) â€” never a
 #   kernel/sunxi/BCM GPIO number. Translation to whatever each backend
 #   wants happens inside this library:
 #     wiringop  -> `gpio -1 ...` (physical numbering)
@@ -16,14 +16,14 @@
 #
 #   Example (Orange Pi PC / Allwinner H3):
 #     physical pin 3 = PA12 = sunxi GPIO 12 = gpiochip0 line 12
-#   Passing "3" to sysfs or gpiod directly would address PA3 — a
+#   Passing "3" to sysfs or gpiod directly would address PA3 â€” a
 #   completely different pin. That is why pin_to_gpio() exists.
 #
 # Provides: detect_board, get_gpio_method, pin_to_gpio, pin_to_label,
 #           pin_conflict_note, gpio_chip_name, gpio_line_busy,
 #           gpio_read, gpio_setup_input, gpio_wait_falling_edge,
-#           gpio_stream_falling_edges, gpio_test_pin, get_available_pins,
-#           get_pin_labels
+#           gpio_stream_falling_edges, gpio_setup_output, gpio_write,
+#           gpio_test_pin, get_available_pins, get_pin_labels
 # ============================================
 
 # Guard against double-sourcing
@@ -157,7 +157,7 @@ detect_board() {
     # Header pin maps below are hand-verified against the schematics for
     # Allwinner H3/H5 40-pin boards (Orange Pi PC/One/Lite/PC Plus/Plus 2E),
     # the H2+ Orange Pi Zero 26-pin header, and Raspberry Pi. Anything else
-    # falls back to the H3 40-pin map, which may be wrong — flag it so the
+    # falls back to the H3 40-pin map, which may be wrong â€” flag it so the
     # listener and the pin test can warn the operator.
     case "$BOARD_CHIPSET" in
         H3|H5|H2+|BCM*) PIN_MAP_TRUSTED=1 ;;
@@ -196,7 +196,7 @@ pin_to_gpio() {
 
     # Unknown boards fall back to the Orange Pi H3 40-pin map (detect_board
     # sets PIN_MAP_TRUSTED=0 so callers can warn). Never pass a header pin
-    # through untranslated — that is exactly how "pin 3" ends up reading PA3.
+    # through untranslated â€” that is exactly how "pin 3" ends up reading PA3.
     if [ "$BOARD_FAMILY" != "raspberrypi" ]; then
         if [ "$GPIO_PIN_COUNT" -eq 26 ]; then
             # Orange Pi Zero / Zero Plus 26-pin header (H2+/H5)
@@ -451,11 +451,11 @@ gpio_read() {
             if [ "$(gpiod_major)" = "2" ]; then
                 out=$(gpioget --numeric -c "$chip" "$gpio_num" 2>/dev/null) ||
                     out=$(gpioget -c "$chip" "$gpio_num" 2>/dev/null)
-                case "$out" in
-                    *inactive*) echo 0 ;;
-                    *active*)   echo 1 ;;
-                    *)          echo "$out" | awk '{print $NF}' ;;
-                esac
+            case "$out" in
+                *inactive*) echo 0 ;;
+                *active*)   echo 1 ;;
+                *)          echo "$out" | awk '{print $NF}' ;;
+            esac
             else
                 gpioget "$chip" "$gpio_num" 2>/dev/null
             fi
@@ -476,6 +476,107 @@ gpio_read() {
     esac
 }
 
+# GPIO output setup + write (relay / light pin).
+# Takes the PHYSICAL header pin number, translates via pin_to_gpio().
+gpio_setup_output() {
+    local pin=$1 gpio_num
+    gpio_num=$(pin_to_gpio "$pin")
+    if [ $? -ne 0 ] || [ -z "$gpio_num" ]; then
+        echo "gpio_setup_output: invalid physical pin $pin" >&2
+        return 1
+    fi
+    case "$GPIO_METHOD" in
+        wiringop)
+            gpio -1 mode "$pin" out 2>/dev/null || gpio mode "$gpio_num" out 2>/dev/null
+            return $?
+            ;;
+        raspi-gpio)
+            command -v raspi-gpio >/dev/null 2>&1 || return 1
+            raspi-gpio set "$gpio_num" op >/dev/null 2>&1
+            return $?
+            ;;
+        libgpiod)
+            return 0
+            ;;
+        sysfs)
+            [ -e "/sys/class/gpio/gpio$gpio_num" ] || echo "$gpio_num" > /sys/class/gpio/export 2>/dev/null
+            echo "out" > "/sys/class/gpio/gpio$gpio_num/direction" 2>/dev/null
+            return $?
+            ;;
+        *)
+            echo "gpio_setup_output: no GPIO interface available" >&2
+            return 1
+            ;;
+    esac
+}
+
+gpio_write() {
+    local pin=$1 val=$2 gpio_num
+    gpio_num=$(pin_to_gpio "$pin")
+    if [ $? -ne 0 ] || [ -z "$gpio_num" ]; then
+        echo "gpio_write: invalid physical pin $pin" >&2
+        return 1
+    fi
+    case "$val" in
+        1|on|high|HIGH) val=1 ;;
+        *) val=0 ;;
+    esac
+    case "$GPIO_METHOD" in
+        wiringop)
+            gpio -1 write "$pin" "$val" 2>/dev/null || gpio write "$gpio_num" "$val" 2>/dev/null
+            return $?
+            ;;
+        raspi-gpio)
+            command -v raspi-gpio >/dev/null 2>&1 || return 1
+            if [ "$val" = "1" ]; then
+                raspi-gpio set "$gpio_num" dh >/dev/null 2>&1
+            else
+                raspi-gpio set "$gpio_num" dl >/dev/null 2>&1
+            fi
+            return $?
+            ;;
+        libgpiod)
+            # libgpiod releases the line when gpioset exits, so a one-shot
+            # set cannot hold a relay ON. Keep a background holder
+            # (gpioset --mode=signal) per write; each new write kills the
+            # previous holder first. PID tracked in /run (tmpfs) with /tmp
+            # fallback for systems without /run/pisowifi.
+            local chip holder_dir holder_pid old_pid
+            chip=$(gpio_chip_name)
+            [ -z "$chip" ] && chip="gpiochip0"
+            command -v gpioset >/dev/null 2>&1 || return 1
+            holder_dir="/run/pisowifi"
+            [ -d "$holder_dir" ] || holder_dir="/tmp"
+            holder_pid="$holder_dir/relay-gpioset-$gpio_num.pid"
+            if [ -f "$holder_pid" ]; then
+                old_pid=$(cat "$holder_pid" 2>/dev/null)
+                if [ -n "$old_pid" ]; then
+                    kill "$old_pid" 2>/dev/null
+                    wait "$old_pid" 2>/dev/null
+                fi
+                rm -f "$holder_pid"
+            fi
+            # Also kill any stray holder for this line (stale pidfile case).
+            pkill -f "gpioset.*$chip.*$gpio_num=" 2>/dev/null
+            if [ "$(gpiod_major)" = "2" ]; then
+                gpioset --mode=signal -c "$chip" "$gpio_num=$val" >/dev/null 2>&1 &
+            else
+                gpioset -m signal "$chip" "$gpio_num=$val" >/dev/null 2>&1 &
+            fi
+            echo $! > "$holder_pid" 2>/dev/null
+            return 0
+            ;;
+        sysfs)
+            echo "$val" > "/sys/class/gpio/gpio$gpio_num/value" 2>/dev/null
+            return $?
+            ;;
+        *)
+            echo "gpio_write: no GPIO interface available" >&2
+            return 1
+            ;;
+    esac
+}
+
 gpio_setup_input() {
     local pin=$1
     local pull=${2:-up}
@@ -483,7 +584,7 @@ gpio_setup_input() {
 
     case "$GPIO_METHOD" in
         wiringop)
-            # Physical numbering for both calls — mixing -1 and -g here is
+            # Physical numbering for both calls â€” mixing -1 and -g here is
             # what silently pointed the listener at the wrong pad before.
             gpio -1 mode "$pin" in 2>/dev/null
             if [ "$pull" = "up" ]; then

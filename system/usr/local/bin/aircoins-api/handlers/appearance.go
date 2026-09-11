@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -123,6 +124,19 @@ func validateAppearance(a *models.PortalAppearance) error {
 
 	if a.HeaderImage != "" && !backgroundImageRe.MatchString(a.HeaderImage) {
 		return fmt.Errorf("header_image must be empty or a filename under /%s/", portalAssetsDir)
+	}
+
+	// redirect_url is optional. When set it must be a well-formed absolute
+	// http(s) URL — the portal navigates clients to it after payment, so a
+	// malformed or dangerous value (javascript:, data:, etc.) is rejected.
+	if a.RedirectURL != "" {
+		if len(a.RedirectURL) > 500 {
+			return fmt.Errorf("redirect_url too long (max 500 characters)")
+		}
+		u, err := url.Parse(a.RedirectURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("redirect_url must be an absolute http:// or https:// URL (or empty to disable)")
+		}
 	}
 
 	return nil

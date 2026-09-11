@@ -13,7 +13,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$VERSION = "1.21.1"
+$VERSION = "1.29.0"
 $TARBALL_NAME = "aircoins-v$VERSION.tar.gz"
 $CHECKSUM_NAME = "aircoins-v$VERSION.sha256"
 $BUCKET = "aircoins"
@@ -300,3 +300,7 @@ Write-Host "  Manifest: $SUPABASE_URL/storage/v1/object/public/$BUCKET/manifest.
 Write-Host ""
 Write-Host "  Devices will detect the update on next check (or force refresh)." -ForegroundColor Yellow
 Write-Host ""
+
+
+
+

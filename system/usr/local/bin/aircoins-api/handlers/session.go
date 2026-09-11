@@ -210,13 +210,16 @@ type windowCoins struct {
 
 // unprocessedWindowCoins sums the UNPROCESSED coin_events of the current
 // armed window — the same window logic as GET /api/coinslot/status
-// (age-based, so DB/API timezone disagreements cannot break it). If the
-// armed markers are already gone (portal closed the modal first, API
+// (age-based, so DB/API timezone disagreements cannot break it). The
+// source argument scopes the window to one coinslot: the caller's
+// sub-vendo ('subvendo:<id>') or the local GPIO ('local_gpio'), which is
+// what keeps one VLAN's coins from crediting another VLAN's client. If
+// the armed markers are already gone (portal closed the modal first, API
 // restarted mid-window) it falls back to the widest possible window so a
-// paying customer is never robbed of freshly inserted coins: the GPIO
-// listener only records pulses while armed, so recent unprocessed rows
-// can only belong to the customer at the coin slot.
-func (h *SessionHandler) unprocessedWindowCoins() windowCoins {
+// paying customer is never robbed of freshly inserted coins: coins are
+// only recorded while armed, so recent unprocessed rows can only belong
+// to the customer at the coin slot.
+func (h *SessionHandler) unprocessedWindowCoins(source string) windowCoins {
 	coins := windowCoins{}
 
 	armed, expiresAt := readArmedState()
@@ -235,9 +238,10 @@ func (h *SessionHandler) unprocessedWindowCoins() windowCoins {
 		FROM coin_events
 		WHERE processed = false
 		  AND detected_at >= NOW() - ($1::int * INTERVAL '1 second')
+		  AND source = $3
 		ORDER BY id ASC
 		LIMIT $2
-	`, windowAge, maxWindowCoins)
+	`, windowAge, maxWindowCoins, source)
 	if err != nil {
 		log.Printf("Error fetching unprocessed coin events: %v", err)
 		return coins
@@ -292,6 +296,8 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	// Parse pay_ticket and session_token from request body.
 	var req struct {
 		PayTicket    string `json:"pay_ticket"`
+		Coinslot     string `json:"coinslot"`
+
 		SessionToken string `json:"session_token"`
 	}
 	if r.Body != nil {
@@ -352,7 +358,32 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	// client is the legitimate holder. The unprocessed coin_events
 	// are consumed by the transaction below.
 
-	coins := h.unprocessedWindowCoins()
+
+	// Resolve which coinslot owns the armed window. SIMPLIFIED MODEL
+	// (v1.25.0): no VLAN isolation — the portal's chosen "subvendo:N" is
+	// honored for any online unit; "gpio"/"auto" keep prior behavior.
+	source := "local_gpio"
+	iface := resolveVLAN(clientIP)
+	svID, _ := subvendoIDForVLAN(h.DB, iface)
+
+	switch {
+	case req.Coinslot == "gpio":
+		source = "local_gpio"
+	case strings.HasPrefix(req.Coinslot, "subvendo:"):
+		id, _ := strconv.ParseInt(strings.TrimPrefix(req.Coinslot, "subvendo:"), 10, 64)
+		if id > 0 {
+			source = "subvendo:" + strconv.FormatInt(id, 10)
+		}
+	default:
+		// "auto", empty, or unrecognized — prefer any online sub-vendo.
+		if svID > 0 {
+			source = "subvendo:" + strconv.FormatInt(svID, 10)
+		} else if units, err := subvendosForVLAN(h.DB, ""); err == nil && len(units) > 0 {
+			source = "subvendo:" + strconv.FormatInt(units[0].ID, 10)
+		}
+	}
+
+	coins := h.unprocessedWindowCoins(source)
 	if coins.totalMinutes == 0 {
 		msg := "no credited coins"
 		if coins.count > 0 {
@@ -397,13 +428,6 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		verb = "extended"
 	}
 
-	// Open the client's internet access. Non-fatal if the iptables layer
-	// is absent (dev box) — the session row exists either way.
-	runCaptiveRules(h.DB, "auth", clientMAC, reason)
-	// Add per-device tc class+filter for FQ_CODEL per-device mode.
-	// Failures log but never block the session state change.
-	EnsurePerDeviceClass(h.DB, "", clientMAC, clientIP, "add")
-
 	// The purchase is complete: close the armed window so the GPIO
 	// listener goes back to idle.
 	os.Remove(armedFile)
@@ -412,12 +436,24 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	logAction(h.DB, "INFO", "session", "Session "+verb+" for "+clientIP+" ("+clientMAC+"): P"+
 		strconv.Itoa(coins.totalValue)+" = "+strconv.Itoa(coins.totalMinutes)+" min")
 
+	// Send the completion response FIRST. runCaptiveRules spawns
+	// `aircoins-captive-rules auth <mac>` as a blocking subprocess that can
+	// take a moment (it also starts the DNS forwarder), and waiting on it
+	// makes the portal hang at "Starting session...". Opening the client's
+	// internet access is safe in the background — it is non-fatal and lands
+	// a fraction of a second later.
 	sendJSON(w, http.StatusOK, map[string]interface{}{
 		"success":  true,
 		"message":  "Session " + verb,
 		"extended": extended,
 		"session":  session,
 	})
+
+	go func() {
+		// Open the client's internet access + per-device tc class/filter.
+		runCaptiveRules(h.DB, "auth", clientMAC, reason)
+		EnsurePerDeviceClass(h.DB, "", clientMAC, clientIP, "add")
+	}()
 }
 
 // creditSession creates a new active session or extends the caller's

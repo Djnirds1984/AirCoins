@@ -337,6 +337,13 @@ func BridgeList(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Auto-enslave unclaimed physical interfaces (e.g. hot-plugged USB LAN
+	// adapters) to br0 so they show up as bridge members automatically.
+	autoAdded := autoEnslavePhysicalMembers()
+	if autoAdded == nil {
+		autoAdded = []string{}
+	}
+
 	// Flag bridges that have a portal server attached
 	portalMap := make(map[string]portalConfigEntry)
 	for _, p := range readPortalConfig() {
@@ -353,7 +360,152 @@ func BridgeList(w http.ResponseWriter, r *http.Request) {
 		bridges = []models.BridgeInfo{}
 	}
 
-	sendJSON(w, http.StatusOK, map[string]interface{}{"bridges": bridges})
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"bridges":     bridges,
+		"auto_added":  autoAdded,
+	})
+}
+
+// ============================================
+// AUTO-ENSLAVE PHYSICAL INTERFACES
+// ============================================
+
+// defaultRouteInterface returns the interface used by the default route
+// (the WAN uplink), or "" if none. Used to avoid bridging the WAN port.
+func defaultRouteInterface() string {
+	out, err := exec.Command("ip", "route", "show", "default").Output()
+	if err != nil {
+		return ""
+	}
+	// Parse "default via x.x.x.x dev <iface> ..."
+	fields := strings.Fields(string(out))
+	for i, f := range fields {
+		if f == "dev" && i+1 < len(fields) {
+			return fields[i+1]
+		}
+	}
+	return ""
+}
+
+// wanCandidateInterfaces returns every interface that could be the WAN
+// uplink and must never be bridged:
+//   - the interface carrying the default route (live)
+//   - detectWANIface() result (default route, first UP Ethernet-like, or
+//     the stored eth_interface setting)
+//   - the stored eth_interface system setting
+func wanCandidateInterfaces() map[string]bool {
+	wanSet := make(map[string]bool)
+	add := func(name string) {
+		if name != "" {
+			wanSet[name] = true
+		}
+	}
+	add(defaultRouteInterface())
+	add(detectWANIface())
+	var eth string
+	if err := models.DB.QueryRow("SELECT value FROM system_settings WHERE key='eth_interface'").Scan(&eth); err == nil {
+		add(eth)
+	}
+	return wanSet
+}
+
+// autoEnslavePhysicalMembers detects physical (wired) interfaces that are
+// NOT enslaved to any bridge, have NO portal server attached, and are NOT
+// part of the WAN setup, then adds them as members of br0. This makes
+// hot-plugged USB LAN adapters join the LAN bridge automatically without
+// manual configuration.
+//
+// Skipped interfaces:
+//   - lo, bridge interfaces themselves, VLAN subinterfaces (name contains '.')
+//   - wireless interfaces (wl*/uap* — managed by hostapd)
+//   - interfaces already enslaved to a bridge
+//   - interfaces with a portal server attached (they are router ports)
+//   - WAN-setup interfaces: default-route iface, detectWANIface() result,
+//     and the stored eth_interface setting
+//   - interfaces with an IP address (likely in use)
+//   - non-physical devices (no /sys/class/net/<iface>/device)
+//
+// Returns the list of interfaces that were newly added to br0.
+func autoEnslavePhysicalMembers() []string {
+	const targetBridge = "br0"
+	if !bridgeExistsInKernel(targetBridge) {
+		return nil
+	}
+
+	// Portal interfaces must never be bridged (router ports).
+	portalSet := make(map[string]bool)
+	for _, p := range readPortalConfig() {
+		portalSet[p.Interface] = true
+	}
+
+	// Never enslave a bridge into another bridge.
+	bridgeSet := make(map[string]bool)
+	for _, b := range listKernelBridges() {
+		bridgeSet[b] = true
+	}
+
+	wanSet := wanCandidateInterfaces()
+
+	entries, err := os.ReadDir("/sys/class/net")
+	if err != nil {
+		log.Printf("autoEnslave: cannot list /sys/class/net: %v", err)
+		return nil
+	}
+
+	var added []string
+	for _, e := range entries {
+		iface := e.Name()
+
+		// Skip loopback, bridges, VLAN subinterfaces, wireless.
+		if iface == "lo" || bridgeSet[iface] || strings.Contains(iface, ".") ||
+			strings.HasPrefix(iface, "wl") || strings.HasPrefix(iface, "uap") {
+			continue
+		}
+
+		// Only physical devices (USB LAN, onboard Ethernet).
+		if _, err := os.Stat("/sys/class/net/" + iface + "/device"); err != nil {
+			continue
+		}
+
+		// Skip already-enslaved interfaces.
+		if master := interfaceHasMaster(iface); master != "" {
+			continue
+		}
+
+		// Skip interfaces with a portal server attached.
+		if portalSet[iface] || portalAttached(iface) {
+			continue
+		}
+
+		// Skip WAN-setup interfaces (default route, detected WAN, stored
+		// eth_interface setting) and interfaces with an IP address.
+		if wanSet[iface] || interfaceHasIP(iface) {
+			continue
+		}
+
+		// Bring the interface up and enslave it to br0.
+		exec.Command("ip", "link", "set", "dev", iface, "up").Run()
+		if out, err := exec.Command("ip", "link", "set", iface, "master", targetBridge).CombinedOutput(); err != nil {
+			log.Printf("autoEnslave: failed to add %s to %s: %v — %s", iface, targetBridge, err, string(out))
+			continue
+		}
+
+		// Persist to DB (best-effort) — bridges.conf is synced below.
+		if _, err := models.DB.Exec(
+			"INSERT INTO bridge_members (bridge_id, member_iface) SELECT id, $2 FROM bridge_config WHERE name = $1",
+			targetBridge, iface,
+		); err != nil {
+			log.Printf("autoEnslave: warning: failed to persist %s to DB: %v", iface, err)
+		}
+
+		log.Printf("autoEnslave: added physical interface %s to %s", iface, targetBridge)
+		added = append(added, iface)
+	}
+
+	if len(added) > 0 {
+		updateBridgeConfigMembers(targetBridge)
+	}
+	return added
 }
 
 // ============================================

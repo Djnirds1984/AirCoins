@@ -63,6 +63,9 @@ COIN_VALUE=1                        # Peso value per pulse
 PULSE_MODE="falling"                # falling, rising, or both
 DEBOUNCE_MS=50                      # ignore edges closer than this to the previous pulse;
                                     # settable from Admin > Settings > GPIO (gpio_config)
+RELAY_ENABLED=false                 # relay / light pin active while coin slot is armed
+RELAY_PIN=5                         # PHYSICAL header pin number driving the relay/light
+RELAY_INTENSITY=5                   # blink tempo 1 (slow) .. 10 (fast dance)
 
 # Config file (written by admin panel / API)
 CONFIG_FILE="/var/lib/pisowifi/gpio_config"
@@ -71,6 +74,24 @@ CONFIG_FILE="/var/lib/pisowifi/gpio_config"
 if [ -f "$CONFIG_FILE" ]; then
     source "$CONFIG_FILE"
 fi
+
+# Convert RELAY_ENABLED (true/false/1/0) to canonical "true"/"false".
+case "${RELAY_ENABLED:-false}" in
+    1|true|TRUE|True|yes|YES|on|ON) RELAY_ENABLED=true ;;
+    *)                            RELAY_ENABLED=false ;;
+esac
+
+# RELAY_PIN defaults to physical pin 5 when unset; RELAY_INTENSITY (1-10)
+# defaults to 5 so the dance tempo always lands in range.
+RELAY_PIN="${RELAY_PIN:-5}"
+case "$RELAY_PIN" in
+    ''|*[!0-9]*) RELAY_PIN=5 ;;
+esac
+case "$RELAY_INTENSITY" in
+    ''|*[!0-9]*) RELAY_INTENSITY=5 ;;
+esac
+if [ "$RELAY_INTENSITY" -lt 1 ] 2>/dev/null; then RELAY_INTENSITY=1; fi
+if [ "$RELAY_INTENSITY" -gt 10 ] 2>/dev/null; then RELAY_INTENSITY=10; fi
 
 # Re-detect board after loading config (config may override BOARD_MODEL)
 detect_board
@@ -82,6 +103,9 @@ PID_FILE="/var/run/gpio-coin-listener.pid"
 STATE_FILE="/var/lib/pisowifi/gpio_state"
 ARMED_FILE="/run/pisowifi/coinslot.armed"   # written by API (POST /api/coinslot/arm)
 ARM_EXTEND_SEC=30                            # extra window per detected coin
+RELAY_BLINK_STOP="/run/pisowifi/relay.blink.stop"
+RELAY_BLINK_PID=""
+RELAY_USABLE=true
 
 # now_ms: milliseconds since epoch (for time-based debounce)
 now_ms() {
@@ -111,6 +135,8 @@ log() {
 # ============================================
 cleanup() {
     log "GPIO Coin Listener stopping..."
+    relay_blink_stop
+    relay_off
     # Unexport GPIO if using sysfs
     if [ "$GPIO_METHOD" = "sysfs" ] && [ -n "$INTERNAL_GPIO" ]; then
         echo "$INTERNAL_GPIO" > /sys/class/gpio/unexport 2>/dev/null
@@ -135,6 +161,12 @@ log "GPIO method: $GPIO_METHOD"
 log "Listening on PHYSICAL header pin: $COIN_PULSE_PIN"
 log "Coin value per pulse: P$COIN_VALUE"
 log "Pulse debounce: ${DEBOUNCE_MS} ms"
+if [ "$RELAY_ENABLED" = "true" ]; then
+    log "Relay/light: ENABLED on physical pin $RELAY_PIN (blink tempo $RELAY_INTENSITY/10 while armed)"
+    check_relay_availability
+else
+    log "Relay/light: disabled (Admin > Settings > GPIO to enable)"
+fi
 
 # ============================================
 # Resolve the physical header pin to a kernel GPIO line
@@ -266,6 +298,126 @@ handle_coin_pulse() {
 
     # Keep the slot armed for follow-up coins
     extend_armed_window
+
+    # Quick bright flash on the relay/light for feedback
+    relay_coin_flash
+}
+
+check_relay_availability() {
+    local relay_gpio relay_label relay_note busy_msg="" busy_flag=2
+    relay_gpio=$(pin_to_gpio "$RELAY_PIN" 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$relay_gpio" ]; then
+        log "ERROR: relay pin $RELAY_PIN is not a usable GPIO on $BOARD_FAMILY/$BOARD_CHIPSET"
+        log "ERROR: Available physical pins: $(get_available_pins)"
+        log "ERROR: Relay/light disabled for this run (coin detection unaffected)"
+        RELAY_USABLE=false
+        return 1
+    fi
+    relay_label=$(pin_to_label "$RELAY_PIN")
+    log "Relay pin: physical pin $RELAY_PIN = $relay_label = $GPIO_CHIP_NAME line $relay_gpio"
+    relay_note=$(pin_conflict_note "$RELAY_PIN")
+    if [ -n "$relay_note" ]; then
+        log "NOTE: $relay_note"
+    fi
+    if [ "$GPIO_METHOD" != "none" ]; then
+        gpio_line_busy "$RELAY_PIN"
+        busy_flag=$?
+        busy_msg="$GPIO_BUSY_REASON"
+    fi
+    if [ "$busy_flag" = "0" ]; then
+        log "ERROR: relay pin $RELAY_PIN ($GPIO_CHIP_NAME line $relay_gpio) IS BUSY"
+        log "ERROR: $busy_msg"
+        log "ERROR: Relay/light disabled for this run (coin detection unaffected)"
+        RELAY_USABLE=false
+        return 1
+    fi
+    RELAY_USABLE=true
+    return 0
+}
+
+relay_off() {
+    [ "$RELAY_ENABLED" = "true" ] || return 0
+    [ "${RELAY_USABLE:-true}" = "true" ] || return 0
+    [ "$RELAY_PIN" = "$COIN_PULSE_PIN" ] && return 0
+    gpio_write "$RELAY_PIN" 0 2>/dev/null
+    return 0
+}
+
+# relay_blink_tempo <intensity 1-10>: prints "<on_ms> <off_ms>" - higher
+# intensity = faster, more energetic dance; lower = slow calm blink.
+relay_blink_tempo() {
+    local i=$1
+    case "$i" in
+        ''|*[!0-9]*) i=5 ;;
+    esac
+    if [ "$i" -lt 1 ]; then i=1; fi
+    if [ "$i" -gt 10 ]; then i=10; fi
+    case "$i" in
+        1)  echo "600 600" ;;
+        2)  echo "450 450" ;;
+        3)  echo "330 330" ;;
+        4)  echo "240 240" ;;
+        5)  echo "170 170" ;;
+        6)  echo "120 120" ;;
+        7)  echo "90 90" ;;
+        8)  echo "65 65" ;;
+        9)  echo "45 45" ;;
+        10) echo "30 30" ;;
+        *)  echo "170 170" ;;
+    esac
+}
+
+# relay_blink_loop: background blink while armed. Runs until RELAY_BLINK_STOP
+# is touched. ONE writer only (this loop) so timing is smooth.
+relay_blink_loop() {
+    local on_ms off_ms on_s off_s
+    set -- $(relay_blink_tempo "$RELAY_INTENSITY")
+    on_ms=$1
+    off_ms=$2
+    on_s=$(awk "BEGIN{printf \"%.3f\", $on_ms/1000}")
+    off_s=$(awk "BEGIN{printf \"%.3f\", $off_ms/1000}")
+    [ -z "$on_s" ] && on_s=0.17
+    [ -z "$off_s" ] && off_s=0.17
+    while [ ! -f "$RELAY_BLINK_STOP" ]; do
+        gpio_write "$RELAY_PIN" 1 2>/dev/null
+        sleep "$on_s"
+        [ -f "$RELAY_BLINK_STOP" ] && break
+        gpio_write "$RELAY_PIN" 0 2>/dev/null
+        sleep "$off_s"
+    done
+}
+
+relay_blink_start() {
+    [ "$RELAY_ENABLED" = "true" ] || return 0
+    [ "${RELAY_USABLE:-true}" = "true" ] || return 0
+    [ "$RELAY_PIN" = "$COIN_PULSE_PIN" ] && return 0
+    relay_blink_stop
+    rm -f "$RELAY_BLINK_STOP"
+    gpio_setup_output "$RELAY_PIN" 2>/dev/null
+    relay_blink_loop &
+    RELAY_BLINK_PID=$!
+}
+
+relay_blink_stop() {
+    [ -n "${RELAY_BLINK_PID:-}" ] && kill "$RELAY_BLINK_PID" 2>/dev/null
+    RELAY_BLINK_PID=""
+    touch "$RELAY_BLINK_STOP" 2>/dev/null
+    sleep 0.05 2>/dev/null || true
+}
+
+# relay_coin_flash: quick bright burst on each detected coin, then the blink
+# loop resumes on its own. Backgrounded so pulse handling stays instant.
+relay_coin_flash() {
+    [ "$RELAY_ENABLED" = "true" ] || return 0
+    [ "${RELAY_USABLE:-true}" = "true" ] || return 0
+    [ "$RELAY_PIN" = "$COIN_PULSE_PIN" ] && return 0
+    (
+        gpio_write "$RELAY_PIN" 1 2>/dev/null
+        sleep 0.12
+        # Only restore LOW if the blink loop is not mid-cycle; either way
+        # the loop rewrites the level on its next tick.
+        [ -f "$RELAY_BLINK_STOP" ] || gpio_write "$RELAY_PIN" 0 2>/dev/null
+    ) &
 }
 
 # accept_pulse_edge: time-based debounce gate shared by both armed loops.
@@ -413,6 +565,9 @@ if [ "$GPIO_METHOD" != "none" ]; then
 
         # ARMED: actively listen for coin pulses until window closes
         log "Coin slot ARMED - listening for coin pulses on physical pin $COIN_PULSE_PIN ($PIN_LABEL, line $INTERNAL_GPIO)"
+        if [ "$RELAY_ENABLED" = "true" ] && [ "$RELAY_PIN" != "$COIN_PULSE_PIN" ]; then
+            relay_blink_start
+        fi
 
         # Re-check on every arm if the pin was busy at startup: the operator
         # may have disabled the conflicting overlay without restarting us.
@@ -426,6 +581,8 @@ if [ "$GPIO_METHOD" != "none" ]; then
         else
             armed_loop_poll
         fi
+        relay_blink_stop
+        relay_off
         log "Armed window closed - coin slot back to IDLE"
     done
 

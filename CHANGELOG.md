@@ -1,5 +1,134 @@
 # Changelog
 
+## v1.29.0
+- **Feature: Relay / light pin (additional GPIO pin, default pin 5)** — A second selectable GPIO pin that lights/blinks while a customer is inserting coins (Insert Coin pressed → armed window open). Each detected coin triggers a quick confirmation flash; relay turns off when the window closes. Adjustable blink tempo 1 (slow) .. 10 (fast "dance"). Settable from Admin > Settings > GPIO just like the coin pin; disabled by default.
+
+## v1.28.0
+- **Feature: Post-payment redirect / landing link** — A new "Post-Payment Redirect" setting in the Portal page lets the operator enter an absolute http/https URL (a landing page, thank-you page, promo link, or IP). When set, after a client finishes inserting coins and gains internet (or redeems a voucher), the portal shows a "Connected" modal with a button that opens the configured link in a new tab. Leave the field blank to disable (default — no behavior change).
+- Backend: `redirect_url` added to the portal appearance config, validated as an absolute http(s) URL and persisted with the theme/colors. Backward compatible — old saved configs simply have no redirect.
+
+## v1.27.0
+- **Architecture: ISP-independent DNS for authorized clients (no more DNS lock-in)** — Authorized clients' DNS was DNAT'ed directly to the ISP's DNS server, with the ISP's IP frozen into each per-MAC iptables rule at authorization time. Moving the unit to another ISP left every rule pointing at a dead DNS, breaking all apps until a refresh. Now a second dnsmasq instance ("clean DNS forwarder") listens on port 5353: no captive hijack, no DHCP — it just forwards queries upstream using /etc/resolv.conf, which DHCP/systemd-resolved updates automatically when the ISP changes. Authorized clients' DNS is REDIRECTed to this local forwarder (iptables REDIRECT carries no IP at all), so per-MAC rules can NEVER go stale. Plug the unit into any ISP — clients' apps work immediately, no refresh needed.
+- The forwarder service (`aircoins-dns-forwarder.service`) is created and started automatically by `aircoins-captive-rules` on first auth/refresh, and survives reboots.
+- `refresh` now serves as a one-time migration: it rebuilds all tracked MACs' old ISP-DNS DNAT rules into forwarder REDIRECT rules. The boot DNS watcher (v1.26.8) and the manual Refresh DNS button remain as harmless safety nets.
+
+## v1.26.9
+- **Critical fix: DNS refresh was a silent no-op** — `aircoins-captive-rules refresh` compared the freshly detected DNS against `UPSTREAM_DNS`, but that variable is re-detected at the top of the same script run, so the comparison was ALWAYS equal and refresh always exited with "DNS unchanged - no refresh needed" without touching any iptables rule. This is why neither the automatic boot watcher nor the manual button restored internet after an ISP change. Refresh now unconditionally rebuilds the per-MAC DNS DNAT rules (and probe/forward rules) for every tracked authorized client with the currently detected DNS — rewriting an already-correct rule is harmless. This fix also makes v1.26.8's automatic boot watcher actually effective.
+
+## v1.26.8
+- **Feature: Automatic DNS refresh on ISP change / relocation** — New DNS watcher (`handlers/dnswatch.go`, started at boot). The unit now auto-detects the upstream DNS (systemd-resolved → resolv.conf → default gateway) ~30s after boot and every 60s while running. When it differs from the last-seen value — e.g. the unit was plugged in at a client's house with a different ISP, or the ISP changed its DNS — it automatically runs `aircoins-captive-rules refresh` to update all tracked authorized clients' DNS rules. Changes are debounced (must be stable across 2 consecutive polls) and every transition is logged (`journalctl -u aircoins-api`, tag `[dnswatch]`). No more manual "Refresh DNS" button press needed after moving the unit; the button still works as a manual override.
+
+## v1.26.7
+- **UI: Portal buttons rearranged and uniform** — INSERT COIN, Pause, and View Rates now sit together in one compact wrapping row, all sharing the exact same size (padding, font, radius, min-width). The "Use Voucher" button matches too.
+- **UI: Every portal button is colorful** — INSERT COIN keeps its gold gradient, Pause is orange, View Rates is teal, Use Voucher is vivid violet; modal buttons keep cyan/gold/red/green.
+- **UI: Smaller header logo** — the navbar "AirCoins" logo was reduced one step (15px mobile / 18px desktop) so it does not dominate the header.
+- **UI: Compacted, scrollable portal layout** — page gap reduced 14px to 8px and side padding tightened; content stays compact and the page scrolls when it overflows.
+
+## v1.26.6
+- **Fix: Rates modal is now a plain list, not buttons** — Each rate in the portal "View Rates" modal was rendered as a clickable button-style card (tapping it opened the Insert Coin modal). Rates are now displayed as a simple non-clickable list (coin amount on the left, time on the right). Payment happens only at the physical coin slot; the main Insert Coin button is unchanged.
+
+## v1.26.5
+- **Fix: Session delete now actually removes the row** — The delete button on the Sessions page said "permanently removes the row" but the backend only soft-deleted (marked expired), so deleted sessions kept reappearing in the UI. Delete now hard-removes the session row and its coin events in a transaction. Vouchers that reference the session keep their sale history (session_id is detached, not deleted). Daily stats aggregates are preserved.
+- **Fix: Bridge auto-detects physical interfaces** — Newly plugged USB LAN adapters / onboard Ethernet ports that are not enslaved to any bridge and have no portal server attached are now automatically added as members of `br0` when the Bridges page loads. Safety skips: loopback, bridges, VLAN subinterfaces, wireless (hostapd-managed), already-enslaved, portal-attached, IP-assigned, and the WAN default-route interface. Persisted to the DB and bridges.conf.
+- **Fix: Double "v" in updater version cards** — The updater page displayed "vv1.26.5"-style labels because the card title prepended an extra "v" to versions that already carry the prefix.
+
+## v1.26.4
+- **Fix: Rebuilt ARM binary with refresh-dns endpoint** — v1.26.3 shipped a stale prebuilt `aircoins-api-arm` binary that did not include the `/api/admin/captive/refresh-dns` route (install.sh skips the Go build when a prebuilt binary is present). The ARM binary is now cross-compiled with the new handler, fixing the 404 on the "Refresh DNS" button.
+
+## v1.26.3
+- **Fix: Added `/api/admin/captive/refresh-dns` API endpoint** — The "Refresh DNS" button in WAN Settings now works. The Go API handler was missing, causing a 404 error. Added `handlers/captive.go` with `RefreshDNSHandler` that runs `aircoins-captive-rules refresh` to update DNS rules for all authorized clients after ISP change.
+
+## v1.26.2
+- **Fix: ISP change breaks internet for authorized clients** — When switching ISPs (e.g., from 192.168.254.254 to 192.168.1.1), authorized hotspot clients lost internet because their DNS rules still pointed to the old ISP's DNS server. The system now:
+  - **Auto-detects DNS from gateway** — `detect_upstream_dns()` now tries the default gateway (e.g., 192.168.1.1) as DNS server, since ISP routers usually act as DNS. Falls back to 8.8.8.8 only as last resort.
+  - **Tracks authorized MACs** — Authorized client MACs are saved to `/var/lib/pisowifi/captive/authorized_macs` for DNS refresh on ISP change.
+  - **New `refresh` command** — `sudo aircoins-captive-rules refresh` updates ALL authorized clients' DNS rules to use the new ISP's DNS. Run this after changing ISP.
+  - **UI: Refresh DNS button** — New "Refresh DNS" button in WAN Settings calls `/admin/captive/refresh-dns` API endpoint to update DNS rules for all authorized clients.
+- **API: New `/admin/captive/refresh-dns` endpoint** — Triggers DNS refresh for all authorized clients. Returns success message with count of refreshed clients.
+
+## v1.26.1
+- **Fix: captive portal auto-close now uses a forced navigation instead of `window.location.reload()`.** Some captive-portal webviews (notably the iOS Captive Network Assistant) ignore a programmatic reload, so after pressing **Done Paying** nothing would refresh. The portal now shows the success toast + done-paying sound, then ~1.8s later navigates to the same URL with a cache-busting param (`?paid=1`) — a genuine top-level page load that also pokes the network so the OS re-runs its connectivity check. Because the client's MAC is whitelisted (the server authorizes it synchronously before `/api/session/start` even responds), the Go `ProbeRelease` responder answers that check with success (Apple `Success`, Android `204`, Windows NCSI) and the captive popup dismisses itself without a manual refresh. Fires only on a successful payment — never on errors, cancels, timeouts, or the status-poll loop.
+
+## v1.26.0
+- **Fix: captive portal now auto-closes after payment (no manual refresh).** Pressing **Done Paying** (or redeeming a voucher) shows the success toast and plays the done-paying sound, then ~2s later the portal auto-refreshes. Because the client's MAC is now whitelisted, the OS's connectivity probe is answered by the Go `ProbeRelease` responder with success (Apple `Success`, Android `204`, Windows NCSI) and the captive popup dismisses itself. The auto-refresh fires only on a successful payment — never on errors, cancels, timeouts, or the status-poll loop.
+
+## v1.24.5
+- **Fix: NodeMCU blocked by the captive portal** — A sub-vendo joining a portal-protected SSID was captured like any unauthenticated client (DNS/HTTP hijack + forward DROP), so it could never reach the API — the "registered but never truly accepted" failure. Units now report their **MAC** at registration, and **Accept** punches the same captive-portal bypass used for paying clients (`aircoins-captive-rules auth <mac>`); Reject/Delete revoke it. Pending table shows the MAC (with a warning when missing).
+- **Fix: vendo selector moved out of the Insert Coins modal** — The picker now lives on the main portal page **above the Insert Coin button**; the customer selects the vendo machine first, then presses Insert Coin. Hidden when only one coinslot exists.
+- **Firmware: setup portal no longer a trap** — The SubVendo-Setup AP self-exits after 5 minutes and reboots (a provisioned unit then retries STA mode), and the WiFi-failure threshold before reopening setup went from 3 to 10 minutes. The pending LED is now one calm 250ms pulse per poll, clearly distinct from the portal's rapid strobe.
+
+## v1.24.4
+- **Fix: NodeMCU stuck rapid-blinking even after acceptance** — The sub-vendo `Register` response hard-coded `status:"pending"` even for an already-accepted unit, so the firmware's registration poll never detected approval and stayed in the pending loop (rapid blink), never reporting coins or showing in the vendo picker. The server now returns the unit's real `status` + `approved` field; an accepted unit transitions to online on its next poll.
+- **Fix: no vendo picker on the portal** — The captive portal's Insert Coins modal never rendered the vendo selector. It now fetches `/api/coinslot/options`, lists Main Vendo (GPIO) + every sub-vendo on the caller's VLAN, and shows the dropdown when 2+ options exist (auto-hides for a single slot). The chosen vendo is passed to arm + session Start.
+
+## v1.24.3
+- **Fix: Accept blocked when a unit has no VLAN binding** — A NodeMCU that registered on an unmapped SSID (no `ssid_vlan_map` entry) couldn't be accepted because it had no `vlan_iface`. Admin → Sub-Vendos now prompts for the **portal VLAN interface** (e.g. `end0.22`) at Accept time, binds it, then takes the unit online. Accept also accepts an optional `vlan_iface` in the request body.
+
+## v1.24.2
+- **Fix: Sub-Vendos 500 root cause** — The legacy `sub_vendos.vlan_iface` was `NOT NULL UNIQUE`, which creates a **UNIQUE CONSTRAINT**. The migration's `DROP INDEX` on that constraint's backing index fails (Postgres: *cannot drop index ... because constraint requires it*), and because the statements ran as a single multi-statement transaction, the **whole batch rolled back** — leaving `device_id` missing. Migrations now use `DROP CONSTRAINT` and each `ALTER` is its own idempotent step, so a failure can't roll back the useful columns.
+- **Fix: firmware stuck in rapid-blink setup** — The NodeMCU now persists its `device_id` before joining WiFi, so a failed first connect/register no longer leaves it unprovisioned. The pending state now re-registers (idempotent) every 3s instead of only polling approval, so it recovers even if the first register hit the server 500. LED: 2 slow blinks = register failing, 1 fast tick = pending, 3 slow = approved.
+
+## v1.24.1
+- **Fix: Sub-Vendos tab 500 Internal Server Error after in-place update** — The v1.23 `sub_vendos` table (claim-code schema) wasn't migrated on devices that already existed; `CREATE TABLE IF NOT EXISTS` is a no-op on an existing table. Added an idempotent `EnsureSchema` migration that adds `device_id`/`status`/`ssid`, backfills legacy rows, makes `vlan_iface` nullable, drops the old `claim_code`/`claimed` columns and the old UNIQUE constraint. The admin Sub-Vendos list now loads on the Orange Pi.
+
+## v1.24.0
+- **Sub-Vendo refactor: shared token + admin approval** — Replaced the per-unit claim-code model. All NodeMCU units authenticate with **one shared token** (env `AIRCOINS_SUBVENDO_TOKEN`). A unit registers with an auto-generated `device_id` + the SSID it joined, appears as **Pending**, and the admin clicks **Accept** to bring it online.
+- **SSID → VLAN auto-bind** — The server maps each unit's WiFi SSID to its portal VLAN iface via the `ssid_vlan_map` table (managed in Settings). One router/SSID = one VLAN; units are bound automatically, no manual VLAN entry.
+- **Pending / Accept / Reject workflow in Admin → Sub-Vendos** — New units appear in a Pending card with Accept/Reject; accepted units go Online and serve coinslots on their VLAN.
+- **Shared-token device API** — `/api/subvendo/register`, `/api/subvendo/approved`, `/api/subvendo/state`, `/api/subvendo/coins` all authenticate with the shared Bearer token + `device_id`.
+- **Firmware updated** — NodeMCU registers instead of claiming a code, polls `/approved` until accepted, then polls `/state` and reports coins. LED: 1 fast blink while pending, 3 slow blinks once approved.
+- **Multi-unit VLAN picker** — `GET /api/coinslot/options` now returns ALL sub-vendos on the caller's VLAN; the portal shows a dropdown when 2+ units share a router, auto-selects when there's one.
+
+## v1.23.1
+- **Fix: portal coinslot picker not appearing** — The vendo dropdown now correctly renders when a VLAN has multiple coinslot options (GPIO + sub-vendo). Fixed missing `coinslotSelect` population logic.
+- **Fix: session Start now uses the armed coinslot** — Portal stashes the `coinslot` returned by the arm response and sends it on session Start, so coins are credited from the correct source (GPIO or the selected sub-vendo).
+- **Fix: GPIO coinslot works when sub-vendo is offline** — Selecting "Main Vendo (GPIO)" in the picker correctly routes coin detection to the local GPIO, independent of sub-vendo online status.
+
+## v1.23.0
+- **Sub-Vendo multi-coinslot system** — Register ESP8266 NodeMCU units as remote coinslots. Each sub-vendo is bound to a VLAN and serves as an isolated coinslot for that network.
+- **Coinslot selector on captive portal** — When a VLAN has more than one coinslot option (GPIO + sub-vendo), the Insert Coin modal shows a dropdown to pick the vendo machine. Auto-selects when only one option exists.
+- **Coinslot Options API** — `GET /api/coinslot/options` returns the available coinslots for the caller's VLAN.
+- **Arm/Disarm/Status APIs** now accept a `coinslot` parameter (`auto`, `gpio`, `subvendo:N`) so the portal can target a specific slot.
+- **Cross-VLAN isolation enforced** — A client can only arm/disarm/status the coinslot bound to its own VLAN; other VLAN requests are rejected server-side.
+- **x64 Ubuntu support** — Tarball ships both `linux/arm/7` and `linux/amd64` binaries; `install.sh` picks by arch.
+- **NodeMCU firmware** (`firmware/subvendo/subvendo.ino`) — First-boot setup portal with WiFi scan + claim-code provisioning + coin reporting.
+
+## v1.22.7
+- **Firmware**: fix the Scan Wi-Fi button — the old async scan never delivered results (the `scanRunning` flag short-circuited every follow-up request, so the scan completed but results were never collected). Replaced with a synchronous `WiFi.scanNetworks()` that blocks ~2-3s and returns the network list immediately. The JS now disables the button during the scan and handles timeout/no-networks gracefully.
+
+## v1.22.6
+- **Firmware**: open (no-password) hotspots now work — an empty password is joined with the no-passphrase `WiFi.begin(ssid)` call instead of being passed as a WPA passphrase (which always failed).
+- **Firmware**: the setup portal gained a **Scan Wi-Fi** button — nearby SSIDs are listed in a dropdown (sorted by signal, marked locked/open), picking one fills the SSID field; leave the password blank for open networks.
+- Save flow now reports a clear error page when the Wi-Fi join fails (wrong password / WPA3-only) instead of blindly claiming.
+
+## v1.22.5
+- **Firmware**: FLASH-button force-setup removed (some dev boards have no FLASH/GPIO0 button) — the 3-minute WiFi timeout is now the only automatic way back into the setup portal.
+- **Firmware**: phone-hotspot compatibility — `WiFi.persistent(false)` + `setAutoReconnect(true)`; when disconnected, the unit scans and the LED tells you why: **1 blink/sec** = SSID visible but auth/range failing (wrong password or WPA3-only hotspot), **2 quick blinks** = SSID not in the air (phone hotspot asleep — open the hotspot screen to wake it).
+- Note: ESP8266 cannot join **WPA3-only** hotspots. Set your phone hotspot security to **WPA2-Personal** for testing.
+
+## v1.22.4
+- **Firmware self-recovery**: if a Sub-Vendo can't reach WiFi for 3 minutes straight (wrong SSID/password, AP renamed, unit moved), it automatically reopens the **SubVendo-Setup** AP so it can be reconfigured over the air — no serial re-flash needed. Holding FLASH at power-on still forces setup mode immediately.
+- Note: EEPROM config survives a re-flash, so a re-flashed unit keeps trying its old WiFi credentials — that rapid blink right after flashing is the connect loop. Use FLASH-at-power-on (or wait 3 min) to re-provision.
+
+## v1.22.3
+- **Sub-Vendo Online/Offline status fixed**: claiming no longer stamps `last_seen` (a unit powered off right after claiming showed Online for up to 5 minutes). Online now comes only from actual token-authenticated state polls, and the offline window dropped to 2 minutes — a powered-off unit drops to Offline within ~2 minutes.
+- Admin Sub-Vendos tab auto-refreshes every 5s while open.
+- Firmware LED is now unambiguous: 3 slow blinks = claim success; rapid blink = setup portal; ~1 Hz blink = can't reach WiFi; steady = armed (accepting coins); brief tick every poll = alive & talking to server.
+
+## v1.22.2
+- **Firmware fix**: Sub-Vendo sketch used NodeMCU `D1`/`D2` pin labels which don't exist when compiling for "Generic ESP8266 Module" — switched to raw GPIO numbers (coin = GPIO4/D2, relay = GPIO5/D1). Compiles under any ESP8266 board selection.
+
+## v1.22.1
+- **Fix**: Sub-Vendos tab rendered blank — the section was missing from the admin UI's `SECTION_NAMES` router array, so its content never became visible. Registered unit table and add-form now display on both ARM and x64.
+
+## v1.22.0
+- **Sub-Vendo multi-coinslot system (NodeMCU ESP8266)**: register one NodeMCU coin slot per portal VLAN in the new **Sub-Vendos** admin tab (1 VLAN = 1 Sub-Vendo). The binding is server-side — a customer's VLAN is resolved from their IP, so units are mutually invisible: VLAN A can never arm, read, or be credited by unit B's coins.
+- Device API with one-time claim-code provisioning (token stored hashed): state polling (2s idle / 500ms armed) and batch coin reports (`POST /api/subvendo/coins`, 1 pulse = ₱1, arm window +30s per coin).
+- Admin tab: online/offline/armed badges, per-unit coin counters, rotate token, enable/disable, delete.
+- NodeMCU firmware shipped in `firmware/subvendo/` — setup AP with claim flow, interrupt-driven pulse counting (30ms debounce), retry-safe reporting.
+- **x64 Ubuntu support**: the release tarball now ships both `aircoins-api` (linux/arm/7) and `aircoins-api-x64` (linux/amd64); `install.sh` picks by architecture. On x64 there is **no GPIO** — arming without a Sub-Vendo on the caller's VLAN returns "No coinslot configured for this network". Coinslots work exclusively through Sub-Vendos there.
+- New: `sub_vendos` table and `coin_events.source` column ('local_gpio' / 'subvendo:<id>') — coin windows are strictly scoped per coinslot; local GPIO behavior on ARM devices is unchanged.
+
 ## v1.21.1
 - **Voucher printing fixed**: explicit A4 portrait `@page` size (no longer inherits the browser's last-used Landscape setting) and a fixed 2-column print grid, so vouchers fill the page instead of one-per-sheet.
 

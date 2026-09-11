@@ -1519,6 +1519,9 @@
             <a href="#" data-section="vouchers" class="nav-item">
                 <span class="icon">🎟️</span><span class="label">Vouchers</span>
             </a>
+            <a href="#" data-section="subvendos" class="nav-item">
+                <span class="icon">🪙</span><span class="label">Sub-Vendos</span>
+            </a>
             <a href="#" data-section="pricing" class="nav-item">
                 <span class="icon">💰</span><span class="label">Pricing</span>
             </a>
@@ -1876,6 +1879,68 @@
         </div>
 
         <!-- Pricing Section -->
+        <div id="section-subvendos" class="section" style="display:none;">
+
+            <!-- Pending Devices Card -->
+            <div class="settings-card" id="subvendo-pending-card" style="display:none;">
+                <h3>⏳ Pending Devices <span class="badge warn" id="subvendo-pending-count">0</span></h3>
+                <p style="color:#aaa;font-size:13px;margin-bottom:12px;">
+                    NodeMCUs that connected to a mapped SSID and are waiting for your approval.
+                    Once accepted, the unit goes online and serves coinslots on its VLAN.
+                </p>
+                <div class="vlan-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Device ID</th>
+                                <th>MAC</th>
+                                <th>SSID</th>
+                                <th>Auto-bound VLAN</th>
+                                <th>First Seen</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="subvendo-pending-body">
+                        </tbody>
+                    </table>
+                    <div id="subvendo-pending-empty" style="text-align:center;padding:16px;color:#666;">
+                        No pending devices.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sub-Vendo Units Card -->
+            <div class="settings-card">
+                <h3>🪙 Sub-Vendo Units</h3>
+                <div class="vlan-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Device ID</th>
+                                <th>Site</th>
+                                <th>VLAN</th>
+                                <th>Status</th>
+                                <th>Coins</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="subvendo-table-body">
+                            <!-- populated by JS -->
+                        </tbody>
+                    </table>
+                    <div id="subvendo-empty" style="display:none;text-align:center;padding:20px;color:#888;">
+                        No sub-vendos yet. Power on a NodeMCU connected to a mapped SSID — it will appear above for approval.
+                    </div>
+                </div>
+                <div class="gpio-info-text" style="margin-top:10px;">
+                    One shared token for all units. A unit on VLAN 22 can never see VLAN 33's units.
+                    Multiple units on the same VLAN → the portal shows a picker to the customer.
+                    Manage SSID→VLAN bindings in <a href="#" onclick="showSection('settings');loadSSIDVLANMap();" style="color:#00d4ff;">Settings → SSID/VLAN Map</a>.
+                </div>
+            </div>
+        </div>
+
         <div id="section-pricing" class="section" style="display:none;">
             <!-- Add New Tier Form -->
             <div class="pricing-form-card">
@@ -2093,6 +2158,21 @@
                         </div>
                     </div>
 
+                    <!-- Post-Payment Redirect -->
+                    <div class="settings-card">
+                        <div class="card-title">Post-Payment Redirect</div>
+                        <div class="gpio-info-text" style="margin-bottom:12px;">
+                            When a client finishes inserting coins and gains internet, show a button that opens this link.
+                            Leave blank to disable.
+                        </div>
+                        <input type="text" id="portal-redirect-url" placeholder="https://yoursite.com/thank-you"
+                               style="width:100%; padding:10px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05); color:#fff; font-size:14px;"
+                               autocomplete="off" spellcheck="false">
+                        <div class="gpio-info-text" style="margin-top:8px;">
+                            Format: an absolute <code>http://</code> or <code>https://</code> URL only.
+                        </div>
+                    </div>
+
                     <!-- Portal Audio -->
                     <div class="settings-card">
                         <div class="card-title">Portal Audio</div>
@@ -2295,8 +2375,10 @@
                             <input type="checkbox" id="wan-apply-os"> Apply to OS now
                         </label>
                         <button class="btn btn-primary" onclick="saveWANSettings()">Save</button>
+                        <button class="btn btn-ghost" onclick="refreshDNSClients()" title="Update DNS rules for all authorized clients after ISP change">Refresh DNS</button>
                     </div>
                     <div id="wan-save-status" style="font-size:13px;min-height:18px;margin-top:4px;"></div>
+                    <div id="wan-dns-refresh-status" style="font-size:13px;min-height:18px;margin-top:4px;"></div>
                 </div>
             </div>
 
@@ -2355,6 +2437,26 @@
                             <label for="gpio-debounce-ms">Pulse Debounce (ms)</label>
                             <input type="number" id="gpio-debounce-ms" min="5" max="1000" step="5" value="50">
                         </div>
+                    </div>
+                    <div class="settings-row">
+                        <div class="settings-field">
+                            <label for="gpio-relay-pin">Relay / Light Pin (physical header pin)</label>
+                            <select id="gpio-relay-pin"></select>
+                        </div>
+                        <div class="settings-field">
+                            <label for="gpio-relay-enabled">&nbsp;</label>
+                            <label class="gpio-relay-enable"><input type="checkbox" id="gpio-relay-enabled" onchange="onRelayEnabledChange()"> Enable relay light</label>
+                        </div>
+                        <div class="settings-field">
+                            <label for="gpio-relay-intensity">Blink Intensity (Low 1 &mdash; High 10): <span id="gpio-relay-intensity-val">5</span></label>
+                            <input type="range" id="gpio-relay-intensity" min="1" max="10" step="1" value="5" oninput="document.getElementById('gpio-relay-intensity-val').textContent=this.value">
+                        </div>
+                    </div>
+                    <div class="gpio-info-text">
+                        Relay light: turns on while a customer is inserting coins (blinks; a
+                        quick flash confirms each coin). Intensity = blink tempo &mdash;
+                        low is a slow pulse, high is a fast dance. Default relay pin is
+                        physical pin <strong>5</strong> and must differ from the coin pin.
                     </div>
                     <div class="gpio-info-text">
                         Pin numbers are PHYSICAL header pins (the numbers printed on the 40-pin header),
@@ -2545,6 +2647,39 @@
                         <button class="btn btn-primary" onclick="changeAdminPassword()">Change Password</button>
                     </div>
                     <div id="pw-save-status" style="font-size:13px;min-height:18px;margin-top:4px;"></div>
+                </div>
+            </div>
+
+            <!-- SSID → VLAN Map Card -->
+            <div class="settings-card">
+                <div class="card-title" style="display:flex;align-items:center;gap:8px;">📡 SSID → VLAN Map</div>
+                <p style="font-size:13px;color:#888;margin:0 0 12px 0;">
+                    Maps WiFi SSIDs to portal VLAN interfaces. When a NodeMCU connects to a mapped SSID,
+                    it is automatically bound to that VLAN. Add one entry per router/hotspot.
+                </p>
+                <div class="vlan-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>SSID</th>
+                                <th>VLAN Interface</th>
+                                <th>Site</th>
+                                <th>Active</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ssid-vlan-map-body">
+                        </tbody>
+                    </table>
+                    <div id="ssid-vlan-map-empty" style="text-align:center;padding:16px;color:#666;">
+                        No mappings yet. Add one below.
+                    </div>
+                </div>
+                <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+                    <input type="text" id="ssid-map-ssid" placeholder="SSID (e.g. Brgy-Hall-2.4G)" style="flex:2;min-width:160px;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#1a1a2e;color:#eee;">
+                    <input type="text" id="ssid-map-vlan" placeholder="VLAN iface (e.g. end0.22)" style="flex:1;min-width:120px;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#1a1a2e;color:#eee;">
+                    <input type="text" id="ssid-map-site" placeholder="Site (optional)" style="flex:1;min-width:100px;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#1a1a2e;color:#eee;">
+                    <button class="btn btn-primary" onclick="addSSIDVLANMap()">Add</button>
                 </div>
             </div>
         </div>
@@ -3037,11 +3172,12 @@ async function checkAuth() {
 // ============================================================
 // ROUTER
 // ============================================================
-const SECTION_NAMES = ['dashboard', 'sessions', 'vouchers', 'pricing', 'portal', 'bridges', 'settings', 'system', 'reports', 'license', 'zerotier', 'updater'];
+const SECTION_NAMES = ['dashboard', 'sessions', 'vouchers', 'subvendos', 'pricing', 'portal', 'bridges', 'settings', 'system', 'reports', 'license', 'zerotier', 'updater'];
 const SECTION_TITLES = {
     dashboard: 'Dashboard',
     sessions: 'Sessions',
     vouchers: 'Voucher Management',
+    subvendos: 'Sub-Vendos',
     pricing: 'Pricing',
     portal: 'Portal',
     bridges: 'Bridges',
@@ -3070,6 +3206,7 @@ function showSection(name) {
     stopDashboardRefresh();
     stopSessionsRefresh();
     stopSystemRefresh();
+    stopSubVendosRefresh();
     if (name === 'dashboard') {
         loadDashboard();
         startDashboardRefresh();
@@ -3078,6 +3215,9 @@ function showSection(name) {
         startSessionsRefresh();
     } else if (name === 'vouchers') {
         loadVouchers();
+    } else if (name === 'subvendos') {
+        loadSubVendos();
+        startSubVendosRefresh();
     } else if (name === 'pricing') {
         loadPricing();
     } else if (name === 'portal') {
@@ -4165,6 +4305,22 @@ function stopSystemRefresh() {
     if (systemInterval) { clearInterval(systemInterval); systemInterval = null; }
 }
 
+// --- Sub-Vendo live status (Online/Offline decays from last_seen) ---
+var subvendoInterval = null;
+function startSubVendosRefresh() {
+    if (subvendoInterval) return;
+    subvendoInterval = setInterval(function() {
+        // Only refresh while the tab is actually visible
+        if (document.getElementById('section-subvendos') &&
+            document.getElementById('section-subvendos').style.display !== 'none') {
+            loadSubVendos();
+        }
+    }, 5000);
+}
+function stopSubVendosRefresh() {
+    if (subvendoInterval) { clearInterval(subvendoInterval); subvendoInterval = null; }
+}
+
 // --- System Info ---
 async function loadSystemInfo() {
     try {
@@ -4469,7 +4625,13 @@ function getPinMapForBoard(boardModel) {
 }
 
 function populatePinDropdown(boardModel) {
-    var sel = document.getElementById('gpio-pin');
+    populatePinDropdownInto('gpio-pin', boardModel);
+    populatePinDropdownInto('gpio-relay-pin', boardModel);
+}
+
+function populatePinDropdownInto(selId, boardModel) {
+    var sel = document.getElementById(selId);
+    if (!sel) return;
     var currentVal = sel.value;
     sel.innerHTML = '';
     var map = getPinMapForBoard(boardModel);
@@ -4493,6 +4655,13 @@ function onBoardModelChange() {
     var boardModel = document.getElementById('gpio-board-model').value;
     populatePinDropdown(boardModel);
     document.getElementById('gpio-board-info').style.display = 'none';
+    onRelayEnabledChange();
+}
+
+function onRelayEnabledChange() {
+    var enabled = document.getElementById('gpio-relay-enabled').checked;
+    document.getElementById('gpio-relay-pin').disabled = !enabled;
+    document.getElementById('gpio-relay-intensity').disabled = !enabled;
 }
 
 async function loadSettings() {
@@ -4537,6 +4706,9 @@ async function loadSettings() {
             var sel = document.getElementById('wan-vlan-select');
             sel.value = String(wanData.vlan_id);
         }
+
+        // Load SSID → VLAN map
+        loadSSIDVLANMap();
     } catch (e) {
         if (e.message !== 'Unauthorized') showNotification('Failed to load WAN settings', 'error');
     }
@@ -4564,6 +4736,13 @@ async function loadSettings() {
         if (gpioCfg.pulse_mode) document.getElementById('gpio-pulse-mode').value = gpioCfg.pulse_mode;
         // Set debounce (ms)
         document.getElementById('gpio-debounce-ms').value = gpioCfg.debounce_ms || 50;
+
+        // Relay / light pin
+        document.getElementById('gpio-relay-enabled').checked = !!gpioCfg.relay_enabled;
+        document.getElementById('gpio-relay-pin').value = gpioCfg.relay_pin || 5;
+        document.getElementById('gpio-relay-intensity').value = gpioCfg.relay_intensity || 5;
+        document.getElementById('gpio-relay-intensity-val').textContent = gpioCfg.relay_intensity || 5;
+        onRelayEnabledChange();
     } catch (e) {
         if (e.message !== 'Unauthorized') showNotification('Failed to load GPIO config', 'error');
     }
@@ -4784,6 +4963,29 @@ async function saveWANSettings() {
     }
 }
 
+// Refresh DNS rules for all authorized clients after ISP change
+async function refreshDNSClients() {
+    var statusEl = document.getElementById('wan-dns-refresh-status');
+    statusEl.textContent = 'Refreshing DNS rules…';
+    statusEl.style.color = '#aaa';
+
+    try {
+        var res = await apiCall('POST', '/admin/captive/refresh-dns', {});
+        if (res && res.success) {
+            statusEl.textContent = res.message || 'DNS rules refreshed successfully';
+            statusEl.style.color = '#4caf50';
+            showNotification('DNS rules refreshed for all authorized clients', 'success');
+        } else {
+            statusEl.textContent = res.message || 'No refresh needed';
+            statusEl.style.color = '#ffa500';
+        }
+    } catch (e) {
+        statusEl.textContent = 'Error: ' + e.message;
+        statusEl.style.color = '#f44336';
+        showNotification('Failed to refresh DNS rules', 'error');
+    }
+}
+
 async function saveGpioConfig() {
     try {
         var boardModel = document.getElementById('gpio-board-model').value;
@@ -4794,13 +4996,27 @@ async function saveGpioConfig() {
             showNotification('Debounce must be between 5 and 1000 ms', 'error');
             return;
         }
+        var relayPin = parseInt(document.getElementById('gpio-relay-pin').value) || 5;
+        var relayEnabled = document.getElementById('gpio-relay-enabled').checked;
+        var relayIntensity = parseInt(document.getElementById('gpio-relay-intensity').value) || 5;
+        if (relayPin < 1 || relayPin > 40) {
+            showNotification('Relay pin must be a physical header pin (1-40)', 'error');
+            return;
+        }
+        if (relayEnabled && relayPin === pin) {
+            showNotification('Relay pin must differ from the coin slot pin', 'error');
+            return;
+        }
 
         await apiCall('POST', '/gpio/config', {
             pin: pin,
             coin_value: 1,
             pulse_mode: pulseMode,
             board_model: boardModel,
-            debounce_ms: debounceMs
+            debounce_ms: debounceMs,
+            relay_pin: relayPin,
+            relay_enabled: relayEnabled,
+            relay_intensity: relayIntensity
         });
 
         // Apply immediately: the listener reads gpio_config on startup,
@@ -5069,13 +5285,18 @@ async function loadPortalAppearance() {
         portalAppearance = {
             theme: res.data.theme,
             colors: Object.assign({}, PORTAL_THEMES.dark.colors, res.data.colors),
-            background_image: res.data.background_image || ''
+            background_image: res.data.background_image || '',
+            header_image: res.data.header_image || '',
+            redirect_url: res.data.redirect_url || ''
         };
+        var ru = document.getElementById('portal-redirect-url');
+        if (ru) ru.value = portalAppearance.redirect_url;
     } catch (e) {
         portalAppearance = {
             theme: 'dark',
             colors: Object.assign({}, PORTAL_THEMES.dark.colors),
-            background_image: ''
+            background_image: '',
+            redirect_url: ''
         };
         showNotification('Failed to load portal appearance: ' + e.message, 'error');
     }
@@ -5084,13 +5305,17 @@ async function loadPortalAppearance() {
 
 async function savePortalAppearance() {
     if (!portalAppearance) return;
+    // Pull the live redirect URL out of the input field.
+    var ru = document.getElementById('portal-redirect-url');
+    var redirectUrl = ru ? ru.value.trim() : '';
     try {
         // background_image is deliberately NOT sent: the server owns it
         // (the upload/remove endpoints persist it themselves) and ignores
         // whatever a client would put here.
         await apiCall('POST', '/admin/portal/appearance', {
             theme: portalAppearance.theme,
-            colors: portalAppearance.colors
+            colors: portalAppearance.colors,
+            redirect_url: redirectUrl
         });
         showNotification('Portal appearance saved', 'success');
     } catch (e) {
@@ -7287,7 +7512,7 @@ function renderVersionCards(data) {
         html += '<div id="card-' + ver.replace(/\./g, '-') + '" style="background:' + bgColor + ';border:1px solid ' + borderColor + ';border-radius:10px;padding:14px 18px;margin-bottom:10px;">'
             + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
             + '<div style="display:flex;align-items:center;gap:8px;">'
-            + '<strong style="font-size:15px;color:#fff;">v' + escapeHtml(ver) + '</strong>'
+            + '<strong style="font-size:15px;color:#fff;">' + escapeHtml(ver) + '</strong>'
             + badgeHtml
             + '</div>'
             + '<span style="font-size:12px;color:#666;">' + escapeHtml(dateStr) + '</span>'
@@ -7421,6 +7646,212 @@ function autoCheckUpdater() {
 // ============================================================
 var bridgeListCache = [];
 var availableVlansForBridge = [];
+
+// ============================================
+// SUB-VENDOS (NodeMCU remote coin slots)
+// ============================================
+async function loadSubVendos() {
+    try {
+        const res = await apiCall('GET', '/admin/subvendos');
+        const units = res.data || [];
+        const tbody = document.getElementById('subvendo-table-body');
+        const empty = document.getElementById('subvendo-empty');
+        const pendingCard = document.getElementById('subvendo-pending-card');
+        const pendingBody = document.getElementById('subvendo-pending-body');
+        const pendingEmpty = document.getElementById('subvendo-pending-empty');
+        const pendingCount = document.getElementById('subvendo-pending-count');
+
+        // Split into pending vs active
+        const pending = units.filter(function(u) { return u.status === 'pending'; });
+        const active = units.filter(function(u) { return u.status !== 'pending' && u.status !== 'rejected'; });
+
+        // Render pending devices
+        if (pending.length) {
+            pendingCard.style.display = 'block';
+            pendingCount.textContent = pending.length;
+            pendingEmpty.style.display = 'none';
+            pendingBody.innerHTML = pending.map(function(u) {
+                const vlan = u.vlan_iface || '<span style="color:#ff9800;">No binding</span>';
+                const macCell = u.mac
+                    ? '<td style="font-family:monospace;font-size:12px;">' + u.mac + '</td>'
+                    : '<td style="color:#ff9800;font-size:12px;">no MAC<br><span style="color:#666;">re-provision unit</span></td>';
+                return '<tr data-id="' + u.id + '" data-vlan="' + (u.vlan_iface || '') + '">' +
+                    '<td style="font-family:monospace;">' + u.device_id + '</td>' +
+                    macCell +
+                    '<td>' + (u.ssid || '—') + '</td>' +
+                    '<td style="font-family:monospace;color:#00d4ff;">' + vlan + '</td>' +
+                    '<td>' + new Date(u.created_at).toLocaleString() + '</td>' +
+                    '<td>' +
+                        '<button class="btn btn-sm btn-success" onclick="acceptSubVendo(' + u.id + ')">✓ Accept</button> ' +
+                        '<button class="btn btn-sm btn-danger" onclick="rejectSubVendo(' + u.id + ')">✗ Reject</button>' +
+                    '</td>' +
+                    '</tr>';
+            }).join('');
+        } else {
+            pendingCard.style.display = 'none';
+            pendingBody.innerHTML = '';
+            pendingEmpty.style.display = 'block';
+        }
+
+        // Render active units
+        if (!active.length) {
+            tbody.innerHTML = '';
+            empty.style.display = 'block';
+            return;
+        }
+        empty.style.display = 'none';
+        tbody.innerHTML = active.map(function(u) {
+            const statusBadge = u.status === 'online'
+                ? (u.online ? '<span class="badge online">Online</span>' : '<span class="badge neutral">Offline</span>')
+                : '<span class="badge warn">' + u.status + '</span>';
+            const armedBadge = u.armed ? ' <span class="badge online">Armed</span>' : '';
+            return '<tr>' +
+                '<td style="font-weight:600;">' + (u.name || '<span style="color:#555;">—</span>') + '</td>' +
+                '<td style="font-family:monospace;font-size:12px;">' + u.device_id + '</td>' +
+                '<td>' + (u.site || '<span style="color:#555;">—</span>') + '</td>' +
+                '<td style="font-family:monospace;color:#00d4ff;">' + (u.vlan_iface || '—') + '</td>' +
+                '<td>' + statusBadge + armedBadge + '</td>' +
+                '<td>' + u.total_coins + '</td>' +
+                '<td>' +
+                    '<button class="btn btn-sm" onclick="toggleSubVendo(' + u.id + ',' + (!u.enabled) + ')">' + (u.enabled ? 'Disable' : 'Enable') + '</button> ' +
+                    '<button class="btn btn-sm" onclick="editSubVendo(' + u.id + ')">Edit</button> ' +
+                    '<button class="btn btn-danger btn-sm" onclick="deleteSubVendo(' + u.id + ')">Delete</button>' +
+                '</td>' +
+                '</tr>';
+        }).join('');
+    } catch (e) {
+        showNotification('Failed to load sub-vendos: ' + e.message, 'error');
+    }
+}
+
+async function acceptSubVendo(id) {
+    try {
+        // Ask for a VLAN interface if the unit has none (unmapped SSID).
+        const unit = document.getElementById('subvendo-pending-body').querySelector('[data-id="' + id + '"]');
+        const hasVlan = unit && unit.dataset.vlan && unit.dataset.vlan !== '';
+        let vlanIface = '';
+        if (!hasVlan) {
+            const input = prompt(
+                'This unit has no VLAN binding (its SSID is not mapped).\n' +
+                'Enter the portal VLAN interface it should serve (e.g. end0.22):\n\n' +
+                'Leave empty to cancel.'
+            );
+            if (input === null) return;
+            const v = (input || '').trim();
+            if (!v) { showNotification('Accept cancelled — no VLAN specified.', 'warning'); return; }
+            vlanIface = v;
+        }
+        if (!confirm('Accept this device? It will go online and serve coinslots' + (vlanIface ? ' on ' + vlanIface : ' on its VLAN') + '.')) return;
+        await apiCall('POST', '/admin/subvendos/accept', vlanIface
+            ? { id: id, vlan_iface: vlanIface }
+            : { id: id });
+        showNotification('Device accepted — now online.', 'success');
+        loadSubVendos();
+    } catch (e) {
+        showNotification('Failed to accept: ' + e.message, 'error');
+    }
+}
+
+async function rejectSubVendo(id) {
+    if (!confirm('Reject this device?')) return;
+    try {
+        await apiCall('POST', '/admin/subvendos/reject', { id: id });
+        showNotification('Device rejected.', 'success');
+        loadSubVendos();
+    } catch (e) {
+        showNotification('Failed to reject: ' + e.message, 'error');
+    }
+}
+
+async function toggleSubVendo(id, enabled) {
+    try {
+        await apiCall('POST', '/admin/subvendos/' + id + '/update', { enabled: enabled });
+        loadSubVendos();
+    } catch (e) {
+        showNotification('Failed to update: ' + e.message, 'error');
+    }
+}
+
+async function editSubVendo(id) {
+    const name = prompt('Enter a name for this sub-vendo:');
+    if (name === null) return;
+    try {
+        await apiCall('POST', '/admin/subvendos/' + id + '/update', { name: name.trim() });
+        showNotification('Updated.', 'success');
+        loadSubVendos();
+    } catch (e) {
+        showNotification('Failed to update: ' + e.message, 'error');
+    }
+}
+
+async function deleteSubVendo(id) {
+    if (!confirm('Delete this sub-vendo? This cannot be undone.')) return;
+    try {
+        await apiCall('POST', '/admin/subvendos/' + id + '/delete', {});
+        showNotification('Sub-vendo deleted', 'success');
+        loadSubVendos();
+    } catch (e) {
+        showNotification('Failed to delete: ' + e.message, 'error');
+    }
+}
+
+// ============================================================
+// SSID → VLAN MAP (Settings)
+// ============================================================
+
+async function loadSSIDVLANMap() {
+    try {
+        const res = await apiCall('GET', '/admin/ssid-vlan-map');
+        const map = res.data || [];
+        const tbody = document.getElementById('ssid-vlan-map-body');
+        const empty = document.getElementById('ssid-vlan-map-empty');
+        if (!map.length) {
+            tbody.innerHTML = '';
+            empty.style.display = 'block';
+            return;
+        }
+        empty.style.display = 'none';
+        tbody.innerHTML = map.map(function(m) {
+            return '<tr>' +
+                '<td style="font-weight:600;">' + m.ssid + '</td>' +
+                '<td style="font-family:monospace;color:#00d4ff;">' + m.vlan_iface + '</td>' +
+                '<td>' + (m.site || '—') + '</td>' +
+                '<td>' + (m.active ? '<span class="badge online">Yes</span>' : '<span class="badge neutral">No</span>') + '</td>' +
+                '<td><button class="btn btn-danger btn-sm" onclick="deleteSSIDVLANMap(' + m.id + ')">Delete</button></td>' +
+                '</tr>';
+        }).join('');
+    } catch (e) {
+        // Endpoint may not exist on older backends — fail silently
+    }
+}
+
+async function addSSIDVLANMap() {
+    const ssid = document.getElementById('ssid-map-ssid').value.trim();
+    const vlan = document.getElementById('ssid-map-vlan').value.trim();
+    const site = document.getElementById('ssid-map-site').value.trim();
+    if (!ssid || !vlan) { showNotification('SSID and VLAN interface are required', 'error'); return; }
+    try {
+        await apiCall('POST', '/admin/ssid-vlan-map', { ssid: ssid, vlan_iface: vlan, site: site });
+        document.getElementById('ssid-map-ssid').value = '';
+        document.getElementById('ssid-map-vlan').value = '';
+        document.getElementById('ssid-map-site').value = '';
+        showNotification('Mapping added.', 'success');
+        loadSSIDVLANMap();
+    } catch (e) {
+        showNotification('Failed to add mapping: ' + e.message, 'error');
+    }
+}
+
+async function deleteSSIDVLANMap(id) {
+    if (!confirm('Delete this mapping?')) return;
+    try {
+        await apiCall('DELETE', '/admin/ssid-vlan-map/' + id, {});
+        showNotification('Mapping deleted.', 'success');
+        loadSSIDVLANMap();
+    } catch (e) {
+        showNotification('Failed to delete: ' + e.message, 'error');
+    }
+}
 
 async function loadBridges() {
     try {

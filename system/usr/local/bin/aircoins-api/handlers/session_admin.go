@@ -322,10 +322,10 @@ func (h *SessionAdminHandler) UpdateSession(w http.ResponseWriter, r *http.Reque
 // DELETE /api/admin/sessions/<id>
 // ============================================
 
-// DeleteSession soft-deletes a session: marks it expired so the MAC→token
-// mapping (sessions_client_mac_uniq partial unique index) is preserved.
-// The row stays in the database, preventing a duplicate MAC slot on next
-// payment. Daily stats are NOT touched (revenue reports preserve history).
+// DeleteSession permanently removes a session row: deletes its coin_events,
+// detaches any vouchers that reference it (voucher sale history is preserved),
+// then deletes the session row itself. Daily stats aggregates are NOT touched
+// (revenue reports preserve history).
 func (h *SessionAdminHandler) DeleteSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -359,18 +359,44 @@ func (h *SessionAdminHandler) DeleteSession(w http.ResponseWriter, r *http.Reque
 		EnsurePerDeviceClass(h.DB, "", mac, clientIP, "remove")
 	}
 
-	// Step 2: Soft-delete — mark expired, zero remaining, set expired_at.
-	// The row is preserved so the sessions_client_mac_uniq partial unique
-	// index keeps the MAC→token slot. coin_events are also preserved.
-	_, err = h.DB.Exec(`
-		UPDATE sessions
-		SET status = 'expired', expired_at = NOW(), expires_at = NOW(),
-		    remaining_seconds = 0
-		WHERE id = $1
-	`, id)
+	// Step 2: Hard-delete — remove the session row and its coin events in a
+	// transaction. Vouchers keep their sale history (session_id is nulled out
+	// rather than cascade-deleted). The UI promises "permanently removes the
+	// row and its coin events", so the row must actually disappear from the
+	// sessions list after delete.
+	tx, err := h.DB.Begin()
 	if err != nil {
-		log.Printf("DeleteSession: soft-delete failed for id=%d: %v", id, err)
+		log.Printf("DeleteSession: begin tx failed for id=%d: %v", id, err)
 		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to delete session"})
+		return
+	}
+	if _, err = tx.Exec(`DELETE FROM coin_events WHERE session_id = $1`, id); err != nil {
+		tx.Rollback()
+		log.Printf("DeleteSession: coin_events delete failed for id=%d: %v", id, err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to delete session"})
+		return
+	}
+	if _, err = tx.Exec(`UPDATE vouchers SET session_id = NULL WHERE session_id = $1`, id); err != nil {
+		tx.Rollback()
+		log.Printf("DeleteSession: voucher detach failed for id=%d: %v", id, err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to delete session"})
+		return
+	}
+	res, err := tx.Exec(`DELETE FROM sessions WHERE id = $1`, id)
+	if err != nil {
+		tx.Rollback()
+		log.Printf("DeleteSession: delete failed for id=%d: %v", id, err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to delete session"})
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		log.Printf("DeleteSession: commit failed for id=%d: %v", id, err)
+		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to delete session"})
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		sendJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "Session not found"})
 		return
 	}
 

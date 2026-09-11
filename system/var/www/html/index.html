@@ -43,7 +43,7 @@
             backdrop-filter: blur(10px);
             flex-shrink: 0;
         }
-        .navbar .logo { font-size: 18px; font-weight: bold; color: #00d4ff; }
+        .navbar .logo { font-size: 15px; font-weight: bold; color: #00d4ff; }
         .navbar .logo span { color: #ffd700; }
         .nav-links { display: flex; gap: 8px; }
         .nav-links a {
@@ -77,7 +77,7 @@
             overflow-y: auto;
             overflow-x: hidden;
         }
-        .page.active { display: flex; flex-direction: column; justify-content: flex-start; gap: 14px; padding-top: 20px; }
+        .page.active { display: flex; flex-direction: column; justify-content: flex-start; gap: 8px; padding: 10px 12px; }
 
         /* HOME PAGE */
         .hero {
@@ -248,22 +248,34 @@
         .modal h2 { margin-bottom: 10px; color: var(--pp-accent); font-size: 20px; }
         .modal p { color: #aaa; margin-bottom: 14px; font-size: 13px; }
 
-        /* RATES MODAL (pricing tiers from /api/pricing) */
+        /* RATES MODAL (pricing tiers from /api/pricing) — informational
+           list only: rows are NOT clickable, payment is at the coin slot */
         .rates-modal .coin-section {
-            grid-template-columns: 1fr;
-            gap: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
             max-width: none;
             margin: 6px 0;
             min-height: 0;
             overflow-y: auto;  /* only the tier list scrolls */
         }
-        .rates-modal .coin-btn { padding: 12px; }
+        .rate-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 11px 14px;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 10px;
+            background: rgba(255,255,255,0.03);
+        }
+        .rate-row .rate-coin { color: var(--pp-accent); font-weight: 700; font-size: 15px; }
+        .rate-row .rate-time { color: #ccc; font-size: 13px; }
         .rates-modal .pricing-empty { margin: 12px 0; }
 
         /* DESKTOP (phone-first: scale up a little on larger screens) */
         @media (min-width: 768px) {
             .navbar { padding: 12px 30px; }
-            .navbar .logo { font-size: 22px; }
+            .navbar .logo { font-size: 18px; }
             .nav-links a { font-size: 15px; }
             .page { max-width: 640px; }
             .hero h1 { font-size: 34px; }
@@ -405,21 +417,38 @@
         }
         .running-timer-value span { color: var(--pp-accent); }
 
-        /* INSERT COIN MAIN BUTTON */
+        /* UNIFORM BUTTON SIZING — every portal action button shares the
+           same footprint; each has its own vivid color. */
+        .insert-coin-main-btn, .pause-resume-btn, .rates-btn, #voucherRedeemBtn {
+            padding: 13px 30px;   /* >=44px tall touch target */
+            font-size: 17px;
+            font-weight: bold;
+            border-radius: 26px;
+            min-width: 150px;
+            justify-content: center;
+            margin: 0;
+        }
+        /* Action buttons sit together in one compact, wrapping row. */
+        .action-btn-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            margin: 4px auto 0;
+            flex-shrink: 0;
+        }
+
+        /* INSERT COIN MAIN BUTTON (gold gradient) */
         .insert-coin-main-btn {
             background: var(--pp-btn);
             color: var(--pp-btn-text);
             border: none;
-            border-radius: 26px;
-            padding: 13px 34px;  /* >=44px tall touch target */
-            font-size: 17px;
-            font-weight: bold;
             cursor: pointer;
             transition: 0.3s;
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            margin: 6px auto 2px;
             animation: glowPulse 2s infinite;
         }
         .insert-coin-main-btn:hover {
@@ -491,16 +520,11 @@
             background: #f39c12;
             color: #000;
             border: none;
-            border-radius: 26px;
-            padding: 13px 34px;
-            font-size: 17px;
-            font-weight: bold;
             cursor: pointer;
             transition: 0.3s;
             display: none;
             align-items: center;
             gap: 8px;
-            margin: 6px auto 2px;
         }
         .pause-resume-btn:hover {
             background: #e08e0b;
@@ -516,16 +540,11 @@
             background: #00bcd4;
             color: #000;
             border: none;
-            border-radius: 26px;
-            padding: 13px 34px;
-            font-size: 17px;
-            font-weight: bold;
             cursor: pointer;
             transition: 0.3s;
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            margin: 6px auto 2px;
         }
         .rates-btn:hover {
             background: #00a5bb;
@@ -533,6 +552,22 @@
             box-shadow: 0 10px 40px rgba(0,188,212,0.5);
         }
         .rates-btn:active { transform: scale(0.95); }
+
+        /* VOUCHER BUTTON — same size as the others, vivid violet */
+        #voucherRedeemBtn {
+            background: linear-gradient(145deg, #ab47bc, #7b1fa2);
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            transition: 0.3s;
+            white-space: nowrap;
+        }
+        #voucherRedeemBtn:hover {
+            background: linear-gradient(145deg, #ba68c8, #8e24aa);
+            transform: scale(1.05);
+            box-shadow: 0 10px 40px rgba(171,71,188,0.5);
+        }
+        #voucherRedeemBtn:active { transform: scale(0.95); }
 
         /* PAUSED OVERLAY on timer card */
         .paused-overlay {
@@ -655,18 +690,26 @@
 
         <!-- INSERT COIN + RATES BUTTONS -->
         <div style="text-align:center; flex-shrink:0;">
-            <button class="insert-coin-main-btn" id="insertCoinBtn" onclick="openGpioModal()">
-                <span class="coin-slot-icon"></span>
-                INSERT COIN
-            </button>
-            <div class="paying-overlay" id="payingOverlay">SOMEBODY IS PAYING, PLEASE WAIT FOR YOUR TURN</div>
-            <div class="ban-badge" id="banBadge">Banned</div>
-            <div>
-                <button class="pause-resume-btn" id="pauseResumeBtn" onclick="togglePauseResume()">&#9208; Pause</button>
+
+            <!-- VENDO / COINSLOT SELECTOR — pick a vendo machine BEFORE inserting coins.
+                 Hidden unless there are 2+ coinslots available on this network. -->
+            <div id="coinslotPicker" style="display:none; margin-bottom:14px; max-width:320px; margin-left:auto; margin-right:auto;">
+                <label for="coinslotSelect" style="font-size:13px; color:#bbb; display:block; margin-bottom:6px;">Select Vendo Machine</label>
+                <select id="coinslotSelect" class="portal-select"
+                        style="width:100%; padding:12px; border-radius:10px; border:1px solid rgba(255,255,255,0.25); background:rgba(255,255,255,0.08); color:#fff; font-size:15px; appearance:none;"></select>
             </div>
-            <div>
+
+            <!-- ACTION BUTTONS — one compact row, all same size, each its own color -->
+            <div class="action-btn-row">
+                <button class="insert-coin-main-btn" id="insertCoinBtn" onclick="openGpioModal()">
+                    <span class="coin-slot-icon"></span>
+                    INSERT COIN
+                </button>
+                <button class="pause-resume-btn" id="pauseResumeBtn" onclick="togglePauseResume()">&#9208; Pause</button>
                 <button class="rates-btn" onclick="openRatesModal()">View Rates</button>
             </div>
+            <div class="paying-overlay" id="payingOverlay">SOMEBODY IS PAYING, PLEASE WAIT FOR YOUR TURN</div>
+            <div class="ban-badge" id="banBadge">Banned</div>
 
 
             <!-- VOUCHER REDEEM -->
@@ -681,6 +724,17 @@
             </div>
 
 
+        </div>
+    </div>
+
+    <!-- POST-PAYMENT CONNECTION READY MODAL (shown when redirect_url is set) -->
+    <div class="modal-overlay" id="postPayModal" style="display:none;">
+        <div class="modal">
+            <h2 style="color:#4caf50;">&#10003; Connected</h2>
+            <p>Your internet is now active. You can browse the web, or tap below to open the provided link.</p>
+            <a id="postPayLink" href="#" target="_blank" rel="noopener"
+               class="btn btn-primary" style="display:inline-block; width:100%; text-align:center; padding:12px; box-sizing:border-box; text-decoration:none; margin-top:6px;">Open Link</a>
+            <button class="btn btn-ghost" onclick="closePostPay()" style="width:100%; margin:10px 0 0;">I'll Browse Myself</button>
         </div>
     </div>
 
@@ -710,8 +764,8 @@
     <!-- GPIO COIN LISTENER MODAL -->
     <div class="modal-overlay gpio-modal" id="gpioModal">
         <div class="modal">
-            <h2 style="margin-bottom:4px;">GPIO Coin Listener</h2>
-            <p style="font-size:13px; color:#666; margin-bottom:10px;">Waiting for coin insertion...</p>
+            <h2 style="margin-bottom:4px;">Insert Coins</h2>
+            <p style="font-size:13px; color:#666; margin-bottom:8px;">Waiting for coin insertion...</p>
 
             <!-- 60s Countdown Ring -->
             <div class="gpio-countdown-ring">
@@ -850,17 +904,9 @@
         }
 
         // ==================== COIN INSERT ====================
-        // Payment happens at the PHYSICAL coin slot — the pricing cards in
-        // the Rates modal are informational, so tapping one just opens the
-        // coin listener modal.
-        function insertCoin(amount) {
-            if (!state.systemOnline) {
-                showNotification('System is currently offline!', 'error');
-                return;
-            }
-            closeRatesModal();
-            openGpioModal();
-        }
+        // Payment happens ONLY at the PHYSICAL coin slot. The Rates modal
+        // is a plain informational list — there is no per-rate button and
+        // nothing to tap. The main Insert Coin button calls openGpioModal().
 
         // ==================== TIMER ====================
         // Smooth 1s countdown between server syncs (apiPoll re-aligns
@@ -972,7 +1018,9 @@
             totalSeconds: 0,
             active: false,
             sessionStartTime: null,
-            sessionInterval: null
+            sessionInterval: null,
+            payTicket: '',
+            coinslot: 'auto'
         };
 
         // ==================== API HELPERS ====================
@@ -1067,24 +1115,22 @@
                 grid.style.display = 'grid';
 
                 tiers.forEach(coin => {
-                    const card = document.createElement('div');
-                    card.className = 'coin-btn';
-                    card.onclick = function () { insertCoin(coin); };
+                    // Informational list row — NOT a button, NOT clickable.
+                    // Payment happens at the physical coin slot.
+                    const row = document.createElement('div');
+                    row.className = 'rate-row';
 
-                    const icon = document.createElement('div');
-                    icon.className = 'coin-icon';
-                    icon.textContent = '₱' + coin;
+                    const coinLabel = document.createElement('span');
+                    coinLabel.className = 'rate-coin';
+                    coinLabel.textContent = '₱' + coin;
 
-                    const title = document.createElement('h3');
-                    title.textContent = coin + (coin === 1 ? ' Peso' : ' Pesos');
+                    const timeLabel = document.createElement('span');
+                    timeLabel.className = 'rate-time';
+                    timeLabel.textContent = formatMinutes(state.pricing[coin]);
 
-                    const desc = document.createElement('p');
-                    desc.textContent = formatMinutes(state.pricing[coin]);
-
-                    card.appendChild(icon);
-                    card.appendChild(title);
-                    card.appendChild(desc);
-                    grid.appendChild(card);
+                    row.appendChild(coinLabel);
+                    row.appendChild(timeLabel);
+                    grid.appendChild(row);
                 });
             });
         }
@@ -1135,6 +1181,11 @@
         function applyPortalAppearance() {
             fetchJSON(APPEARANCE_URL + '?t=' + Date.now())
                 .then(res => {
+                    // Store the optional post-payment redirect target for
+                    // use after DONE PAYING / voucher redemption.
+                    (window._portalRedirect = (res.data && res.data.redirect_url) || '')
+                        && console.log('redirect_url configured');
+
                     if (!res || !res.success || !res.data || !res.data.colors) return;
                     const c = res.data.colors;
                     const keys = ['primary', 'accent', 'background', 'card', 'text', 'button', 'button_text'];
@@ -1229,7 +1280,7 @@
             return fetch(COINSLOT_ARM_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-Session-Token': getSessionToken() },
-                body: JSON.stringify({ duration_sec: durationSec })
+                body: JSON.stringify({ duration_sec: durationSec, coinslot: gpio.coinslot || 'auto' })
             }).then(r => r.json().then(body => ({ status: r.status, body: body }))).catch(() => null);
         }
 
@@ -1294,12 +1345,52 @@
             if (gpio.coins.length > 0) updateGpioCoinTotals();
         }
 
+        // Fetch the coinslot choices for the caller's VLAN (GPIO + sub-vendos)
+        // and populate the vendo picker. Hidden unless there are 2+ options.
+        function populateCoinslotOptions() {
+            fetchJSON('/api/coinslot/options?t=' + Date.now())
+                .then(data => {
+                    const picker = document.getElementById('coinslotPicker');
+                    const sel = document.getElementById('coinslotSelect');
+                    if (!picker || !sel) return;
+
+                    const options = [];
+                    if (data && data.gpio) {
+                        options.push({ value: 'gpio', label: 'Main Vendo (GPIO)' });
+                    }
+                    if (data && Array.isArray(data.subvendos)) {
+                        data.subvendos.forEach(function (sv) {
+                            options.push({
+                                value: 'subvendo:' + sv.id,
+                                label: 'Sub-Vendo: ' + sv.name + (sv.status === 'online' ? '' : ' (offline)')
+                            });
+                        });
+                    }
+                    if (data && data.subvendo && !Array.isArray(data.subvendos)) {
+                        // legacy single-object response
+                        options.push({ value: 'subvendo:' + data.subvendo.id, label: 'Sub-Vendo: ' + data.subvendo.name });
+                    }
+
+                    // Show the picker only when more than one choice exists.
+                    if (options.length > 1) {
+                        sel.innerHTML = options.map(o => '<option value="' + o.value + '">' + o.label + '</option>').join('');
+                        sel.onchange = function () { gpio.coinslot = sel.value; };
+                        gpio.coinslot = sel.value || options[0].value;
+                        picker.style.display = 'block';
+                    } else {
+                        picker.style.display = 'none';
+                        gpio.coinslot = 'auto';
+                        if (options.length === 1) gpio.coinslot = options[0].value;
+                    }
+                })
+                .catch(() => { gpio.coinslot = 'auto'; });
+        }
+
         function openGpioModal() {
             if (!state.systemOnline) {
                 showNotification('System is currently offline!', 'error');
                 return;
             }
-
             // Reset GPIO state
             gpio.countdown = 60;
             gpio.coins = [];
@@ -1322,6 +1413,16 @@
 
             // Open modal
             document.getElementById('gpioModal').classList.add('active');
+
+            // Use the vendo chosen on the main page (before Insert Coin).
+            // The picker on the main page is populated on page load; if the
+            // user picked nothing (single-vendo network) fall back to auto.
+            const sel = document.getElementById('coinslotSelect');
+            if (sel && sel.value) {
+                gpio.coinslot = sel.value;
+            } else {
+                gpio.coinslot = 'auto';
+            }
 
             // Play insert-coin audio (user gesture from tap guarantees play() works)
             playAudioSafe(audioInsertCoin);
@@ -1500,13 +1601,22 @@
             document.getElementById('gpioStatus').textContent = 'Starting session...';
             document.getElementById('gpioStatus').className = 'gpio-status detecting';
 
+            // Failsafe: never leave the modal hung at "Starting session..."
+            // if the request stalls or the server is slow. After 25s we give
+            // up, close, and let the operator retry.
+            var hung = setTimeout(function () {
+                closeGpioModal();
+                showNotification('Starting session timed out. Please try again.', 'error');
+            }, 25000);
+
             fetch(SESSION_START_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Session-Token': getSessionToken() },
-                body: JSON.stringify({ pay_ticket: gpio.payTicket || '' })
+                body: JSON.stringify({ pay_ticket: gpio.payTicket || '', coinslot: gpio.coinslot || 'auto' })
             })
                 .then(r => r.json().catch(() => ({})).then(body => ({ ok: r.ok, status: r.status, body: body })))
                 .then(res => {
+                    clearTimeout(hung);
                     // 403 with "Invalid or missing pay_ticket" → session expired/already paid.
                     if (res.status === 403 && res.body && res.body.message &&
                         res.body.message.indexOf('pay_ticket') !== -1) {
@@ -1534,8 +1644,10 @@
                     stopAudio(audioInsertCoin);
                     playAudioSafe(audioDonePaying);
                     applyServerSession(res.body.session, res.body.extended);
+                    maybeShowPostPay();
                 })
                 .catch(err => {
+                    clearTimeout(hung);
                     closeGpioModal();
                     warnOnce('session start', err);
                     showNotification('Could not reach the server to start the session.', 'error');
@@ -1580,6 +1692,7 @@
                     showNotification('Voucher accepted — enjoy your internet!', 'success');
                     playAudioSafe(audioDonePaying);
                     applyServerSession(res.body.session, res.body.extended);
+                    maybeShowPostPay();
                 })
                 .catch(err => {
                     btn.disabled = false;
@@ -1609,6 +1722,51 @@
             gpio.totalSeconds = 0;
             closeGpioModal();
             showNotification('Coin insertion cancelled', 'info');
+        }
+
+        // Auto-close the captive portal. Once the session is active the client's
+        // MAC is whitelisted (the server does this synchronously before the
+        // /session/start response), so navigating again makes the browser/OS re-run
+        // its connectivity probe, which the Go ProbeRelease responder now answers
+        // with success — dismissing the captive popup without a manual refresh.
+        // Fire once, a beat after the success feedback so the sound + toast still
+        // play first.
+        let portalAutoRefreshTimer = null;
+        function schedulePortalAutoRefresh() {
+            if (portalAutoRefreshTimer) clearTimeout(portalAutoRefreshTimer);
+            portalAutoRefreshTimer = setTimeout(function () {
+                portalAutoRefreshTimer = null;
+                // Force a real top-level navigation rather than .reload(): some
+                // captive-portal webviews (e.g. the iOS Captive Network Assistant)
+                // ignore a programmatic reload. Navigating to the same URL is a
+                // genuine page load that also pokes the network, prompting the OS
+                // to re-run its connectivity check against the now-authorized MAC.
+                try {
+                    var base = window.location.href.split('#')[0];
+                    var sep = base.indexOf('?') >= 0 ? '&' : '?';
+                    window.location.replace(base + sep + 'paid=1');
+                } catch (e) {
+                    window.location.reload();
+                }
+            }, 1800);
+        }
+
+        // Auto-redirects the client to the operator-configured landing URL after
+        // a successful payment / voucher redemption. Silent no-op when no
+        // redirect_url is configured, so the feature is invisible by default.
+        function maybeShowPostPay() {
+            var url = (window._portalRedirect || '').trim();
+            if (!url) return;
+            try {
+                var parsed = new URL(url);
+                if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                    // A tiny delay lets the "connected" state settle and the
+                    // session apply before the browser navigates away.
+                    setTimeout(function () {
+                        window.location.href = parsed.href;
+                    }, 800);
+                }
+            } catch (e) { /* malformed — treat as unset */ }
         }
 
         // Mirrors a session object returned by the server (POST
@@ -1641,6 +1799,9 @@
             showNotification(extended
                 ? 'Time added! Enjoy browsing.'
                 : 'Session started! Enjoy browsing.', 'success');
+
+            // Auto-close the captive portal now that the client is authorized.
+            schedulePortalAutoRefresh();
         }
 
         // Running timer on the home session card (hh:mm:ss) - COUNTDOWN
@@ -1941,6 +2102,9 @@
         // Auto-start API polling when page loads
         startApiPolling();
         updateDebugToken();
+        // Populate the vendo picker (main page) so the customer selects the
+        // vendo machine BEFORE pressing Insert Coin.
+        populateCoinslotOptions();
 
         // Pre-fill the voucher input from ?voucher=CODE (printed QR codes
         // point at this portal URL so customers can redeem with one tap).

@@ -33,12 +33,14 @@ func (h *GPIOHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 	var config models.GPIOConfig
 	err := h.DB.QueryRow(`
 		SELECT id, pin, coin_value, pulse_mode, COALESCE(board_model, 'auto'),
-		       COALESCE(debounce_ms, 50), updated_at
+		       COALESCE(debounce_ms, 50),
+		       COALESCE(relay_enabled, false), COALESCE(relay_pin, 5),
+		       COALESCE(relay_intensity, 5), updated_at
 		FROM gpio_config ORDER BY id DESC LIMIT 1
-	`).Scan(&config.ID, &config.Pin, &config.CoinValue, &config.PulseMode, &config.BoardModel, &config.DebounceMs, &config.UpdatedAt)
+	`).Scan(&config.ID, &config.Pin, &config.CoinValue, &config.PulseMode, &config.BoardModel, &config.DebounceMs, &config.RelayEnabled, &config.RelayPin, &config.RelayIntensity, &config.UpdatedAt)
 
 	if err == sql.ErrNoRows {
-		sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Data: models.GPIOConfig{Pin: 7, CoinValue: 1, PulseMode: "falling", BoardModel: "auto", DebounceMs: 50}})
+		sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Data: models.GPIOConfig{Pin: 7, CoinValue: 1, PulseMode: "falling", BoardModel: "auto", DebounceMs: 50, RelayEnabled: false, RelayPin: 5, RelayIntensity: 5}})
 		return
 	} else if err != nil {
 		log.Printf("Error fetching GPIO config: %v", err)
@@ -88,11 +90,34 @@ func (h *GPIOHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Relay / light pin: 0 = not chosen yet (default to physical pin 5);
+	// when enabled it must be a valid header pin and differ from the coin pin.
+	if req.RelayPin == 0 {
+		req.RelayPin = 5
+	}
+	if req.RelayPin < 1 || req.RelayPin > 40 {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Invalid relay pin (1-40)"})
+		return
+	}
+	if req.RelayEnabled && req.RelayPin == req.Pin {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Relay pin must differ from the coin pin"})
+		return
+	}
+
+	// Relay intensity: blink tempo 1 (slow) .. 10 (fast dance). 0 = default 5.
+	if req.RelayIntensity == 0 {
+		req.RelayIntensity = 5
+	}
+	if req.RelayIntensity < 1 || req.RelayIntensity > 10 {
+		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Relay intensity must be between 1 and 10"})
+		return
+	}
+
 	// Insert new config (keep history)
 	_, err := h.DB.Exec(`
-		INSERT INTO gpio_config (pin, coin_value, pulse_mode, board_model, debounce_ms, updated_at)
-		VALUES ($1, $2, $3, $4, $5, NOW())
-	`, req.Pin, req.CoinValue, req.PulseMode, req.BoardModel, req.DebounceMs)
+		INSERT INTO gpio_config (pin, coin_value, pulse_mode, board_model, debounce_ms, relay_enabled, relay_pin, relay_intensity, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+	`, req.Pin, req.CoinValue, req.PulseMode, req.BoardModel, req.DebounceMs, req.RelayEnabled, req.RelayPin, req.RelayIntensity)
 
 	if err != nil {
 		log.Printf("Error saving GPIO config: %v", err)
@@ -101,7 +126,7 @@ func (h *GPIOHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Write config file for gpio-coin-listener to read
-	writeGPIOConfigFile(req.Pin, req.CoinValue, req.PulseMode, req.BoardModel, req.DebounceMs)
+	writeGPIOConfigFile(req.Pin, req.CoinValue, req.PulseMode, req.BoardModel, req.DebounceMs, req.RelayEnabled, req.RelayPin, req.RelayIntensity)
 
 	logAction(h.DB, "INFO", "gpio", "GPIO config updated: physical pin="+strconv.Itoa(req.Pin)+" board="+req.BoardModel+" debounce="+strconv.Itoa(req.DebounceMs)+"ms")
 	sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "GPIO config saved. Restart GPIO listener to apply."})
@@ -430,7 +455,11 @@ func firstNonEmpty(values ...string) string {
 }
 
 // writeGPIOConfigFile writes config to file for gpio-coin-listener
-func writeGPIOConfigFile(pin, coinValue int, pulseMode, boardModel string, debounceMs int) {
+func writeGPIOConfigFile(pin, coinValue int, pulseMode, boardModel string, debounceMs int, relayEnabled bool, relayPin, relayIntensity int) {
+	relayOn := "false"
+	if relayEnabled {
+		relayOn = "true"
+	}
 	content := "# AirCoins GPIO Config - Written by API\n"
 	content += "# COIN_PULSE_PIN is a PHYSICAL HEADER PIN number (not a GPIO number)\n"
 	content += "COIN_PULSE_PIN=" + strconv.Itoa(pin) + "\n"
@@ -438,6 +467,10 @@ func writeGPIOConfigFile(pin, coinValue int, pulseMode, boardModel string, debou
 	content += "PULSE_MODE=\"" + pulseMode + "\"\n"
 	content += "BOARD_MODEL=\"" + boardModel + "\"\n"
 	content += "DEBOUNCE_MS=" + strconv.Itoa(debounceMs) + "\n"
+	content += "# RELAY_PIN is a PHYSICAL HEADER PIN number (not a GPIO number)\n"
+	content += "RELAY_ENABLED=" + relayOn + "\n"
+	content += "RELAY_PIN=" + strconv.Itoa(relayPin) + "\n"
+	content += "RELAY_INTENSITY=" + strconv.Itoa(relayIntensity) + "\n"
 
 	os.MkdirAll("/var/lib/pisowifi", 0755)
 	err := os.WriteFile("/var/lib/pisowifi/gpio_config", []byte(content), 0644)

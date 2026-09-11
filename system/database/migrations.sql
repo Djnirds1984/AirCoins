@@ -644,6 +644,75 @@ ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS pausable BOOLEAN NOT NULL DEFAULT 
 ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS expiration_hours INTEGER NOT NULL DEFAULT 0;
 
 -- ============================================
+-- 020 - SUB-VENDOS: NodeMCU remote coin slots (1 VLAN = 1 unit)
+-- ============================================
+CREATE TABLE IF NOT EXISTS sub_vendos (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    site TEXT NOT NULL DEFAULT '',
+    vlan_iface TEXT NOT NULL UNIQUE,
+    api_token_hash VARCHAR(64) NOT NULL DEFAULT '',
+    claim_code VARCHAR(12) NOT NULL DEFAULT '',
+    claimed BOOLEAN NOT NULL DEFAULT FALSE,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    armed_until BIGINT NOT NULL DEFAULT 0,
+    window_started_at BIGINT NOT NULL DEFAULT 0,
+    total_coins INTEGER NOT NULL DEFAULT 0,
+    last_seen TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
+-- 021 - SUB-VENDOS: refactor to device-registration model
+-- ============================================
+-- Replaces claim_code/claimed with device_id + status lifecycle.
+-- One shared API token for all units; admin maps SSID -> VLAN iface.
+-- Idempotent: only alters if columns don't exist yet.
+ALTER TABLE sub_vendos ADD COLUMN IF NOT EXISTS device_id VARCHAR(32);
+ALTER TABLE sub_vendos ADD COLUMN IF NOT EXISTS status VARCHAR(12) NOT NULL DEFAULT 'online' CHECK (status IN ('pending','online','offline','rejected'));
+ALTER TABLE sub_vendos ADD COLUMN IF NOT EXISTS ssid VARCHAR(64);
+ALTER TABLE sub_vendos ADD COLUMN IF NOT EXISTS site_new TEXT NOT NULL DEFAULT '';
+-- Backfill: existing rows keep their vlan_iface, get a synthetic device_id, status='online'
+UPDATE sub_vendos SET device_id = 'legacy-' || id::text, status = 'online' WHERE device_id IS NULL;
+ALTER TABLE sub_vendos ALTER COLUMN device_id SET NOT NULL;
+ALTER TABLE sub_vendos ALTER COLUMN vlan_iface DROP NOT NULL;
+ALTER TABLE sub_vendos ALTER COLUMN name SET DEFAULT '';
+ALTER TABLE sub_vendos ALTER COLUMN name SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_subvendos_device ON sub_vendos(device_id);
+CREATE INDEX IF NOT EXISTS idx_subvendos_vlan ON sub_vendos(vlan_iface);
+CREATE INDEX IF NOT EXISTS idx_subvendos_status ON sub_vendos(status);
+
+-- SSID -> VLAN interface mapping (admin-managed)
+CREATE TABLE IF NOT EXISTS ssid_vlan_map (
+    id SERIAL PRIMARY KEY,
+    ssid VARCHAR(64) NOT NULL UNIQUE,
+    vlan_iface VARCHAR(32) NOT NULL,
+    site VARCHAR(128) NOT NULL DEFAULT '',
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- A VLAN iface may have many units (multi-subvendo per router); drop the old
+-- UNIQUE CONSTRAINT (and its backing index). Must use DROP CONSTRAINT — a
+-- UNIQUE declared inline creates a constraint, not a bare index, and Postgres
+-- refuses DROP INDEX on a constraint-backed index.
+ALTER TABLE sub_vendos DROP CONSTRAINT IF EXISTS sub_vendos_vlan_iface_key;
+DROP INDEX IF EXISTS sub_vendos_vlan_iface_key;
+
+ALTER TABLE coin_events ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'local_gpio';
+CREATE INDEX IF NOT EXISTS idx_coin_events_source ON coin_events(source, processed);
+
+-- ============================================
+-- 022 - GPIO CONFIG: relay / light pin
+-- ============================================
+-- Additional relay pin that lights/blinks while the coin slot is armed
+-- (Insert Coin pressed / coins being inserted). Default physical pin 5,
+-- intensity 1 (slow) .. 10 (fast dance). Disabled by default.
+ALTER TABLE IF EXISTS gpio_config ADD COLUMN IF NOT EXISTS relay_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE IF EXISTS gpio_config ADD COLUMN IF NOT EXISTS relay_pin INTEGER NOT NULL DEFAULT 5;
+ALTER TABLE IF EXISTS gpio_config ADD COLUMN IF NOT EXISTS relay_intensity INTEGER NOT NULL DEFAULT 5;
+
+-- ============================================
 -- COMPLETION
 -- ============================================
 \echo 'Migrations applied.'

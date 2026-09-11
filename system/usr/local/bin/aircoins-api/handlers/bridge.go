@@ -555,7 +555,7 @@ func BridgeCreate(w http.ResponseWriter, r *http.Request) {
 
 	// Bring bridge up
 	if cmdOut, err := exec.Command("ip", "link", "set", req.Name, "up").CombinedOutput(); err != nil {
-		exec.Command("ip", "link", "delete", req.Name).Run()
+		exec.Command("ip", "link", "delete", req.Name, "type", "bridge").Run()
 		sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to bring bridge up: " + string(cmdOut)})
 		return
 	}
@@ -647,7 +647,7 @@ func BridgeDelete(w http.ResponseWriter, r *http.Request) {
 
 	// Delete from kernel (already-gone is fine — still clean the config)
 	if bridgeExistsInKernel(req.Name) {
-		if cmdOut, err := exec.Command("ip", "link", "delete", req.Name).CombinedOutput(); err != nil {
+		if cmdOut, err := exec.Command("ip", "link", "delete", req.Name, "type", "bridge").CombinedOutput(); err != nil {
 			sendJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "Failed to delete bridge: " + string(cmdOut)})
 			return
 		}

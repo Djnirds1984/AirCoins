@@ -7900,13 +7900,20 @@ async function loadBridges() {
 }
 
 async function loadAvailableVlansForBridge() {
-    try {
-        const [vlansRes, ifacesRes] = await Promise.all([
-            apiCall('GET', '/vlan/list'),
-            apiCall('GET', '/vlan/interfaces')
-        ]);
-        const vlans = vlansRes.vlans || [];
-        const ifaces = ifacesRes.interfaces || [];
+    // Fetch the two sources independently so a failure in one (e.g. an
+    // older API binary without /vlan/interfaces) cannot empty the whole
+    // dropdown — the other source still populates it.
+    const [vlansRes, ifacesRes] = await Promise.allSettled([
+        apiCall('GET', '/vlan/list'),
+        apiCall('GET', '/vlan/interfaces')
+    ]);
+    if (vlansRes.status === 'rejected') console.warn('vlan/list failed:', vlansRes.reason);
+    if (ifacesRes.status === 'rejected') console.warn('vlan/interfaces failed:', ifacesRes.reason);
+
+    const vlans = (vlansRes.status === 'fulfilled' && vlansRes.value && vlansRes.value.vlans) ? vlansRes.value.vlans : [];
+    const ifaces = (ifacesRes.status === 'fulfilled' && ifacesRes.value && ifacesRes.value.interfaces) ? ifacesRes.value.interfaces : [];
+
+    if (ifaces.length > 0 || vlans.length > 0) {
         // Names already used: bridge interfaces themselves and current members
         const allBridgeMembers = {};
         const allBridgeNames = {};
@@ -7923,12 +7930,15 @@ async function loadAvailableVlansForBridge() {
             const down = i.state !== 'up';
             return {
                 interface: i.name,
-                description: 'Physical' + (hasIP ? ' — has IP, release it first' : '') + (down ? ' — down' : ''),
+                // Down interfaces remain selectable — enslaving a down NIC to
+                // a bridge is valid (the bridge brings it up). Only interfaces
+                // carrying an IP are locked (the API rejects those).
+                description: 'Physical' + (down ? ' (down)' : '') + (hasIP ? ' — has IP, release it first' : ''),
                 ip: i.ip,
                 has_portal: false,
                 active: !down,
                 physical: true,
-                disabled: hasIP || down
+                disabled: hasIP
             };
         });
         // VLAN sub-interfaces (value = the VLAN iface name itself, not its parent)
@@ -7946,11 +7956,12 @@ async function loadAvailableVlansForBridge() {
             };
         });
         availableVlansForBridge = physCands.concat(vlanCands);
-        // Re-render member dropdowns
-        renderBridgeMembers(bridgeListCache);
-    } catch (e) {
-        // silently fail — dropdown will just be empty
+    } else {
+        // Both sources failed — keep the dropdown visibly non-empty
+        availableVlansForBridge = [{ interface: '', description: 'No interfaces available (check API)', physical: true, disabled: true }];
     }
+    // Re-render member dropdowns
+    renderBridgeMembers(bridgeListCache);
 }
 
 function renderBridgeMembers(bridges) {

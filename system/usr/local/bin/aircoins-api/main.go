@@ -272,6 +272,20 @@ func main() {
 	mux.Handle("/api/bridge/member/add", adminProtected(handlers.BridgeAddMember))
 	mux.Handle("/api/bridge/member/remove", adminProtected(handlers.BridgeRemoveMember))
 
+	// Wi-Fi hotspot routes (hostapd: list adapters, save SSID/channel, start/stop)
+	mux.Handle("/api/admin/wifi-ap", adminProtected(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			handlers.WiFiAPGet(w, r)
+		case http.MethodPost:
+			handlers.WiFiAPSave(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))
+	mux.Handle("/api/admin/wifi-ap/start", adminProtected(handlers.WiFiAPStart))
+	mux.Handle("/api/admin/wifi-ap/stop", adminProtected(handlers.WiFiAPStop))
+
 	// WAN settings routes (auto-detect WAN port, DHCP/Static/VLAN DHCP modes)
 	mux.Handle("/api/admin/wan", adminProtected(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

@@ -398,6 +398,25 @@ CREATE TABLE IF NOT EXISTS bridge_members (
 );
 
 -- ============================================
+-- WIFI HOTSPOT (HOSTAPD)
+-- ============================================
+-- A wireless adapter can be turned into an OPEN access point (hotspot)
+-- managed by hostapd. Security is intentionally passwordless — the
+-- hotspot is a captive-portal entry interface; the portal stack
+-- (portal_servers, dnsmasq) is provisioned on the interface separately.
+CREATE TABLE IF NOT EXISTS wifi_ap_config (
+    id SERIAL PRIMARY KEY,
+    interface VARCHAR(32) UNIQUE NOT NULL,
+    ssid VARCHAR(32) NOT NULL,
+    channel INTEGER NOT NULL DEFAULT 6,
+    hw_mode VARCHAR(4) NOT NULL DEFAULT 'g',
+    country_code VARCHAR(4) NOT NULL DEFAULT 'PH',
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
 -- FUNCTIONS
 -- ============================================
 

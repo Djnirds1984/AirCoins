@@ -1531,6 +1531,9 @@
             <a href="#" data-section="bridges" class="nav-item">
                 <span class="icon">🔗</span><span class="label">Bridges</span>
             </a>
+            <a href="#" data-section="wifiap" class="nav-item">
+                <span class="icon">📶</span><span class="label">Wi-Fi Hotspot</span>
+            </a>
             <a href="#" data-section="settings" class="nav-item">
                 <span class="icon">⚙️</span><span class="label">Settings</span>
             </a>
@@ -3070,6 +3073,64 @@
 
         </div>
 
+        <!-- Wi-Fi Hotspot Section -->
+        <div id="section-wifiap" class="section" style="display:none;">
+
+            <!-- Hotspot Status Card -->
+            <div class="settings-card">
+                <h3>📶 Wi-Fi Hotspot</h3>
+                <div id="wifiap-status" style="margin-bottom:12px;color:#aaa;">
+                    Loading hotspot status…
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button class="btn btn-primary btn-sm" id="wifiap-start-btn" onclick="startWiFiAP()">Start Hotspot</button>
+                    <button class="btn btn-danger btn-sm" id="wifiap-stop-btn" onclick="stopWiFiAP()">Stop Hotspot</button>
+                </div>
+                <div style="margin-top:12px;color:#888;font-size:0.85em;">
+                    🔓 This hotspot is <strong>OPEN — no password</strong>. Phones that connect land on the
+                    captive portal, exactly like the wired/VLAN portals. After starting the hotspot,
+                    provision DHCP + portal on the same interface in the
+                    <a href="#" onclick="showSection('portal')" style="color:#00d4ff;">Portal</a> section.
+                </div>
+            </div>
+
+            <!-- Hotspot Settings Card -->
+            <div class="settings-card">
+                <h3>⚙️ Hotspot Settings</h3>
+                <div class="vlan-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Wireless Adapter</label>
+                            <select id="wifiap-iface" onchange="onWiFiAdapterChange()"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>SSID (Network Name)</label>
+                            <input type="text" id="wifiap-ssid" placeholder="AirCoins Free WiFi" maxlength="32">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Channel</label>
+                            <select id="wifiap-channel"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Country Code</label>
+                            <input type="text" id="wifiap-country" value="PH" maxlength="2">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Security</label>
+                            <input type="text" value="Open — no password (captive portal)" disabled>
+                        </div>
+                    </div>
+                    <button class="btn-primary" onclick="saveWiFiAP()">Save Settings</button>
+                </div>
+                <div id="wifiap-adapters-note" style="margin-top:10px;color:#888;font-size:0.85em;"></div>
+            </div>
+
+        </div>
+
     </div>
 </div>
 
@@ -3187,7 +3248,7 @@ async function checkAuth() {
 // ============================================================
 // ROUTER
 // ============================================================
-const SECTION_NAMES = ['dashboard', 'sessions', 'vouchers', 'subvendos', 'pricing', 'portal', 'bridges', 'settings', 'system', 'reports', 'license', 'zerotier', 'updater'];
+const SECTION_NAMES = ['dashboard', 'sessions', 'vouchers', 'subvendos', 'pricing', 'portal', 'bridges', 'wifiap', 'settings', 'system', 'reports', 'license', 'zerotier', 'updater'];
 const SECTION_TITLES = {
     dashboard: 'Dashboard',
     sessions: 'Sessions',
@@ -3196,6 +3257,7 @@ const SECTION_TITLES = {
     pricing: 'Pricing',
     portal: 'Portal',
     bridges: 'Bridges',
+    wifiap: 'Wi-Fi Hotspot',
     settings: 'Settings',
     system: 'System',
     reports: 'Reports',
@@ -3243,6 +3305,8 @@ function showSection(name) {
         loadQdiscRules();
     } else if (name === 'bridges') {
         loadBridges();
+    } else if (name === 'wifiap') {
+        loadWiFiAP();
     } else if (name === 'settings') {
         loadSettings();
     } else if (name === 'system') {
@@ -8191,6 +8255,146 @@ async function removeBridgeMember(bridgeName, memberIface) {
         loadBridges();
     } catch (e) {
         showNotification('Failed to remove member: ' + e.message, 'error');
+    }
+}
+
+// ============================================================
+// WIFI HOTSPOT (hostapd — OPEN, no password)
+// ============================================================
+let wifiAPCache = null;
+
+async function loadWiFiAP() {
+    const statusEl = document.getElementById('wifiap-status');
+    const noteEl = document.getElementById('wifiap-adapters-note');
+    const ifaceSel = document.getElementById('wifiap-iface');
+
+    try {
+        const data = await apiCall('GET', '/admin/wifi-ap');
+        wifiAPCache = data;
+
+        if (!data.installed) {
+            statusEl.innerHTML = '<span style="color:#ff8800;">hostapd is not installed.</span> Run <code>apt-get install -y hostapd</code> on the device.';
+            ifaceSel.innerHTML = '<option value="">— hostapd missing —</option>';
+            noteEl.textContent = '';
+            return;
+        }
+
+        // Status line
+        if (data.running) {
+            statusEl.innerHTML = '<span style="color:#00e676;">● RUNNING</span>' +
+                (data.running_interface ? ' on <code>' + data.running_interface + '</code>' : '') +
+                ' — <strong>' + (data.stations || 0) + '</strong> client(s) connected';
+        } else {
+            statusEl.innerHTML = '<span style="color:#ff4444;">● STOPPED</span>';
+        }
+
+        // Adapter dropdown
+        const adapters = data.adapters || [];
+        if (adapters.length === 0) {
+            ifaceSel.innerHTML = '<option value="">— no wireless adapter detected —</option>';
+            noteEl.innerHTML = 'No wireless interface found. Plug in a USB Wi-Fi adapter that supports AP mode and reload.';
+            return;
+        }
+
+        ifaceSel.innerHTML = adapters.map(function(a) {
+            const label = a.name + (a.supports_ap ? '' : ' — no AP mode (not usable)');
+            return '<option value="' + a.name + '"' + (!a.supports_ap ? ' disabled' : '') + '>' + label + '</option>';
+        }).join('');
+
+        // Preselect saved config
+        const cfgInterfaces = Object.keys(data.configs || {});
+        if (cfgInterfaces.length > 0) {
+            const cfg = data.configs[cfgInterfaces[0]];
+            ifaceSel.value = cfg.interface;
+            document.getElementById('wifiap-ssid').value = cfg.ssid;
+            document.getElementById('wifiap-country').value = cfg.country_code || 'PH';
+        }
+
+        onWiFiAdapterChange();
+
+        // Note about adapter capabilities
+        noteEl.innerHTML = adapters.map(function(a) {
+            const ch24 = (a.channels || []).filter(function(c) { return c.band === '2.4GHz'; }).length;
+            const ch5 = (a.channels || []).filter(function(c) { return c.band === '5GHz'; }).length;
+            return '<code>' + a.name + '</code> — ' + (a.supports_ap ? 'AP capable' : 'AP NOT supported') +
+                ' (' + ch24 + '× 2.4GHz' + (ch5 ? ', ' + ch5 + '× 5GHz' : '') + ' channels)';
+        }).join('<br>');
+    } catch (e) {
+        statusEl.innerHTML = '<span style="color:#ff4444;">Failed to load Wi-Fi status: ' + e.message + '</span>';
+    }
+}
+function onWiFiAdapterChange() {
+    const ifaceSel = document.getElementById('wifiap-iface');
+    const chanSel = document.getElementById('wifiap-channel');
+    const name = ifaceSel.value;
+    chanSel.innerHTML = '<option value="">— select channel —</option>';
+    if (!wifiAPCache || !name) return;
+
+    const adapter = (wifiAPCache.adapters || []).find(function(a) { return a.name === name; });
+    if (!adapter) return;
+
+    const saved = wifiAPCache.configs || {};
+    const savedChan = saved[name] ? saved[name].channel : 0;
+
+    const groups = {};
+    (adapter.channels || []).forEach(function(c) {
+        (groups[c.band] = groups[c.band] || []).push(c);
+    });
+    ['2.4GHz', '5GHz'].forEach(function(band) {
+        if (!groups[band]) return;
+        const og = document.createElement('optgroup');
+        og.label = band;
+        groups[band].sort(function(a, b) { return a.channel - b.channel; }).forEach(function(c) {
+            const opt = document.createElement('option');
+            opt.value = c.channel;
+            opt.textContent = 'Channel ' + c.channel + ' (' + c.freq_mhz + ' MHz)';
+            if (c.channel === savedChan) opt.selected = true;
+            og.appendChild(opt);
+        });
+        chanSel.appendChild(og);
+    });
+}
+
+async function saveWiFiAP() {
+    const iface = document.getElementById('wifiap-iface').value;
+    const ssid = document.getElementById('wifiap-ssid').value.trim();
+    const channel = parseInt(document.getElementById('wifiap-channel').value, 10);
+    const country = document.getElementById('wifiap-country').value.trim();
+
+    if (!iface) { showNotification('Select a wireless adapter', 'error'); return; }
+    if (!ssid) { showNotification('SSID is required', 'error'); return; }
+    if (!channel) { showNotification('Select a channel', 'error'); return; }
+
+    try {
+        const res = await apiCall('POST', '/admin/wifi-ap', {
+            interface: iface, ssid: ssid, channel: channel, country_code: country
+        });
+        showNotification('Hotspot "' + ssid + '" saved' + (res && res.restarted ? ' and applied live' : ''), 'success');
+        loadWiFiAP();
+    } catch (e) {
+        showNotification('Failed to save hotspot: ' + e.message, 'error');
+    }
+}
+
+async function startWiFiAP() {
+    const iface = document.getElementById('wifiap-iface').value;
+    try {
+        const res = await apiCall('POST', '/admin/wifi-ap/start', iface ? { interface: iface } : {});
+        showNotification('Hotspot "' + (res && res.ssid ? res.ssid : '') + '" started — clients can now connect', 'success');
+        loadWiFiAP();
+    } catch (e) {
+        showNotification('Failed to start hotspot: ' + e.message, 'error');
+    }
+}
+
+async function stopWiFiAP() {
+    if (!confirm('Stop the Wi-Fi hotspot? Connected clients will be disconnected.')) return;
+    try {
+        await apiCall('POST', '/admin/wifi-ap/stop', {});
+        showNotification('Hotspot stopped', 'success');
+        loadWiFiAP();
+    } catch (e) {
+        showNotification('Failed to stop hotspot: ' + e.message, 'error');
     }
 }
 </script>

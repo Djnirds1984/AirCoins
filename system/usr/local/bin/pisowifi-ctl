@@ -159,6 +159,14 @@ show_status() {
         echo -e "${RED}STOPPED${NC}"
     fi
 
+    # Wi-Fi hotspot (hostapd)
+    echo -n "  Wi-Fi Hotspot (hostapd): "
+    if systemctl is-active --quiet hostapd 2>/dev/null; then
+        echo -e "${GREEN}RUNNING${NC}"
+    else
+        echo -e "${YELLOW}OFF${NC}"
+    fi
+
     # Active sessions
     echo ""
     echo -e "${CYAN}--- Sessions ---${NC}"

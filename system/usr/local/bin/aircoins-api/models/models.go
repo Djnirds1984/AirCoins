@@ -226,6 +226,22 @@ func EnsureSchema() {
 			 ALTER TABLE gpio_config ADD COLUMN IF NOT EXISTS relay_pin INTEGER NOT NULL DEFAULT 5;
 			 ALTER TABLE gpio_config ADD COLUMN IF NOT EXISTS relay_intensity INTEGER NOT NULL DEFAULT 5`,
 		},
+		{
+			// Wi-Fi hotspot (hostapd) configuration. One AP per wireless
+			// interface; security is always OPEN (captive portal entry).
+			"wifi_ap_config table",
+			`CREATE TABLE IF NOT EXISTS wifi_ap_config (
+				id SERIAL PRIMARY KEY,
+				interface VARCHAR(32) UNIQUE NOT NULL,
+				ssid VARCHAR(32) NOT NULL,
+				channel INTEGER NOT NULL DEFAULT 6,
+				hw_mode VARCHAR(4) NOT NULL DEFAULT 'g',
+				country_code VARCHAR(4) NOT NULL DEFAULT 'PH',
+				enabled BOOLEAN NOT NULL DEFAULT FALSE,
+				created_at TIMESTAMPTZ DEFAULT NOW(),
+				updated_at TIMESTAMPTZ DEFAULT NOW()
+			)`,
+		},
 	}
 
 	for _, f := range fixes {
@@ -423,6 +439,49 @@ type BridgeRequest struct {
 type BridgeMemberRequest struct {
 	BridgeName  string `json:"bridge_name"`
 	MemberIface string `json:"member_iface"`
+}
+
+// ============================================
+// WIFI AP (HOSTAPD) MODELS
+// ============================================
+// A wireless adapter can be turned into an open access point (hotspot)
+// managed by hostapd. The hotspot is intentionally passwordless — it is
+// a captive-portal entry interface; the portal stack (portal_servers,
+// dnsmasq) is provisioned on it separately, exactly like a VLAN or bridge.
+
+// WiFiAPConfig is the persisted hotspot configuration for one interface.
+// Security is always OPEN (no WPA) by design.
+type WiFiAPConfig struct {
+	Interface   string `json:"interface"`
+	SSID        string `json:"ssid"`
+	Channel     int    `json:"channel"`
+	HwMode      string `json:"hw_mode"`
+	CountryCode string `json:"country_code"`
+	Enabled     bool   `json:"enabled"`
+}
+
+// WiFiAPRequest is the save payload from the admin UI.
+type WiFiAPRequest struct {
+	Interface   string `json:"interface"`
+	SSID        string `json:"ssid"`
+	Channel     int    `json:"channel"`
+	CountryCode string `json:"country_code,omitempty"`
+}
+
+// WiFiChannel describes one channel an adapter supports.
+type WiFiChannel struct {
+	Channel int    `json:"channel"`
+	FreqMHz int    `json:"freq_mhz"`
+	Band    string `json:"band"` // "2.4GHz" or "5GHz"
+	Active  bool   `json:"active"`
+}
+
+// WiFiAdapter describes a detected wireless interface and its capabilities.
+type WiFiAdapter struct {
+	Name       string        `json:"name"`
+	SupportsAP bool          `json:"supports_ap"`
+	Active     bool          `json:"active"`
+	Channels   []WiFiChannel `json:"channels"`
 }
 
 // ============================================

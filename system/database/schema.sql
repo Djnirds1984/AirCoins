@@ -19,9 +19,10 @@ CREATE TABLE IF NOT EXISTS admin_users (
 );
 
 -- Insert default admin user (password: admin123)
--- Hash generated with bcrypt
+-- Hash verified with golang.org/x/crypto/bcrypt CompareHashAndPassword
+-- (the previously seeded hash did NOT match admin123 — see CHANGELOG)
 INSERT INTO admin_users (username, password_hash)
-VALUES ('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy')
+VALUES ('admin', '$2a$10$PUcBM0XqvzSOG5BmRlxg9.e84jM8uMrnn5eWfYIcrbBhYOCxJ9jaG')
 ON CONFLICT (username) DO NOTHING;
 
 -- ============================================

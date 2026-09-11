@@ -312,6 +312,11 @@ if [ -f "$SYSTEM_DIR/database/migrations.sql" ]; then
     fi
 fi
 
+# Repair default admin credentials if the broken legacy hash is present
+# (the original schema seed hash did not match the documented 'admin123').
+# Only the known-bad hash is replaced — changed passwords are never touched.
+run_pg -d "$DB_NAME" -c "UPDATE admin_users SET password_hash = '\$2a\$10\$PUcBM0XqvzSOG5BmRlxg9.e84jM8uMrnn5eWfYIcrbBhYOCxJ9jaG' WHERE username = 'admin' AND password_hash = '\$2a\$10\$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';" > /dev/null 2>&1 || echo -e "${YELLOW}  ⚠ Could not verify default admin hash (continuing)${NC}"
+
 echo -e "${GREEN}  ✓ PostgreSQL database ready${NC}"
 
 # ============================================

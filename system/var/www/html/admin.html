@@ -3082,6 +3082,7 @@
                 <div id="wifiap-status" style="margin-bottom:12px;color:#aaa;">
                     Loading hotspot status…
                 </div>
+                <div id="wifiap-reason" style="display:none;margin-top:4px;margin-bottom:12px;padding:10px;background:rgba(255,68,68,0.08);border:1px solid rgba(255,68,68,0.35);border-radius:8px;max-height:200px;overflow:auto;white-space:pre-wrap;font-family:monospace;font-size:0.78em;color:#ff9b9b;"></div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <button class="btn btn-primary btn-sm" id="wifiap-start-btn" onclick="startWiFiAP()">Start Hotspot</button>
                     <button class="btn btn-danger btn-sm" id="wifiap-stop-btn" onclick="stopWiFiAP()">Stop Hotspot</button>
@@ -8267,10 +8268,19 @@ async function loadWiFiAP() {
     const statusEl = document.getElementById('wifiap-status');
     const noteEl = document.getElementById('wifiap-adapters-note');
     const ifaceSel = document.getElementById('wifiap-iface');
+    const reasonEl = document.getElementById('wifiap-reason');
 
     try {
         const data = await apiCall('GET', '/admin/wifi-ap');
         wifiAPCache = data;
+
+        // Reset + render the failure log box (why hostapd is not running)
+        reasonEl.style.display = 'none';
+        reasonEl.textContent = '';
+        if (!data.running && data.failed_reason) {
+            reasonEl.style.display = 'block';
+            reasonEl.textContent = 'hostapd log (why it is not running):\n' + data.failed_reason;
+        }
 
         if (!data.installed) {
             statusEl.innerHTML = '<span style="color:#ff8800;">hostapd is not installed.</span> Run <code>apt-get install -y hostapd</code> on the device.';
@@ -8382,6 +8392,9 @@ async function startWiFiAP() {
         const res = await apiCall('POST', '/admin/wifi-ap/start', iface ? { interface: iface } : {});
         showNotification('Hotspot "' + (res && res.ssid ? res.ssid : '') + '" started — clients can now connect', 'success');
         loadWiFiAP();
+        // Late-crash re-check: the API verifies before replying, but a
+        // second look a moment later catches anything that dies after.
+        setTimeout(loadWiFiAP, 2500);
     } catch (e) {
         showNotification('Failed to start hotspot: ' + e.message, 'error');
     }

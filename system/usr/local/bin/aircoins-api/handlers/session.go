@@ -248,7 +248,6 @@ func (h *SessionHandler) unprocessedWindowCoins(source string) windowCoins {
 	}
 	defer rows.Close()
 
-	minutesByValue := make(map[int]int)
 	for rows.Next() {
 		var id int64
 		var value int
@@ -257,24 +256,27 @@ func (h *SessionHandler) unprocessedWindowCoins(source string) windowCoins {
 			continue
 		}
 
-		minutes, cached := minutesByValue[value]
-		if !cached {
-			m, perr := MinutesForAmount(h.DB, value)
-			if perr != nil {
-				log.Printf("Error resolving pricing for P%d: %v", value, perr)
-				m = PricingMatch{}
-			}
-			minutes = m.Minutes
-			minutesByValue[value] = minutes
-		}
-
 		coins.ids = append(coins.ids, id)
 		coins.count++
 		coins.totalValue += value
-		coins.totalMinutes += minutes
 	}
 	if err := rows.Err(); err != nil {
 		log.Printf("Error reading coin events: %v", err)
+	}
+
+	// Tiered credit: resolve ONE pricing tier for the accumulated total
+	// (highest active tier at or below the total). Operators configure
+	// per-denomination rates — e.g. P1=12min, P5=120min, P10=300min — and
+	// the tier takes effect as soon as the window total reaches it, instead
+	// of the old per-pulse summation (5 x the P1 tier) which made those
+	// multi-peso tiers unreachable on pulse-train coin acceptors.
+	if coins.totalValue > 0 {
+		m, perr := MinutesForAmount(h.DB, coins.totalValue)
+		if perr != nil {
+			log.Printf("Error resolving pricing for P%d: %v", coins.totalValue, perr)
+			m = PricingMatch{}
+		}
+		coins.totalMinutes = m.Minutes
 	}
 	return coins
 }

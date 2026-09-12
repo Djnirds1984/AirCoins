@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.29.1
+- **Fix: tiered pricing for multi-peso coins** — Session credit now resolves ONE pricing tier for the accumulated inserted total instead of summing minutes per pulse. Operators can configure per-denomination rates (e.g. P1=12min, P5=2 hours, P10=5 hours) and the tier takes effect as soon as the inserted total reaches it — previously a 5-peso coin was credited as 5 x the P1 tier, making multi-peso tiers unreachable on pulse-train coin acceptors.
+- Portal coin-insertion preview now mirrors the same tiered logic (running total resolved against the pricing table), so the displayed credit matches what the backend actually credits.
+
 ## v1.29.0
 - **Feature: Relay / light pin (additional GPIO pin, default pin 5)** — A second selectable GPIO pin that lights/blinks while a customer is inserting coins (Insert Coin pressed → armed window open). Each detected coin triggers a quick confirmation flash; relay turns off when the window closes. Adjustable blink tempo 1 (slow) .. 10 (fast "dance"). Settable from Admin > Settings > GPIO just like the coin pin; disabled by default.
 

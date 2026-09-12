@@ -688,18 +688,8 @@
             </div>
         </div>
 
-        <!-- INSERT COIN + RATES BUTTONS -->
-        <div style="text-align:center; flex-shrink:0;">
-
-            <!-- VENDO / COINSLOT SELECTOR — pick a vendo machine BEFORE inserting coins.
-                 Hidden unless there are 2+ coinslots available on this network. -->
-            <div id="coinslotPicker" style="display:none; margin-bottom:14px; max-width:320px; margin-left:auto; margin-right:auto;">
-                <label for="coinslotSelect" style="font-size:13px; color:#bbb; display:block; margin-bottom:6px;">Select Vendo Machine</label>
-                <select id="coinslotSelect" class="portal-select"
-                        style="width:100%; padding:12px; border-radius:10px; border:1px solid rgba(255,255,255,0.25); background:rgba(255,255,255,0.08); color:#fff; font-size:15px; appearance:none;"></select>
-            </div>
-
-            <!-- ACTION BUTTONS — one compact row, all same size, each its own color -->
+        <!-- ACTION BUTTONS — one compact row, all same size, each its own color -->
+        <div style="flex-shrink:0;">
             <div class="action-btn-row">
                 <button class="insert-coin-main-btn" id="insertCoinBtn" onclick="openGpioModal()">
                     <span class="coin-slot-icon"></span>
@@ -710,7 +700,6 @@
             </div>
             <div class="paying-overlay" id="payingOverlay">SOMEBODY IS PAYING, PLEASE WAIT FOR YOUR TURN</div>
             <div class="ban-badge" id="banBadge">Banned</div>
-
 
             <!-- VOUCHER REDEEM -->
             <div class="status-card" style="margin-top:12px; text-align:left;">
@@ -728,17 +717,17 @@
     </div>
 
     <!-- POST-PAYMENT CONNECTION READY MODAL (shown when redirect_url is set) -->
-    <div class="modal-overlay" id="postPayModal" style="display:none;">
-        <div class="modal">
-            <h2 style="color:#4caf50;">&#10003; Connected</h2>
-            <p>Your internet is now active. You can browse the web, or tap below to open the provided link.</p>
-            <a id="postPayLink" href="#" target="_blank" rel="noopener"
-               class="btn btn-primary" style="display:inline-block; width:100%; text-align:center; padding:12px; box-sizing:border-box; text-decoration:none; margin-top:6px;">Open Link</a>
-            <button class="btn btn-ghost" onclick="closePostPay()" style="width:100%; margin:10px 0 0;">I'll Browse Myself</button>
+        <div class="modal-overlay" id="postPayModal" style="display:none;">
+            <div class="modal">
+                <h2 style="color:#4caf50;">&#10003; Connected</h2>
+                <p>Your internet is now active. You can browse the web, or tap below to open the provided link.</p>
+                <a id="postPayLink" href="#" target="_blank" rel="noopener"
+                   class="btn btn-primary" style="display:inline-block; width:100%; text-align:center; padding:12px; box-sizing:border-box; text-decoration:none; margin-top:6px;">Open Link</a>
+                <button class="btn btn-ghost" onclick="closePostPay()" style="width:100%; margin:10px 0 0;">I'll Browse Myself</button>
+            </div>
         </div>
-    </div>
 
-    <!-- RATES MODAL (pricing tiers from the admin Pricing page) -->
+        <!-- RATES MODAL (pricing tiers from the admin Pricing page) -->
     <div class="modal-overlay rates-modal" id="ratesModal">
         <div class="modal">
             <h2>Rates</h2>
@@ -766,6 +755,12 @@
         <div class="modal">
             <h2 style="margin-bottom:4px;">Insert Coins</h2>
             <p style="font-size:13px; color:#666; margin-bottom:8px;">Waiting for coin insertion...</p>
+
+            <!-- Vendo / Coinslot selector — hidden unless multiple coinslots are available -->
+            <div id="coinslotPicker" style="display:none; margin-bottom:12px;">
+                <label for="coinslotSelect" style="font-size:13px; color:#888; display:block; margin-bottom:4px;">Select Vendo Machine</label>
+                <select id="coinslotSelect" class="portal-select" style="width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; font-size:15px;"></select>
+            </div>
 
             <!-- 60s Countdown Ring -->
             <div class="gpio-countdown-ring">
@@ -1414,15 +1409,9 @@
             // Open modal
             document.getElementById('gpioModal').classList.add('active');
 
-            // Use the vendo chosen on the main page (before Insert Coin).
-            // The picker on the main page is populated on page load; if the
-            // user picked nothing (single-vendo network) fall back to auto.
-            const sel = document.getElementById('coinslotSelect');
-            if (sel && sel.value) {
-                gpio.coinslot = sel.value;
-            } else {
-                gpio.coinslot = 'auto';
-            }
+            // Fetch vendo/coinslot options for the caller's VLAN and populate
+            // the picker. Hidden when only one (or zero) options exist.
+            populateCoinslotOptions();
 
             // Play insert-coin audio (user gesture from tap guarantees play() works)
             playAudioSafe(audioInsertCoin);
@@ -1490,8 +1479,9 @@
         }
 
         // Handle real GPIO coin detection from backend API.
-        // serverMinutes is the minutes the backend resolved for this coin;
-        // the local pricing mirror is only used when it is unavailable.
+        // Credited minutes are tiered: resolved from the RUNNING TOTAL
+        // against the pricing table (highest tier at or below the total),
+        // mirroring the backend's credit logic.
         function handleGpioCoin(amount, serverMinutes) {
             if (!gpio.active) return;
 
@@ -1502,16 +1492,20 @@
             gpio.countdown = Math.max(0, gpio.expiresAt - nowSec);
             updateGpioCountdownUI();
 
-            // Add coin. The portal mirrors the backend pricing rules, but the
-            // backend is what actually credits time — an unpriced coin is still
-            // listed, just without minutes.
-            const minutes = (typeof serverMinutes === 'number' && serverMinutes >= 0)
-                ? serverMinutes
-                : minutesForAmount(amount);
-            const minutesText = minutes > 0 ? '+' + minutes + ' min' : 'no rate';
-            gpio.coins.push({ amount: amount, minutes: minutes, time: new Date().toLocaleTimeString() });
+            // Add coin. The portal mirrors the backend pricing rules — tiered
+            // credit: the running total is resolved against the pricing table
+            // (highest tier at or below the total), matching what the backend
+            // will actually credit. An unpriced coin is still listed, just
+            // without minutes.
             gpio.totalAmount += amount;
-            gpio.totalSeconds += minutes * 60;
+            const tierMinutes = minutesForAmount(gpio.totalAmount);
+            const prevSeconds = gpio.totalSeconds;
+            gpio.totalSeconds = tierMinutes * 60;
+            const deltaMin = Math.round((gpio.totalSeconds - prevSeconds) / 60);
+            gpio.coins.push({ amount: amount, minutes: deltaMin, time: new Date().toLocaleTimeString() });
+            const minutesText = deltaMin > 0
+                ? '+' + deltaMin + ' min'
+                : (tierMinutes > 0 ? 'total ' + tierMinutes + ' min' : 'no rate');
 
             // Update coin display
             updateGpioCoinTotals();
@@ -1724,33 +1718,6 @@
             showNotification('Coin insertion cancelled', 'info');
         }
 
-        // Auto-close the captive portal. Once the session is active the client's
-        // MAC is whitelisted (the server does this synchronously before the
-        // /session/start response), so navigating again makes the browser/OS re-run
-        // its connectivity probe, which the Go ProbeRelease responder now answers
-        // with success — dismissing the captive popup without a manual refresh.
-        // Fire once, a beat after the success feedback so the sound + toast still
-        // play first.
-        let portalAutoRefreshTimer = null;
-        function schedulePortalAutoRefresh() {
-            if (portalAutoRefreshTimer) clearTimeout(portalAutoRefreshTimer);
-            portalAutoRefreshTimer = setTimeout(function () {
-                portalAutoRefreshTimer = null;
-                // Force a real top-level navigation rather than .reload(): some
-                // captive-portal webviews (e.g. the iOS Captive Network Assistant)
-                // ignore a programmatic reload. Navigating to the same URL is a
-                // genuine page load that also pokes the network, prompting the OS
-                // to re-run its connectivity check against the now-authorized MAC.
-                try {
-                    var base = window.location.href.split('#')[0];
-                    var sep = base.indexOf('?') >= 0 ? '&' : '?';
-                    window.location.replace(base + sep + 'paid=1');
-                } catch (e) {
-                    window.location.reload();
-                }
-            }, 1800);
-        }
-
         // Auto-redirects the client to the operator-configured landing URL after
         // a successful payment / voucher redemption. Silent no-op when no
         // redirect_url is configured, so the feature is invisible by default.
@@ -1799,9 +1766,6 @@
             showNotification(extended
                 ? 'Time added! Enjoy browsing.'
                 : 'Session started! Enjoy browsing.', 'success');
-
-            // Auto-close the captive portal now that the client is authorized.
-            schedulePortalAutoRefresh();
         }
 
         // Running timer on the home session card (hh:mm:ss) - COUNTDOWN
@@ -2102,9 +2066,6 @@
         // Auto-start API polling when page loads
         startApiPolling();
         updateDebugToken();
-        // Populate the vendo picker (main page) so the customer selects the
-        // vendo machine BEFORE pressing Insert Coin.
-        populateCoinslotOptions();
 
         // Pre-fill the voucher input from ?voucher=CODE (printed QR codes
         // point at this portal URL so customers can redeem with one tap).

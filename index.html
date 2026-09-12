@@ -1479,8 +1479,9 @@
         }
 
         // Handle real GPIO coin detection from backend API.
-        // serverMinutes is the minutes the backend resolved for this coin;
-        // the local pricing mirror is only used when it is unavailable.
+        // Credited minutes are tiered: resolved from the RUNNING TOTAL
+        // against the pricing table (highest tier at or below the total),
+        // mirroring the backend's credit logic.
         function handleGpioCoin(amount, serverMinutes) {
             if (!gpio.active) return;
 
@@ -1491,16 +1492,20 @@
             gpio.countdown = Math.max(0, gpio.expiresAt - nowSec);
             updateGpioCountdownUI();
 
-            // Add coin. The portal mirrors the backend pricing rules, but the
-            // backend is what actually credits time — an unpriced coin is still
-            // listed, just without minutes.
-            const minutes = (typeof serverMinutes === 'number' && serverMinutes >= 0)
-                ? serverMinutes
-                : minutesForAmount(amount);
-            const minutesText = minutes > 0 ? '+' + minutes + ' min' : 'no rate';
-            gpio.coins.push({ amount: amount, minutes: minutes, time: new Date().toLocaleTimeString() });
+            // Add coin. The portal mirrors the backend pricing rules — tiered
+            // credit: the running total is resolved against the pricing table
+            // (highest tier at or below the total), matching what the backend
+            // will actually credit. An unpriced coin is still listed, just
+            // without minutes.
             gpio.totalAmount += amount;
-            gpio.totalSeconds += minutes * 60;
+            const tierMinutes = minutesForAmount(gpio.totalAmount);
+            const prevSeconds = gpio.totalSeconds;
+            gpio.totalSeconds = tierMinutes * 60;
+            const deltaMin = Math.round((gpio.totalSeconds - prevSeconds) / 60);
+            gpio.coins.push({ amount: amount, minutes: deltaMin, time: new Date().toLocaleTimeString() });
+            const minutesText = deltaMin > 0
+                ? '+' + deltaMin + ' min'
+                : (tierMinutes > 0 ? 'total ' + tierMinutes + ' min' : 'no rate');
 
             // Update coin display
             updateGpioCoinTotals();

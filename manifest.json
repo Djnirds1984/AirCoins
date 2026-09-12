@@ -1,9 +1,16 @@
 ﻿{
-    "version":  "v1.29.0",
-    "release_notes":  "- **Feature: Relay / light pin (additional GPIO pin, default pin 5)** â€” A second selectable GPIO pin that lights/blinks while a customer is inserting coins (Insert Coin pressed â†’ armed window open). Each detected coin triggers a quick confirmation flash; relay turns off when the window closes. Adjustable blink tempo 1 (slow) .. 10 (fast \"dance\"). Settable from Admin \u003e Settings \u003e GPIO just like the coin pin; disabled by default.",
-    "sha256":  "8bf06cff122bc6ba075cc7675e34b96943a2f328e7d22c23d9b8f96229183ae7",
-    "tarball":  "releases/aircoins-v1.29.0.tar.gz",
+    "version":  "v1.29.1",
+    "release_notes":  "- **Fix: tiered pricing for multi-peso coins** â€” Session credit now resolves ONE pricing tier for the accumulated inserted total instead of summing minutes per pulse. Operators can configure per-denomination rates (e.g. P1=12min, P5=2 hours, P10=5 hours) and the tier takes effect as soon as the inserted total reaches it â€” previously a 5-peso coin was credited as 5 x the P1 tier, making multi-peso tiers unreachable on pulse-train coin acceptors.\n- Portal coin-insertion preview now mirrors the same tiered logic (running total resolved against the pricing table), so the displayed credit matches what the backend actually credits.",
+    "sha256":  "a28519da77fc3658840d1608a4e83c90877d08843d7c0df1b229c75a043b2265",
+    "tarball":  "releases/aircoins-v1.29.1.tar.gz",
     "versions":  [
+                     {
+                         "released_at":  "2026-09-12T03:44:51Z",
+                         "sha256":  "a28519da77fc3658840d1608a4e83c90877d08843d7c0df1b229c75a043b2265",
+                         "version":  "v1.29.1",
+                         "release_notes":  "- **Fix: tiered pricing for multi-peso coins** â€” Session credit now resolves ONE pricing tier for the accumulated inserted total instead of summing minutes per pulse. Operators can configure per-denomination rates (e.g. P1=12min, P5=2 hours, P10=5 hours) and the tier takes effect as soon as the inserted total reaches it â€” previously a 5-peso coin was credited as 5 x the P1 tier, making multi-peso tiers unreachable on pulse-train coin acceptors.\n- Portal coin-insertion preview now mirrors the same tiered logic (running total resolved against the pricing table), so the displayed credit matches what the backend actually credits.",
+                         "tarball":  "releases/aircoins-v1.29.1.tar.gz"
+                     },
                      {
                          "released_at":  "2026-09-11T02:08:57Z",
                          "sha256":  "8bf06cff122bc6ba075cc7675e34b96943a2f328e7d22c23d9b8f96229183ae7",
@@ -31,14 +38,7 @@
                          "version":  "v1.27.0",
                          "release_notes":  "- **Architecture: ISP-independent DNS for authorized clients (no more DNS lock-in)** ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Authorized clients\u0027 DNS was DNAT\u0027ed directly to the ISP\u0027s DNS server, with the ISP\u0027s IP frozen into each per-MAC iptables rule at authorization time. Moving the unit to another ISP left every rule pointing at a dead DNS, breaking all apps until a refresh. Now a second dnsmasq instance (\"clean DNS forwarder\") listens on port 5353: no captive hijack, no DHCP ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â it just forwards queries upstream using /etc/resolv.conf, which DHCP/systemd-resolved updates automatically when the ISP changes. Authorized clients\u0027 DNS is REDIRECTed to this local forwarder (iptables REDIRECT carries no IP at all), so per-MAC rules can NEVER go stale. Plug the unit into any ISP ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â clients\u0027 apps work immediately, no refresh needed.\n- The forwarder service (`aircoins-dns-forwarder.service`) is created and started automatically by `aircoins-captive-rules` on first auth/refresh, and survives reboots.\n- `refresh` now serves as a one-time migration: it rebuilds all tracked MACs\u0027 old ISP-DNS DNAT rules into forwarder REDIRECT rules. The boot DNS watcher (v1.26.8) and the manual Refresh DNS button remain as harmless safety nets.",
                          "tarball":  "releases/aircoins-v1.27.0.tar.gz"
-                     },
-                     {
-                         "released_at":  "2026-09-08T11:16:22Z",
-                         "sha256":  "4d2f273a21154086547bad87c73f61d8b6f139f4d24a25f45c360f5840165501",
-                         "version":  "v1.26.9",
-                         "release_notes":  "- **Critical fix: DNS refresh was a silent no-op** ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â `aircoins-captive-rules refresh` compared the freshly detected DNS against `UPSTREAM_DNS`, but that variable is re-detected at the top of the same script run, so the comparison was ALWAYS equal and refresh always exited with \"DNS unchanged - no refresh needed\" without touching any iptables rule. This is why neither the automatic boot watcher nor the manual button restored internet after an ISP change. Refresh now unconditionally rebuilds the per-MAC DNS DNAT rules (and probe/forward rules) for every tracked authorized client with the currently detected DNS ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â rewriting an already-correct rule is harmless. This fix also makes v1.26.8\u0027s automatic boot watcher actually effective.",
-                         "tarball":  "releases/aircoins-v1.26.9.tar.gz"
                      }
                  ],
-    "released_at":  "2026-09-11T02:08:57Z"
+    "released_at":  "2026-09-12T03:44:51Z"
 }

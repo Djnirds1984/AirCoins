@@ -41,20 +41,20 @@ const remainingSQL = `GREATEST(0, EXTRACT(EPOCH FROM (expires_at - NOW())))::int
 
 // sessionRow holds the common columns returned by session lookups.
 type sessionRow struct {
-	id             int
-	mac            string
-	ip             string
-	coins          int
-	total          int
-	remaining      int
-	startedAt      time.Time
-	expiresAt      time.Time
-	pausedAt       sql.NullTime
-	shapedMbps     *int
-	token          string
-	pausable       bool
-	expirationHrs  int
-	pauseDeadline  sql.NullTime
+	id            int
+	mac           string
+	ip            string
+	coins         int
+	total         int
+	remaining     int
+	startedAt     time.Time
+	expiresAt     time.Time
+	pausedAt      sql.NullTime
+	shapedMbps    *int
+	token         string
+	pausable      bool
+	expirationHrs int
+	pauseDeadline sql.NullTime
 }
 
 // sessionMutexes serializes concurrent MAC migrations for the same session.
@@ -270,13 +270,22 @@ func (h *SessionHandler) unprocessedWindowCoins(source string) windowCoins {
 	// the tier takes effect as soon as the window total reaches it, instead
 	// of the old per-pulse summation (5 x the P1 tier) which made those
 	// multi-peso tiers unreachable on pulse-train coin acceptors.
+	//
+	// Any part of the total beyond the matched tier is credited by SCALING
+	// the matched tier proportionally (integer division). E.g. only a
+	// P10=300min tier exists and the total is P20 -> 20/10 * 300 = 600 min.
+	// Exact tier matches fall out of the same formula (P10 -> 10/10*300 = 300).
 	if coins.totalValue > 0 {
 		m, perr := MinutesForAmount(h.DB, coins.totalValue)
 		if perr != nil {
 			log.Printf("Error resolving pricing for P%d: %v", coins.totalValue, perr)
 			m = PricingMatch{}
 		}
-		coins.totalMinutes = m.Minutes
+		if m.MatchedCoin > 0 && m.Minutes > 0 {
+			coins.totalMinutes = int(int64(coins.totalValue) * int64(m.Minutes) / int64(m.MatchedCoin))
+		} else {
+			coins.totalMinutes = 0
+		}
 	}
 	return coins
 }
@@ -297,8 +306,8 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	// Parse pay_ticket and session_token from request body.
 	var req struct {
-		PayTicket    string `json:"pay_ticket"`
-		Coinslot     string `json:"coinslot"`
+		PayTicket string `json:"pay_ticket"`
+		Coinslot  string `json:"coinslot"`
 
 		SessionToken string `json:"session_token"`
 	}
@@ -359,7 +368,6 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	// without the per-VLAN lock since the ticket already proved this
 	// client is the legitimate holder. The unprocessed coin_events
 	// are consumed by the transaction below.
-
 
 	// Resolve which coinslot owns the armed window. SIMPLIFIED MODEL
 	// (v1.25.0): no VLAN isolation — the portal's chosen "subvendo:N" is
@@ -681,18 +689,18 @@ func (h *SessionHandler) Status(w http.ResponseWriter, r *http.Request) {
 			pauseExpiresAt = sess.pauseDeadline.Time.Format(time.RFC3339)
 		}
 		response["session"] = map[string]interface{}{
-			"id":                 sess.id,
-			"status":             "active",
-			"coins":              sess.coins,
-			"total":              sess.total,
-			"remaining":          remaining,
-			"started":            sess.startedAt.Unix(),
-			"mac":                sess.mac,
-			"expires_at":         sess.expiresAt.Format(time.RFC3339),
-			"paused":             paused,
-			"pausable":           sess.pausable,
-			"expiration_hours":   sess.expirationHrs,
-			"pause_expires_at":   pauseExpiresAt,
+			"id":               sess.id,
+			"status":           "active",
+			"coins":            sess.coins,
+			"total":            sess.total,
+			"remaining":        remaining,
+			"started":          sess.startedAt.Unix(),
+			"mac":              sess.mac,
+			"expires_at":       sess.expiresAt.Format(time.RFC3339),
+			"paused":           paused,
+			"pausable":         sess.pausable,
+			"expiration_hours": sess.expirationHrs,
+			"pause_expires_at": pauseExpiresAt,
 		}
 	}
 
@@ -1213,10 +1221,10 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	if pauseDeadline.Valid && pauseDeadline.Time.Before(time.Now()) {
 		forceExpirePaused(h.DB, id, clientIP, clientMAC, "pause-window-expired")
 		sendJSON(w, http.StatusOK, map[string]interface{}{
-			"success":      true,
-			"expired":      true,
-			"remaining":    0,
-			"message":      "Your paused session expired — insert coin again to regain internet access.",
+			"success":   true,
+			"expired":   true,
+			"remaining": 0,
+			"message":   "Your paused session expired — insert coin again to regain internet access.",
 		})
 		return
 	}

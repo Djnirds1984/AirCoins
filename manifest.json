@@ -1,9 +1,30 @@
 ﻿{
-    "version":  "v1.29.1",
-    "release_notes":  "- **Fix: tiered pricing for multi-peso coins** â€” Session credit now resolves ONE pricing tier for the accumulated inserted total instead of summing minutes per pulse. Operators can configure per-denomination rates (e.g. P1=12min, P5=2 hours, P10=5 hours) and the tier takes effect as soon as the inserted total reaches it â€” previously a 5-peso coin was credited as 5 x the P1 tier, making multi-peso tiers unreachable on pulse-train coin acceptors.\n- Portal coin-insertion preview now mirrors the same tiered logic (running total resolved against the pricing table), so the displayed credit matches what the backend actually credits.",
-    "sha256":  "a28519da77fc3658840d1608a4e83c90877d08843d7c0df1b229c75a043b2265",
-    "tarball":  "releases/aircoins-v1.29.1.tar.gz",
+    "version":  "v1.29.4",
+    "release_notes":  "- **Change: Hotspot page renamed to \"built-in wifi\"** â€” The \"Wi-Fi Hotspot\" section is now titled **built-in wifi** throughout the admin panel: sidebar menu item, section heading, settings card, section title bar, and the stop confirmation dialog. The SSID field itself is unchanged (it still accepts any network name, defaulting to \"built-in wifi\").",
+    "sha256":  "638e18602b43319d141c4c7d80baebdab0342a76f62a5eb2407fbc5b6e2f8e00",
+    "tarball":  "releases/aircoins-v1.29.4.tar.gz",
     "versions":  [
+                     {
+                         "released_at":  "2026-09-12T10:04:03Z",
+                         "sha256":  "638e18602b43319d141c4c7d80baebdab0342a76f62a5eb2407fbc5b6e2f8e00",
+                         "version":  "v1.29.4",
+                         "release_notes":  "- **Change: Hotspot page renamed to \"built-in wifi\"** â€” The \"Wi-Fi Hotspot\" section is now titled **built-in wifi** throughout the admin panel: sidebar menu item, section heading, settings card, section title bar, and the stop confirmation dialog. The SSID field itself is unchanged (it still accepts any network name, defaulting to \"built-in wifi\").",
+                         "tarball":  "releases/aircoins-v1.29.4.tar.gz"
+                     },
+                     {
+                         "released_at":  "2026-09-12T08:10:48Z",
+                         "sha256":  "a276a07c79630ae0872c7854bd95f18bab730fc4e2d9fd8f0d2bce69a8c2141a",
+                         "version":  "v1.29.3",
+                         "release_notes":  "- **Change: WiFi hotspot default SSID renamed to \"built-in wifi\"** â€” The default/hint SSID in Admin â†’ Wi-Fi Hotspot was changed from \"AirCoins Free WiFi\" to \"built-in wifi\". Existing devices keep their saved name; only the setup default/hint is updated.",
+                         "tarball":  "releases/aircoins-v1.29.3.tar.gz"
+                     },
+                     {
+                         "released_at":  "2026-09-12T03:57:26Z",
+                         "sha256":  "05b4e3c56c6c8198ff266f8cc9d83bdca09c19b5fd38d972f79773ba6ba9cd83",
+                         "version":  "v1.29.2",
+                         "release_notes":  "- **Feature: proportional scaling beyond the last rate** â€” When the inserted total is higher than the largest configured tier (or falls between tiers), the credit now scales the highest applicable tier proportionally instead of capping at that tier\u0027s minutes. E.g. with only a P10 = 5 hours rate, dropping P20 credits 2 x 5 hours = 10 hours. Exact tier matches are unchanged (P10 still = 5 hours). Portal preview mirrors the same math.",
+                         "tarball":  "releases/aircoins-v1.29.2.tar.gz"
+                     },
                      {
                          "released_at":  "2026-09-12T03:44:51Z",
                          "sha256":  "a28519da77fc3658840d1608a4e83c90877d08843d7c0df1b229c75a043b2265",
@@ -17,28 +38,7 @@
                          "version":  "v1.29.0",
                          "release_notes":  "- **Feature: Relay / light pin (additional GPIO pin, default pin 5)** â€” A second selectable GPIO pin that lights/blinks while a customer is inserting coins (Insert Coin pressed â†’ armed window open). Each detected coin triggers a quick confirmation flash; relay turns off when the window closes. Adjustable blink tempo 1 (slow) .. 10 (fast \"dance\"). Settable from Admin \u003e Settings \u003e GPIO just like the coin pin; disabled by default.",
                          "tarball":  "releases/aircoins-v1.29.0.tar.gz"
-                     },
-                     {
-                         "released_at":  "2026-09-10T02:24:31Z",
-                         "sha256":  "17eb17f73ccf3b838735b57e1b6f680b7c916d2d04c3ef5d7eb586e5b9e8eec2",
-                         "version":  "v1.28.1",
-                         "release_notes":  "- **Fix: \"Done Paying\" no longer hangs at \"Starting session...\"** â€” The session-start handler sent its response only AFTER running the blocking `aircoins-captive-rules auth \u003cmac\u003e` subprocess (which since v1.27.0 also starts the DNS forwarder). If that subprocess was slow, the portal stayed frozen on \"Starting session...\". The response is now sent first and the firewall/TC work runs in the background, so Done Paying completes instantly. The frontend also gained a 25s failsafe so the modal can never hang indefinitely.\n- **Change: Post-payment redirect is now automatic (no modal)** â€” After a successful coin payment or voucher redemption, instead of showing a \"Connected\" modal with a button, the portal now auto-redirects the client to the configured post-payment URL (after a short 0.8s delay). No-op when no redirect_url is set.",
-                         "tarball":  "releases/aircoins-v1.28.1.tar.gz"
-                     },
-                     {
-                         "released_at":  "2026-09-08T12:23:37Z",
-                         "sha256":  "b4b1a0dcaa954c68f7d63d70af5a45d30e90e1ae38d272f377bc2f4b7ea89920",
-                         "version":  "v1.28.0",
-                         "release_notes":  "- **Feature: Post-payment redirect / landing link** Ã¢â‚¬â€ A new \"Post-Payment Redirect\" setting in the Portal page lets the operator enter an absolute http/https URL (a landing page, thank-you page, promo link, or IP). When set, after a client finishes inserting coins and gains internet (or redeems a voucher), the portal shows a \"Connected\" modal with a button that opens the configured link in a new tab. Leave the field blank to disable (default Ã¢â‚¬â€ no behavior change).\n- Backend: `redirect_url` added to the portal appearance config, validated as an absolute http(s) URL and persisted with the theme/colors. Backward compatible Ã¢â‚¬â€ old saved configs simply have no redirect.",
-                         "tarball":  "releases/aircoins-v1.28.0.tar.gz"
-                     },
-                     {
-                         "released_at":  "2026-09-08T11:28:36Z",
-                         "sha256":  "6c4fb33a8a8864c31cf1b3b79e4d07f08723195d401eac998b49279f07c16c04",
-                         "version":  "v1.27.0",
-                         "release_notes":  "- **Architecture: ISP-independent DNS for authorized clients (no more DNS lock-in)** ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Authorized clients\u0027 DNS was DNAT\u0027ed directly to the ISP\u0027s DNS server, with the ISP\u0027s IP frozen into each per-MAC iptables rule at authorization time. Moving the unit to another ISP left every rule pointing at a dead DNS, breaking all apps until a refresh. Now a second dnsmasq instance (\"clean DNS forwarder\") listens on port 5353: no captive hijack, no DHCP ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â it just forwards queries upstream using /etc/resolv.conf, which DHCP/systemd-resolved updates automatically when the ISP changes. Authorized clients\u0027 DNS is REDIRECTed to this local forwarder (iptables REDIRECT carries no IP at all), so per-MAC rules can NEVER go stale. Plug the unit into any ISP ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â clients\u0027 apps work immediately, no refresh needed.\n- The forwarder service (`aircoins-dns-forwarder.service`) is created and started automatically by `aircoins-captive-rules` on first auth/refresh, and survives reboots.\n- `refresh` now serves as a one-time migration: it rebuilds all tracked MACs\u0027 old ISP-DNS DNAT rules into forwarder REDIRECT rules. The boot DNS watcher (v1.26.8) and the manual Refresh DNS button remain as harmless safety nets.",
-                         "tarball":  "releases/aircoins-v1.27.0.tar.gz"
                      }
                  ],
-    "released_at":  "2026-09-12T03:44:51Z"
+    "released_at":  "2026-09-12T10:04:03Z"
 }

@@ -1532,7 +1532,7 @@
                 <span class="icon">🔗</span><span class="label">Bridges</span>
             </a>
             <a href="#" data-section="wifiap" class="nav-item">
-                <span class="icon">📶</span><span class="label">Wi-Fi Hotspot</span>
+                <span class="icon">📶</span><span class="label">built-in wifi</span>
             </a>
             <a href="#" data-section="settings" class="nav-item">
                 <span class="icon">⚙️</span><span class="label">Settings</span>
@@ -3078,7 +3078,7 @@
 
             <!-- Hotspot Status Card -->
             <div class="settings-card">
-                <h3>📶 Wi-Fi Hotspot</h3>
+                <h3>📶 built-in wifi</h3>
                 <div id="wifiap-status" style="margin-bottom:12px;color:#aaa;">
                     Loading hotspot status…
                 </div>
@@ -3097,7 +3097,7 @@
 
             <!-- Hotspot Settings Card -->
             <div class="settings-card">
-                <h3>⚙️ Hotspot Settings</h3>
+                <h3>⚙️ built-in wifi Settings</h3>
                 <div class="vlan-form">
                     <div class="form-row">
                         <div class="form-group">
@@ -3106,7 +3106,7 @@
                         </div>
                         <div class="form-group">
                             <label>SSID (Network Name)</label>
-                            <input type="text" id="wifiap-ssid" placeholder="AirCoins Free WiFi" maxlength="32">
+                            <input type="text" id="wifiap-ssid" placeholder="built-in wifi" maxlength="32">
                         </div>
                     </div>
                     <div class="form-row">
@@ -3258,7 +3258,7 @@ const SECTION_TITLES = {
     pricing: 'Pricing',
     portal: 'Portal',
     bridges: 'Bridges',
-    wifiap: 'Wi-Fi Hotspot',
+    wifiap: 'built-in wifi',
     settings: 'Settings',
     system: 'System',
     reports: 'Reports',
@@ -8401,7 +8401,7 @@ async function startWiFiAP() {
 }
 
 async function stopWiFiAP() {
-    if (!confirm('Stop the Wi-Fi hotspot? Connected clients will be disconnected.')) return;
+    if (!confirm('Stop built-in wifi? Connected clients will be disconnected.')) return;
     try {
         await apiCall('POST', '/admin/wifi-ap/stop', {});
         showNotification('Hotspot stopped', 'success');

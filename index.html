@@ -1051,14 +1051,14 @@
         const PRICING_URL = '/api/pricing';
         const PRICING_REFRESH_INTERVAL = 60000;  // re-read tiers once a minute
 
-        // Mirrors the backend MinutesForAmount(): exact tier, otherwise the
-        // highest configured tier at or below the amount, otherwise 0.
-        // Informational only — the backend decides what actually gets credited.
+        // Mirrors the backend tiered credit: find the highest configured tier
+        // at or below the amount, then SCALE it proportionally for any excess
+        // beyond that tier. E.g. only a P10=300min tier exists and the total
+        // is P20 -> 20/10 * 300 = 600 min. Informational only — the backend
+        // decides what actually gets credited.
         function minutesForAmount(amount) {
             const coin = parseInt(amount, 10);
             if (!coin || coin <= 0) return 0;
-
-            if (state.pricing[coin] > 0) return state.pricing[coin];
 
             let bestTier = 0;
             let bestMinutes = 0;
@@ -1069,7 +1069,9 @@
                     bestMinutes = state.pricing[key];
                 }
             });
-            return bestMinutes;
+
+            if (bestTier <= 0 || bestMinutes <= 0) return 0;
+            return Math.floor((coin * bestMinutes) / bestTier);
         }
 
         function formatMinutes(mins) {

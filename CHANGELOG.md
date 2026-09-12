@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.29.4
+- **Change: Hotspot page renamed to "built-in wifi"** — The "Wi-Fi Hotspot" section is now titled **built-in wifi** throughout the admin panel: sidebar menu item, section heading, settings card, section title bar, and the stop confirmation dialog. The SSID field itself is unchanged (it still accepts any network name, defaulting to "built-in wifi").
+
+## v1.29.3
+- **Change: WiFi hotspot default SSID renamed to "built-in wifi"** — The default/hint SSID in Admin → Wi-Fi Hotspot was changed from "AirCoins Free WiFi" to "built-in wifi". Existing devices keep their saved name; only the setup default/hint is updated.
+
+## v1.29.2
+- **Feature: proportional scaling beyond the last rate** — When the inserted total is higher than the largest configured tier (or falls between tiers), the credit now scales the highest applicable tier proportionally instead of capping at that tier's minutes. E.g. with only a P10 = 5 hours rate, dropping P20 credits 2 x 5 hours = 10 hours. Exact tier matches are unchanged (P10 still = 5 hours). Portal preview mirrors the same math.
+
 ## v1.29.1
 - **Fix: tiered pricing for multi-peso coins** — Session credit now resolves ONE pricing tier for the accumulated inserted total instead of summing minutes per pulse. Operators can configure per-denomination rates (e.g. P1=12min, P5=2 hours, P10=5 hours) and the tier takes effect as soon as the inserted total reaches it — previously a 5-peso coin was credited as 5 x the P1 tier, making multi-peso tiers unreachable on pulse-train coin acceptors.
 - Portal coin-insertion preview now mirrors the same tiered logic (running total resolved against the pricing table), so the displayed credit matches what the backend actually credits.

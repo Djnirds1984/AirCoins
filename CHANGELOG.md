@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.29.6
+- **Fix: GPIO toggle now reflects the real running state (frontend)** — The admin panel no longer blindly shows the saved `GPIO_ENABLED` flag (a checkbox defaults unchecked, so a failed/stale read silently displayed "off" while the machine kept accepting coins). The read CGI now also reports `listener_active` (the live coin-listener state), and the panel binds the toggle to that as the ground truth, preferring the saved flag only when it agrees. If the saved flag says off but the listener is actually running, an orange notice explains the drift. Existing root-cause fix retained: the API never strips GPIO_ENABLED on save.
+
 ## v1.29.5
 - **Fix: GPIO master toggle no longer resets on page reload** — The Go API stored the "Enable GPIO" master switch (GPIO_ENABLED) only in `/var/lib/pisowifi/gpio_config`, but its own `writeGPIOConfigFile()` rewrote the entire file without that key, silently dropping the saved toggle. The file is now rewritten while preserving the existing GPIO_ENABLED value (default true for SBC). The admin panel also verifies the toggle actually persisted to disk after flipping it and shows a clear error if the config file is not writable — no more silent revert to "off" on reload.
 

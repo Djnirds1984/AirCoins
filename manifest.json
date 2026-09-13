@@ -1,9 +1,16 @@
 ﻿{
-    "version":  "v1.29.5",
-    "release_notes":  "- **Fix: GPIO master toggle no longer resets on page reload** â€” The Go API stored the \"Enable GPIO\" master switch (GPIO_ENABLED) only in `/var/lib/pisowifi/gpio_config`, but its own `writeGPIOConfigFile()` rewrote the entire file without that key, silently dropping the saved toggle. The file is now rewritten while preserving the existing GPIO_ENABLED value (default true for SBC). The admin panel also verifies the toggle actually persisted to disk after flipping it and shows a clear error if the config file is not writable â€” no more silent revert to \"off\" on reload.",
-    "sha256":  "4263bbe5e97b924c74dbe1ff387777fdf079137b6df2303a2d9655e3211d74e2",
-    "tarball":  "releases/aircoins-v1.29.5.tar.gz",
+    "version":  "v1.29.6",
+    "release_notes":  "- **Fix: GPIO toggle now reflects the real running state (frontend)** â€” The admin panel no longer blindly shows the saved `GPIO_ENABLED` flag (a checkbox defaults unchecked, so a failed/stale read silently displayed \"off\" while the machine kept accepting coins). The read CGI now also reports `listener_active` (the live coin-listener state), and the panel binds the toggle to that as the ground truth, preferring the saved flag only when it agrees. If the saved flag says off but the listener is actually running, an orange notice explains the drift. Existing root-cause fix retained: the API never strips GPIO_ENABLED on save.",
+    "sha256":  "e0f00d1adeb90974b9dc2e2224f2c9f8903fc4e0008fd231fbd448fb4156dce5",
+    "tarball":  "releases/aircoins-v1.29.6.tar.gz",
     "versions":  [
+                     {
+                         "released_at":  "2026-09-13T01:50:18Z",
+                         "sha256":  "e0f00d1adeb90974b9dc2e2224f2c9f8903fc4e0008fd231fbd448fb4156dce5",
+                         "version":  "v1.29.6",
+                         "release_notes":  "- **Fix: GPIO toggle now reflects the real running state (frontend)** â€” The admin panel no longer blindly shows the saved `GPIO_ENABLED` flag (a checkbox defaults unchecked, so a failed/stale read silently displayed \"off\" while the machine kept accepting coins). The read CGI now also reports `listener_active` (the live coin-listener state), and the panel binds the toggle to that as the ground truth, preferring the saved flag only when it agrees. If the saved flag says off but the listener is actually running, an orange notice explains the drift. Existing root-cause fix retained: the API never strips GPIO_ENABLED on save.",
+                         "tarball":  "releases/aircoins-v1.29.6.tar.gz"
+                     },
                      {
                          "released_at":  "2026-09-13T00:38:24Z",
                          "sha256":  "4263bbe5e97b924c74dbe1ff387777fdf079137b6df2303a2d9655e3211d74e2",
@@ -31,14 +38,7 @@
                          "version":  "v1.29.2",
                          "release_notes":  "- **Feature: proportional scaling beyond the last rate** â€” When the inserted total is higher than the largest configured tier (or falls between tiers), the credit now scales the highest applicable tier proportionally instead of capping at that tier\u0027s minutes. E.g. with only a P10 = 5 hours rate, dropping P20 credits 2 x 5 hours = 10 hours. Exact tier matches are unchanged (P10 still = 5 hours). Portal preview mirrors the same math.",
                          "tarball":  "releases/aircoins-v1.29.2.tar.gz"
-                     },
-                     {
-                         "released_at":  "2026-09-12T03:44:51Z",
-                         "sha256":  "a28519da77fc3658840d1608a4e83c90877d08843d7c0df1b229c75a043b2265",
-                         "version":  "v1.29.1",
-                         "release_notes":  "- **Fix: tiered pricing for multi-peso coins** â€” Session credit now resolves ONE pricing tier for the accumulated inserted total instead of summing minutes per pulse. Operators can configure per-denomination rates (e.g. P1=12min, P5=2 hours, P10=5 hours) and the tier takes effect as soon as the inserted total reaches it â€” previously a 5-peso coin was credited as 5 x the P1 tier, making multi-peso tiers unreachable on pulse-train coin acceptors.\n- Portal coin-insertion preview now mirrors the same tiered logic (running total resolved against the pricing table), so the displayed credit matches what the backend actually credits.",
-                         "tarball":  "releases/aircoins-v1.29.1.tar.gz"
                      }
                  ],
-    "released_at":  "2026-09-13T00:38:24Z"
+    "released_at":  "2026-09-13T01:50:18Z"
 }

@@ -2400,6 +2400,7 @@
                         <div class="settings-field" style="flex:2;">
                             <label>Platform</label>
                             <div id="gpio-platform-notice" class="gpio-info-text" style="display:none;"></div>
+                            <div id="gpio-drift-note" class="gpio-info-text" style="display:none;margin-top:6px;background:rgba(255,152,0,0.08);border:1px solid rgba(255,152,0,0.25);color:#ff9800;"></div>
                         </div>
                     </div>
                     <div id="gpio-card-body" style="transition:opacity:.2s;">
@@ -4830,7 +4831,29 @@ async function loadGpioMasterState() {
         if (!res.ok) throw new Error('CGI error: ' + res.status);
         var cfg = await res.json();
         var cb = document.getElementById('gpio-master-enabled');
-        cb.checked = !!cfg.gpio_enabled;
+        // A checkbox's default HTML state is UNCHECKED. If the read below ever
+        // fails we must NOT silently leave it off — that is how the panel showed
+        // "off" while the machine was actually accepting coins. Bind the toggle
+        // to the live listener state (the ground truth), using the saved flag as
+        // the secondary source, so the UI never contradicts reality.
+        var savedOn = (typeof cfg.gpio_enabled === 'boolean') ? cfg.gpio_enabled : null;
+        var liveOn = !!cfg.listener_active;
+        var on;
+        if (savedOn !== null && savedOn === liveOn) on = savedOn;
+        else on = liveOn;
+        cb.checked = on;
+
+        // If the saved flag says OFF but the listener is actually running, show
+        // the drift instead of silently displaying a wrong toggle.
+        var driftEl = document.getElementById('gpio-drift-note');
+        if (savedOn === false && liveOn) {
+            if (driftEl) {
+                driftEl.textContent = 'Saved config says GPIO is off, but the coin listener is actually RUNNING (accepting coins). Set the toggle to ON and Save to sync.';
+                driftEl.style.display = 'block';
+            }
+        } else if (driftEl) {
+            driftEl.style.display = 'none';
+        }
 
         // Platform notice: x86 / no usable GPIO method → no SBC GPIO header
         var noticeEl = document.getElementById('gpio-platform-notice');

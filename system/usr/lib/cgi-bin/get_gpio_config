@@ -70,7 +70,12 @@ if [ "$(systemctl is-active gpio-coin-listener 2>/dev/null)" = "active" ]; then
     LISTENER_ACTIVE=true
 elif [ -f /var/run/gpio-coin-listener.pid ]; then
     _LPID=$(cat /var/run/gpio-coin-listener.pid 2>/dev/null | tr -d '[:space:]')
-    if [ -n "$_LPID" ] && kill -0 "$_LPID" 2>/dev/null; then
+    # The CGI runs as www-data, so `kill -0` on the root-owned listener
+    # fails with EPERM even while it is alive — which made the panel show
+    # OFF while coins were being accepted. Read /proc/<pid>/cmdline instead:
+    # it is world-readable and proves the process identity.
+    if [ -n "$_LPID" ] && [ -r "/proc/$_LPID/cmdline" ] && \
+       grep -aq 'gpio-coin-listener' "/proc/$_LPID/cmdline" 2>/dev/null; then
         LISTENER_ACTIVE=true
     fi
 fi

@@ -15,7 +15,7 @@ set -e
 # ============================================
 # CONFIGURATION
 # ============================================
-VERSION="1.29.6"
+VERSION="1.29.11"
 INSTALL_DIR="/opt/aircoins"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYSTEM_DIR="$SCRIPT_DIR/system"
@@ -520,13 +520,18 @@ if ! grep -q '^GPIO_ENABLED=' /var/lib/pisowifi/gpio_config 2>/dev/null; then
     fi
 fi
 
-# Enable CGI in lighttpd (fallback if not already in config)
-if ! grep -q "mod_cgi" /etc/lighttpd/lighttpd.conf 2>/dev/null; then
+# Enable CGI in lighttpd (fallback if not already in config).
+# Also ensure mod_alias + the /cgi-bin/ -> /usr/lib/cgi-bin/ alias exist;
+# without the alias lighttpd looks under the docroot and the CGI 404s into
+# error-handler, serving index.html instead — silently breaking every admin
+# CGI (GPIO toggle, pin test). This block is idempotent for existing configs.
+if ! grep -q "alias.url += ( \"/cgi-bin/\" => \"/usr/lib/cgi-bin/\" )" /etc/lighttpd/lighttpd.conf 2>/dev/null; then
     cat >> /etc/lighttpd/lighttpd.conf << 'CGIEOF'
 
-# CGI support (for admin API)
-server.modules += ( "mod_cgi" )
+# CGI support + physical dir alias (for admin API — GPIO toggle, pin test)
+server.modules += ( "mod_cgi", "mod_alias" )
 $HTTP["url"] =~ "^/cgi-bin/" {
+    alias.url += ( "/cgi-bin/" => "/usr/lib/cgi-bin/" )
     cgi.assign = ( "" => "/bin/bash" )
 }
 CGIEOF

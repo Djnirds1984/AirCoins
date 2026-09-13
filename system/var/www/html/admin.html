@@ -4838,9 +4838,11 @@ async function loadGpioMasterState() {
         // the secondary source, so the UI never contradicts reality.
         var savedOn = (typeof cfg.gpio_enabled === 'boolean') ? cfg.gpio_enabled : null;
         var liveOn = !!cfg.listener_active;
-        var on;
-        if (savedOn !== null && savedOn === liveOn) on = savedOn;
-        else on = liveOn;
+        // The saved master flag is AUTHORITATIVE when present. listener_active
+        // is only the fallback for pre-config deployments (and the drift
+        // notice hint below). It must never override a known saved value:
+        // this CGI runs as www-data, where live process checks under-report.
+        var on = (savedOn !== null) ? savedOn : liveOn;
         cb.checked = on;
 
         // If the saved flag says OFF but the listener is actually running, show
@@ -4869,7 +4871,15 @@ async function loadGpioMasterState() {
             noticeEl.style.display = 'block';
         }
     } catch (e) {
-        // CGI unavailable (pre-deploy): keep toggle state as-is, no notice
+        // CGI unavailable/broken: leave the toggle as-is but TELL the
+        // operator. A silently-off toggle while coins keep flowing is
+        // exactly the confusion this panel must never create.
+        var warnEl = document.getElementById('gpio-platform-notice');
+        if (warnEl) {
+            warnEl.textContent = 'GPIO config read failed (' + (e && e.message ? e.message : 'CGI unavailable') + '). The toggle may not reflect the machine — check that lighttpd serves /cgi-bin/get_gpio_config.';
+            warnEl.className = 'gpio-info-text';
+            warnEl.style.display = 'block';
+        }
     }
     onGpioEnabledFieldsChange();
 }

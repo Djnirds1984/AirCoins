@@ -123,6 +123,45 @@ if find "$TARBALL_DIR" -name '.env' -not -name '.env.example' 2>/dev/null | grep
 fi
 echo "  ✓ No secrets detected"
 
+# --- Line-ending normalization ---
+# Any CRLF that slips in from Windows editing breaks Linux scripts at
+# runtime: the shebang becomes "#!/bin/bash\r" ("cannot execute: required
+# file not found") and "\r: command not found" errors appear in daemons.
+# Strip CR from packaged Linux scripts/CGI — but NEVER from the compiled
+# binaries: sed on an ELF corrupts it (it strips \r bytes and the section
+# headers no longer match), which bricks the API on devices that update.
+echo ""
+echo "[3b/4] Normalizing line endings (strip CR from Linux scripts)..."
+find "$TARBALL_DIR/system/usr/local/bin" \
+     "$TARBALL_DIR/system/usr/lib/cgi-bin" \
+     -type f ! -name 'aircoins-api*' \
+     -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+for _lf in "$TARBALL_DIR/install.sh" \
+           "$TARBALL_DIR/aircoins-recover.sh" \
+           "$TARBALL_DIR/index.html" \
+           "$TARBALL_DIR/admin.html" \
+           "$TARBALL_DIR/DEPLOYMENT.md" \
+           "$TARBALL_DIR/CHANGELOG.md"; do
+    [ -f "$_lf" ] && sed -i 's/\r$//' "$_lf"
+done
+echo "  ✓ Line endings normalized (LF)"
+
+# Verify the packaged binaries survived staging untouched. A sed-style pass
+# must never transform compiled binaries: a corrupted ELF bricks every
+# device that installs the OTA. Compare byte-for-byte against the freshly
+# built copies and abort the build on ANY mismatch.
+if ! cmp -s "$GO_SRC_DIR/aircoins-api" "$TARBALL_DIR/system/usr/local/bin/aircoins-api/aircoins-api"; then
+    echo "ERROR: packaged ARM binary does not match the freshly built one — aborting."
+    rm -rf "$STAGING_DIR"
+    exit 1
+fi
+if ! cmp -s "$GO_SRC_DIR/aircoins-api-x64" "$TARBALL_DIR/system/usr/local/bin/aircoins-api/aircoins-api-x64"; then
+    echo "ERROR: packaged x64 binary does not match the freshly built one — aborting."
+    rm -rf "$STAGING_DIR"
+    exit 1
+fi
+echo "  ✓ Binary integrity verified (ARM + x64 byte-identical to build)"
+
 # --- Create tarball + checksum ---
 echo ""
 echo "[4/4] Creating tarball and checksum..."

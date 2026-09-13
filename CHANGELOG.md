@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.29.11
+- **Fix: GPIO toggle showed OFF even when the listener was running** — The `listener_active` check added in v1.29.6 under-reported when the CGI ran as www-data (`systemctl is-active` and `kill -0` both fail with EPERM on the root-owned listener), and the "live state wins" rule then flipped the toggle OFF despite the saved config saying ON. The CGI now detects the listener via the world-readable `/proc/<pid>/cmdline` (works for any user), and the admin panel treats the saved `GPIO_ENABLED` flag as authoritative — `listener_active` is only a fallback when no config exists, plus the drift-notice hint.
+
+## v1.29.10
+- **Fix (critical): OTA no longer ships a corrupted API binary** — The line-ending normalization added in v1.29.9 ran sed over system/usr/local/bin recursively, which stripped \\r bytes from the compiled ARM/x64 ELF binaries and corrupted them ("too large section header offset"). Devices that installed v1.29.9 ended up with an aircoins-api that cannot start (no login, all /api requests answered with HTML by the portal fallback). The normalizer now explicitly excludes the compiled binaries. If your device is stuck on the broken v1.29.9: OTA is impossible while the API is down — restore manually by downloading this release tarball and copying system/usr/local/bin/aircoins-api/aircoins-api over /usr/local/bin/aircoins-api/aircoins-api, then `systemctl restart aircoins-api`.
+
+## v1.29.9
+- **Fix: CGI script had Windows CRLF line endings ("cannot execute: required file not found")** — The rewritten get_gpio_config shipped with CRLF, so its shebang was "#!/bin/bash\r" and Linux refused to run it (lighttpd answered 200 with an empty body; running the script directly printed "cannot execute: required file not found"). The script is now LF-only, and build-release.sh strips CR from every packaged Linux script/CGI (with a backup-safe pass over install.sh, recover script and docs) so a Windows edit can never ship a broken script again.
+
+## v1.29.8
+- **Fix: OTA updates now self-heal the lighttpd /cgi-bin/ alias** — The updater does targeted file replacement and never re-ran install.sh, so devices updated over the air kept the broken lighttpd config (no /cgi-bin/ alias) and the GPIO toggle kept reading portal HTML instead of the CGI. Every update now idempotently ensures `mod_alias` is loaded and `/cgi-bin/` is aliased to `/usr/lib/cgi-bin/` (with config backup + automatic revert if the patched config fails `lighttpd -t`), then lighttpd is restarted.
+
+## v1.29.7
+- **Fix (root cause): admin CGI was never served by lighttpd** — `/cgi-bin/get_gpio_config`, `/cgi-bin/set_gpio_config` and `/cgi-bin/test_gpio` were installed to `/usr/lib/cgi-bin/` but the lighttpd config only set `cgi.assign` without aliasing the `/cgi-bin/` URL to that physical directory. Every CGI request 404'd under the docroot and `error-handler-404` answered with index.html (HTTP 200), so the GPIO master toggle always read as OFF while the machine kept accepting coins. lighttpd now loads `mod_alias` and maps `/cgi-bin/` → `/usr/lib/cgi-bin/`; install.sh and zerotier-install add the same block idempotently for already-deployed devices.
+- Admin panel: if the GPIO config read ever fails (non-JSON/broken CGI), the panel now shows a clear warning instead of silently displaying the toggle as off.
+
 ## v1.29.6
 - **Fix: GPIO toggle now reflects the real running state (frontend)** — The admin panel no longer blindly shows the saved `GPIO_ENABLED` flag (a checkbox defaults unchecked, so a failed/stale read silently displayed "off" while the machine kept accepting coins). The read CGI now also reports `listener_active` (the live coin-listener state), and the panel binds the toggle to that as the ground truth, preferring the saved flag only when it agrees. If the saved flag says off but the listener is actually running, an orange notice explains the drift. Existing root-cause fix retained: the API never strips GPIO_ENABLED on save.
 

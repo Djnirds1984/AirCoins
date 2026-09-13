@@ -472,6 +472,34 @@ echo "gpio-coin-listener restarted"
 [ -f "$DIR/aircoins-recover.sh" ] && sudo cp "$DIR/aircoins-recover.sh" /opt/aircoins/aircoins-recover.sh && sudo chmod +x /opt/aircoins/aircoins-recover.sh
 # Update CGI
 [ -d "$DIR/system/usr/lib/cgi-bin" ] && sudo cp "$DIR/system/usr/lib/cgi-bin/"* /usr/lib/cgi-bin/ 2>/dev/null && sudo chmod +x /usr/lib/cgi-bin/* 2>/dev/null
+# SELF-HEAL lighttpd CGI alias: the admin CGIs live in /usr/lib/cgi-bin,
+# which is NOT under server.document-root. Without aliasing /cgi-bin/ to
+# that directory, lighttpd 404s under the docroot and error-handler-404
+# serves index.html (HTTP 200) — so the GPIO toggle read/write silently
+# returned portal HTML and the toggle always showed OFF. Idempotent:
+# only applied when the alias line is missing, with backup + revert if
+# the patched config does not validate.
+if [ -f /etc/lighttpd/lighttpd.conf ] && ! grep -q 'alias.url' /etc/lighttpd/lighttpd.conf; then
+    sudo cp /etc/lighttpd/lighttpd.conf /etc/lighttpd/lighttpd.conf.bak-aircoins
+    if ! grep -q '"mod_alias"' /etc/lighttpd/lighttpd.conf; then
+        sudo sed -i '/^server.modules = (/a\    "mod_alias",' /etc/lighttpd/lighttpd.conf
+    fi
+    sudo tee -a /etc/lighttpd/lighttpd.conf > /dev/null << 'LITEOF'
+
+# /cgi-bin/ must alias to the physical scripts dir, otherwise the admin
+# CGIs 404 into error-handler-404 (index.html) and silently never run.
+$HTTP["url"] =~ "^/cgi-bin/" {
+    alias.url += ( "/cgi-bin/" => "/usr/lib/cgi-bin/" )
+    cgi.assign = ( "" => "/bin/bash" )
+}
+LITEOF
+    if sudo lighttpd -t -f /etc/lighttpd/lighttpd.conf > /dev/null 2>&1; then
+        echo "lighttpd /cgi-bin/ alias added (CGI self-heal)"
+    else
+        echo "lighttpd config test FAILED after alias patch — reverting"
+        sudo cp /etc/lighttpd/lighttpd.conf.bak-aircoins /etc/lighttpd/lighttpd.conf
+    fi
+fi
 # Update CHANGELOG
 [ -f "$DIR/CHANGELOG.md" ] && sudo cp "$DIR/CHANGELOG.md" /opt/aircoins/CHANGELOG.md
 # Restart services with retry — a single start can lose a race with the stop

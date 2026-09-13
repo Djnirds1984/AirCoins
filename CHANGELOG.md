@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.29.5
+- **Fix: GPIO master toggle no longer resets on page reload** — The Go API stored the "Enable GPIO" master switch (GPIO_ENABLED) only in `/var/lib/pisowifi/gpio_config`, but its own `writeGPIOConfigFile()` rewrote the entire file without that key, silently dropping the saved toggle. The file is now rewritten while preserving the existing GPIO_ENABLED value (default true for SBC). The admin panel also verifies the toggle actually persisted to disk after flipping it and shows a clear error if the config file is not writable — no more silent revert to "off" on reload.
+
 ## v1.29.4
 - **Change: Hotspot page renamed to "built-in wifi"** — The "Wi-Fi Hotspot" section is now titled **built-in wifi** throughout the admin panel: sidebar menu item, section heading, settings card, section title bar, and the stop confirmation dialog. The SSID field itself is unchanged (it still accepts any network name, defaulting to "built-in wifi").
 

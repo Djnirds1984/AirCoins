@@ -4790,6 +4790,26 @@ async function onGpioMasterToggle(cb) {
             body: JSON.stringify({ gpio_enabled: enabled })
         });
         if (!res.ok) throw new Error('CGI error: ' + res.status);
+
+        // Verify the value actually persisted to disk. A reload re-reads the
+        // config file via get_gpio_config, so if the CGI write did not stick,
+        // the toggle would silently bounce back on the next page load.
+        try {
+            var vres = await fetch('/cgi-bin/get_gpio_config');
+            if (vres.ok) {
+                var vcfg = await vres.json();
+                if (!!vcfg.gpio_enabled !== enabled) {
+                    showNotification('GPIO toggle did not persist (config file still ' +
+                        (vcfg.gpio_enabled ? 'on' : 'off') +
+                        '). Check that /var/lib/pisowifi/gpio_config is writable by www-data.', 'error');
+                    cb.checked = !enabled;
+                    gpioMasterBusy = false;
+                    onGpioEnabledFieldsChange();
+                    return;
+                }
+            }
+        } catch (_) {}
+
         try {
             await apiCall('POST', '/system/services/gpio-coin-listener/restart');
             showNotification('GPIO ' + (enabled ? 'enabled' : 'disabled') + ' — coin listener restarted', 'success');

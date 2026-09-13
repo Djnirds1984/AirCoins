@@ -460,8 +460,31 @@ func writeGPIOConfigFile(pin, coinValue int, pulseMode, boardModel string, debou
 	if relayEnabled {
 		relayOn = "true"
 	}
+
+	// PRESERVE the master-toggle state (GPIO_ENABLED). The file is written
+	// by BOTH this API handler and the admin panel's set_gpio_config CGI, so
+	// a rewrite here must never silently drop the toggle — otherwise a reload
+	// of the panel would show "Enable GPIO" flipped back to the stale value.
+	// The master toggle lives ONLY in this file (not the DB), so read it back
+	// and carry it over; default to true (SBC boards) when it is absent.
+	enabledStr := "true"
+	if data, rerr := os.ReadFile("/var/lib/pisowifi/gpio_config"); rerr == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			tr := strings.TrimSpace(line)
+			if strings.HasPrefix(tr, "GPIO_ENABLED=") {
+				val := strings.TrimSpace(strings.TrimPrefix(tr, "GPIO_ENABLED="))
+				if val == "true" || val == "TRUE" || val == "True" || val == "1" || val == "on" || val == "yes" {
+					enabledStr = "true"
+				} else {
+					enabledStr = "false"
+				}
+			}
+		}
+	}
+
 	content := "# AirCoins GPIO Config - Written by API\n"
 	content += "# COIN_PULSE_PIN is a PHYSICAL HEADER PIN number (not a GPIO number)\n"
+	content += "GPIO_ENABLED=" + enabledStr + "\n"
 	content += "COIN_PULSE_PIN=" + strconv.Itoa(pin) + "\n"
 	content += "COIN_VALUE=" + strconv.Itoa(coinValue) + "\n"
 	content += "PULSE_MODE=\"" + pulseMode + "\"\n"

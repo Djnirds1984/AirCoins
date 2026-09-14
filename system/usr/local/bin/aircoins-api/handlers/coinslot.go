@@ -215,7 +215,7 @@ func (h *CoinslotHandler) Arm(w http.ResponseWriter, r *http.Request) {
 		lockHeld = false
 		sendJSON(w, http.StatusOK, map[string]interface{}{
 			"armed": true, "armed_at": armedAt, "expires_at": expiresAt,
-			"pay_ticket": ticket, "coinslot": req.Coinslot,
+			"pay_ticket": ticket, "coinslot": "subvendo:" + strconv.FormatInt(targetSvID, 10),
 		})
 		return
 	}
@@ -257,6 +257,7 @@ func (h *CoinslotHandler) Arm(w http.ResponseWriter, r *http.Request) {
 		"armed_at":   armedAt,
 		"expires_at": expiresAt,
 		"pay_ticket": ticket,
+		"coinslot":   "gpio",
 	})
 }
 

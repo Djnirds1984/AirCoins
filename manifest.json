@@ -1,9 +1,16 @@
 ﻿{
-    "version":  "v1.29.11",
-    "release_notes":  "- **Fix: GPIO toggle showed OFF even when the listener was running** â€” The `listener_active` check added in v1.29.6 under-reported when the CGI ran as www-data (`systemctl is-active` and `kill -0` both fail with EPERM on the root-owned listener), and the \"live state wins\" rule then flipped the toggle OFF despite the saved config saying ON. The CGI now detects the listener via the world-readable `/proc/\u003cpid\u003e/cmdline` (works for any user), and the admin panel treats the saved `GPIO_ENABLED` flag as authoritative â€” `listener_active` is only a fallback when no config exists, plus the drift-notice hint.",
-    "sha256":  "471dd669988dd2990b9cb7e6ccc08bc8511412ebaec9a49e9dfb087df33a573a",
-    "tarball":  "releases/aircoins-v1.29.11.tar.gz",
+    "version":  "v1.29.12",
+    "release_notes":  "- **Fix: \"Failed to start session\" after Done Paying on multi-vendo / sub-Vendo deployments** â€” The portal now locks onto the coinslot the server *actually* armed (the `/api/coinslot/arm` response echoes the resolved `gpio` or `subvendo:N`) and threads that same slot through the countdown status poll, the disarm call, and the `/api/session/start` call. Previously the status poll and start re-resolved the slot independently, so on boxes with remote Sub-Vendo units the portal could look up coins under a different source than the one inserted into â€” leaving the server with \"no credited coins\" (HTTP 400) at Start. Now arm/status/start all agree on one source.\n- **Fix (diagnostics/self-heal): non-JSON replies to `/api/session/start` are retried once instead of instantly showing the generic failure.** When the lighttpd `error-handler-404` fallback answers a start POST with HTTP 200 + portal HTML â€” the signature of a broken/old `aircoins-api` process (e.g. the corrupted v1.29.9 binary documented below) â€” the portal retries once before reporting. If the API is truly not answering JSON, the error you see is the *real* cause: the Go API isn\u0027t running or is serving HTML, so check `systemctl status aircoins-api` / restore the API binary (see v1.29.10 notes) rather than re-tapping coins.",
+    "sha256":  "827fa867baa164221e6801733b0fd3d884323b70a9f00620a9b78b8d69c76ff9",
+    "tarball":  "releases/aircoins-v1.29.12.tar.gz",
     "versions":  [
+                     {
+                         "released_at":  "2026-09-14T11:24:23Z",
+                         "sha256":  "827fa867baa164221e6801733b0fd3d884323b70a9f00620a9b78b8d69c76ff9",
+                         "version":  "v1.29.12",
+                         "release_notes":  "- **Fix: \"Failed to start session\" after Done Paying on multi-vendo / sub-Vendo deployments** â€” The portal now locks onto the coinslot the server *actually* armed (the `/api/coinslot/arm` response echoes the resolved `gpio` or `subvendo:N`) and threads that same slot through the countdown status poll, the disarm call, and the `/api/session/start` call. Previously the status poll and start re-resolved the slot independently, so on boxes with remote Sub-Vendo units the portal could look up coins under a different source than the one inserted into â€” leaving the server with \"no credited coins\" (HTTP 400) at Start. Now arm/status/start all agree on one source.\n- **Fix (diagnostics/self-heal): non-JSON replies to `/api/session/start` are retried once instead of instantly showing the generic failure.** When the lighttpd `error-handler-404` fallback answers a start POST with HTTP 200 + portal HTML â€” the signature of a broken/old `aircoins-api` process (e.g. the corrupted v1.29.9 binary documented below) â€” the portal retries once before reporting. If the API is truly not answering JSON, the error you see is the *real* cause: the Go API isn\u0027t running or is serving HTML, so check `systemctl status aircoins-api` / restore the API binary (see v1.29.10 notes) rather than re-tapping coins.",
+                         "tarball":  "releases/aircoins-v1.29.12.tar.gz"
+                     },
                      {
                          "released_at":  "2026-09-13T03:41:45Z",
                          "sha256":  "471dd669988dd2990b9cb7e6ccc08bc8511412ebaec9a49e9dfb087df33a573a",
@@ -31,14 +38,7 @@
                          "version":  "v1.29.8",
                          "release_notes":  "- **Fix: OTA updates now self-heal the lighttpd /cgi-bin/ alias** â€” The updater does targeted file replacement and never re-ran install.sh, so devices updated over the air kept the broken lighttpd config (no /cgi-bin/ alias) and the GPIO toggle kept reading portal HTML instead of the CGI. Every update now idempotently ensures `mod_alias` is loaded and `/cgi-bin/` is aliased to `/usr/lib/cgi-bin/` (with config backup + automatic revert if the patched config fails `lighttpd -t`), then lighttpd is restarted.",
                          "tarball":  "releases/aircoins-v1.29.8.tar.gz"
-                     },
-                     {
-                         "released_at":  "2026-09-13T02:27:16Z",
-                         "sha256":  "672be653abc1bbe312691f933b044b1d360f07e614737bda0f3861b8761be3bf",
-                         "version":  "v1.29.7",
-                         "release_notes":  "- **Fix (root cause): admin CGI was never served by lighttpd** â€” `/cgi-bin/get_gpio_config`, `/cgi-bin/set_gpio_config` and `/cgi-bin/test_gpio` were installed to `/usr/lib/cgi-bin/` but the lighttpd config only set `cgi.assign` without aliasing the `/cgi-bin/` URL to that physical directory. Every CGI request 404\u0027d under the docroot and `error-handler-404` answered with index.html (HTTP 200), so the GPIO master toggle always read as OFF while the machine kept accepting coins. lighttpd now loads `mod_alias` and maps `/cgi-bin/` â†’ `/usr/lib/cgi-bin/`; install.sh and zerotier-install add the same block idempotently for already-deployed devices.\n- Admin panel: if the GPIO config read ever fails (non-JSON/broken CGI), the panel now shows a clear warning instead of silently displaying the toggle as off.",
-                         "tarball":  "releases/aircoins-v1.29.7.tar.gz"
                      }
                  ],
-    "released_at":  "2026-09-13T03:41:45Z"
+    "released_at":  "2026-09-14T11:24:23Z"
 }

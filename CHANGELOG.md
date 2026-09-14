@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.29.12
+- **Fix: "Failed to start session" after Done Paying on multi-vendo / sub-Vendo deployments** — The portal now locks onto the coinslot the server *actually* armed (the `/api/coinslot/arm` response echoes the resolved `gpio` or `subvendo:N`) and threads that same slot through the countdown status poll, the disarm call, and the `/api/session/start` call. Previously the status poll and start re-resolved the slot independently, so on boxes with remote Sub-Vendo units the portal could look up coins under a different source than the one inserted into — leaving the server with "no credited coins" (HTTP 400) at Start. Now arm/status/start all agree on one source.
+- **Fix (diagnostics/self-heal): non-JSON replies to `/api/session/start` are retried once instead of instantly showing the generic failure.** When the lighttpd `error-handler-404` fallback answers a start POST with HTTP 200 + portal HTML — the signature of a broken/old `aircoins-api` process (e.g. the corrupted v1.29.9 binary documented below) — the portal retries once before reporting. If the API is truly not answering JSON, the error you see is the *real* cause: the Go API isn't running or is serving HTML, so check `systemctl status aircoins-api` / restore the API binary (see v1.29.10 notes) rather than re-tapping coins.
+
 ## v1.29.11
 - **Fix: GPIO toggle showed OFF even when the listener was running** — The `listener_active` check added in v1.29.6 under-reported when the CGI ran as www-data (`systemctl is-active` and `kill -0` both fail with EPERM on the root-owned listener), and the "live state wins" rule then flipped the toggle OFF despite the saved config saying ON. The CGI now detects the listener via the world-readable `/proc/<pid>/cmdline` (works for any user), and the admin panel treats the saved `GPIO_ENABLED` flag as authoritative — `listener_active` is only a fallback when no config exists, plus the drift-notice hint.
 

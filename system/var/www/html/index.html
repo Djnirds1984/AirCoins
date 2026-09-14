@@ -1015,7 +1015,12 @@
             sessionStartTime: null,
             sessionInterval: null,
             payTicket: '',
-            coinslot: 'auto'
+            coinslot: 'auto',
+            // The coinslot the SERVER actually armed (from the /arm response),
+            // e.g. 'gpio' or 'subvendo:3'. Sticky so status/start always target
+            // the same slot that was armed, even if the async picker default
+            // resolves to a different unit later.
+            activeCoinslot: ''
         };
 
         // ==================== API HELPERS ====================
@@ -1278,11 +1283,23 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-Session-Token': getSessionToken() },
                 body: JSON.stringify({ duration_sec: durationSec, coinslot: gpio.coinslot || 'auto' })
-            }).then(r => r.json().then(body => ({ status: r.status, body: body }))).catch(() => null);
+            }).then(r => r.json().then(body => {
+                // Lock onto the slot the server actually resolved/armed (e.g.
+                // 'gpio' or 'subvendo:3'), NOT just what we asked for. Every
+                // later poll/start must target this exact slot or a sub-vendo's
+                // coins are looked up under the wrong source and start fails.
+                if (body && body.coinslot) gpio.activeCoinslot = body.coinslot;
+                return { status: r.status, body: body };
+            })).catch(() => null);
         }
 
         function coinslotDisarm() {
-            fetch(COINSLOT_DISARM_URL, { method: 'POST' }).catch(() => {});
+            const slot = gpio.activeCoinslot || gpio.coinslot || 'auto';
+            fetch(COINSLOT_DISARM_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ coinslot: slot })
+            }).catch(() => {});
         }
 
         // Poll coin slot status while the modal is open. The response carries
@@ -1292,7 +1309,8 @@
         // pulse to /api/gpio/coin, the API stores a coin_events row, and
         // /api/coinslot/status reports the rows newer than the arm timestamp.
         function pollCoinslotStatus() {
-            fetchJSON(COINSLOT_STATUS_URL + '?t=' + Date.now())
+            const slot = encodeURIComponent(gpio.activeCoinslot || gpio.coinslot || 'auto');
+            fetchJSON(COINSLOT_STATUS_URL + '?t=' + Date.now() + '&coinslot=' + slot)
                 .then(data => {
                     if (!gpio.active || !data) return;
 
@@ -1395,6 +1413,7 @@
             gpio.totalAmount = 0;
             gpio.totalSeconds = 0;
             gpio.payTicket = '';
+            gpio.activeCoinslot = '';
             gpio.active = true;
 
             // Reset UI
@@ -1593,8 +1612,9 @@
 
         // doSessionStart performs the actual POST /api/session/start after
         // the can-start pre-flight (or if the pre-flight fails).
-        function doSessionStart() {
-            document.getElementById('gpioStatus').textContent = 'Starting session...';
+        function doSessionStart(attempt) {
+            attempt = attempt || 1;
+            document.getElementById('gpioStatus').textContent = 'Starting session...' + (attempt > 1 ? ' (retry ' + attempt + ')' : '');
             document.getElementById('gpioStatus').className = 'gpio-status detecting';
 
             // Failsafe: never leave the modal hung at "Starting session..."
@@ -1605,14 +1625,24 @@
                 showNotification('Starting session timed out. Please try again.', 'error');
             }, 25000);
 
+            var slot = gpio.activeCoinslot || gpio.coinslot || 'auto';
             fetch(SESSION_START_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Session-Token': getSessionToken() },
-                body: JSON.stringify({ pay_ticket: gpio.payTicket || '', coinslot: gpio.coinslot || 'auto' })
+                body: JSON.stringify({ pay_ticket: gpio.payTicket || '', coinslot: slot })
             })
-                .then(r => r.json().catch(() => ({})).then(body => ({ ok: r.ok, status: r.status, body: body })))
+                .then(r => r.text().then(text => ({
+                    ok: r.ok,
+                    status: r.status,
+                    ctype: (r.headers.get('content-type') || '').toLowerCase(),
+                    text: text
+                })))
                 .then(res => {
                     clearTimeout(hung);
+                    res.body = null;
+                    if (res.text) {
+                        try { res.body = JSON.parse(res.text); } catch (e) { res.isHtml = true; }
+                    }
                     // 403 with "Invalid or missing pay_ticket" → session expired/already paid.
                     if (res.status === 403 && res.body && res.body.message &&
                         res.body.message.indexOf('pay_ticket') !== -1) {
@@ -1624,6 +1654,14 @@
                     if (res.status === 423 || (res.body && res.body.code === 'paying')) {
                         closeGpioModal();
                         showPayingMessage();
+                        return;
+                    }
+                    // The API answered but not with our JSON 2xx. This is the
+                    // classic "broken build / lighttpd 404-fallback" case where
+                    // error-handler-404 returns HTTP 200 + index.html HTML; the
+                    // Go API is not actually answering /api/session/start.
+                    if (res.isHtml && attempt < 2) {
+                        setTimeout(function () { doSessionStart(attempt + 1); }, 1200);
                         return;
                     }
                     closeGpioModal();

@@ -447,8 +447,15 @@ gpio_read() {
             ;;
         libgpiod)
             gpio_num=$(pin_to_gpio "$pin") || return 1
-            chip=$(gpio_chip_name)
-            if [ "$(gpiod_major)" = "2" ]; then
+            # HOT PATH: chip name + CLI major version are cached in
+            # $GPIO_CHIP / $GPIOD_MAJOR (resolved once via
+            # gpio_chip_name/gpiod_major) — never fork gpiodetect or
+            # `gpioget --version` per read.  Those forks made every poll
+            # tens of ms and swallowed fast multi-pulse trains.
+            [ -z "$GPIO_CHIP" ] && gpio_chip_name >/dev/null
+            [ -z "$GPIOD_MAJOR" ] && gpiod_major >/dev/null
+            chip=${GPIO_CHIP:-gpiochip0}
+            if [ "$GPIOD_MAJOR" = "2" ]; then
                 out=$(gpioget --numeric -c "$chip" "$gpio_num" 2>/dev/null) ||
                     out=$(gpioget -c "$chip" "$gpio_num" 2>/dev/null)
             case "$out" in

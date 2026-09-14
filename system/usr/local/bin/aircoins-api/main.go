@@ -43,10 +43,20 @@ func main() {
 	// memory and multi-peso coins kept under-counting. The API is always
 	// restarted by the update script (and on every boot), which makes
 	// this the reliable moment to load the listener that is on disk.
-	if out, err := exec.Command("systemctl", "restart", "gpio-coin-listener").CombinedOutput(); err != nil {
-		log.Printf("WARNING: gpio-coin-listener restart failed: %v (%s)", err, strings.TrimSpace(string(out)))
-	} else {
-		log.Println("gpio-coin-listener restarted to load the on-disk version")
+	//
+	// After removing the NodeMCU sub-vendo feature we are GPIO-only.
+	// The listener now exits non-zero on GPIO setup failure (so systemd
+	// Restart=on-failure retries it on backoff), but if the admin set
+	// GPIO_ENABLED=false the listener exits immediately and systemd
+	// leaves it dead.  We read gpio_config here and only restart when
+	// GPIO is enabled, so a device that legitimately has GPIO off is
+	// not hammered with restart attempts on every boot.
+	if gpioEnabled, _ := readGPIOEnabledFlag(); gpioEnabled {
+		if out, err := exec.Command("systemctl", "restart", "gpio-coin-listener").CombinedOutput(); err != nil {
+			log.Printf("WARNING: gpio-coin-listener restart failed: %v (%s)", err, strings.TrimSpace(string(out)))
+		} else {
+			log.Println("gpio-coin-listener restarted to load the on-disk version")
+		}
 	}
 
 	// ── License system ──────────────────────────────────────────────────
@@ -376,6 +386,35 @@ func getEnv(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+// readGPIOEnabledFlag reads /var/lib/pisowifi/gpio_config and returns
+// true if GPIO_ENABLED is set to a truthy value (true/1/yes/on).
+// Used at API startup to decide whether to restart the GPIO coin
+// listener service. Returns false on any error (missing file, parse
+// failure, etc.) so a device with no GPIO config is treated as "GPIO
+// off" and the listener is not force-restarted.
+func readGPIOEnabledFlag() (bool, error) {
+	data, err := os.ReadFile("/var/lib/pisowifi/gpio_config")
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "GPIO_ENABLED=") {
+			continue
+		}
+		val := strings.TrimPrefix(line, "GPIO_ENABLED=")
+		val = strings.TrimSpace(val)
+		switch strings.ToLower(val) {
+		case "true", "1", "yes", "on":
+			return true, nil
+		default:
+			return false, nil
+		}
+	}
+	// Key absent: default is true (per the listener and set_gpio_config)
+	return true, nil
 }
 
 func enableCORS(next http.Handler) http.Handler {

@@ -28,7 +28,7 @@ PIN=7
 COIN_VALUE=1
 PULSE_MODE="falling"
 BOARD_MODEL="auto"
-DEBOUNCE_MS=50
+DEBOUNCE_MS=30
 GPIO_ENABLED=true
 RELAY_PIN=5
 RELAY_ENABLED=false
@@ -41,7 +41,7 @@ fi
 read -r POST_DATA
 
 # Parse JSON (using basic shell parsing - no jq dependency required)
-# Expected format: {"pin":7,"coin_value":1,"pulse_mode":"falling","board_model":"auto","debounce_ms":50,"gpio_enabled":true}
+# Expected format: {"pin":7,"coin_value":1,"pulse_mode":"falling","board_model":"auto","debounce_ms":30,"gpio_enabled":true}
 
 # Extract values using grep/sed - only fields present in the body override
 # the preserved defaults above

@@ -59,9 +59,10 @@ fi
 # ============================================
 # Default values (overridden by config file)
 COIN_PULSE_PIN=7                    # PHYSICAL header pin number
-COIN_VALUE=1                        # Peso value per pulse
+COIN_VALUE=1                        # Peso value per pulse (1 pulse = P1; a P10 coin must send 10 pulses)
 PULSE_MODE="falling"                # falling, rising, or both
-DEBOUNCE_MS=50                      # ignore edges closer than this to the previous pulse;
+DEBOUNCE_MS=30                      # ignore edges closer than this to the previous pulse;
+                                    # 30 ms default fits fast acceptors (50 ms pulse trains);
                                     # settable from Admin > Settings > GPIO (gpio_config)
 RELAY_ENABLED=false                 # relay / light pin active while coin slot is armed
 RELAY_PIN=5                         # PHYSICAL header pin number driving the relay/light
@@ -142,12 +143,20 @@ case "${GPIO_ENABLED:-true}" in
     1|true|TRUE|True|yes|YES|on|ON) GPIO_ENABLED=true ;;
     *)                              GPIO_ENABLED=false ;;
 esac
-# This check runs BEFORE the cleanup trap is installed: nothing was armed
-# yet, so exiting here touches no GPIO/relay/armed state. Exit 0 is a
-# clean stop for systemd (Restart=on-failure does not loop on exit 0).
+# When the master toggle is OFF the listener exits immediately.  We exit
+# 1 (not 0) so systemd's Restart=on-failure keeps trying; combined with
+# the 30 s quiesce guard below this is harmless (the service sits stopped
+# for 30 s between attempts while the toggle is off, instead of spinning
+# at full speed).  The real fix for "toggle then reboot to get coins" is
+# in main.go: the API now restarts this service on boot when GPIO is
+# enabled in gpio_config, so a reboot no longer leaves the listener dead.
 if [ "$GPIO_ENABLED" = "false" ]; then
-    log "gpio-coin-listener: GPIO disabled by master toggle (Enable GPIO = off), exiting"
-    exit 0
+    log "gpio-coin-listener: GPIO disabled by master toggle (Enable GPIO = off), exiting (systemd will retry)"
+    # Quiesce: do not hammer systemd with restart attempts while the
+    # toggle is off.  30 s is long enough to not be a busy-loop, short
+    # enough that flipping the toggle back on is felt within seconds.
+    sleep 30
+    exit 1
 fi
 log "gpio-coin-listener: master toggle on (board=$BOARD_MODEL, method=$GPIO_METHOD)"
 
@@ -180,7 +189,7 @@ log "GPIO Coin Listener started (PID: $$)"
 log "Board: $BOARD_FAMILY / $BOARD_MODEL ($BOARD_CHIPSET)"
 log "GPIO method: $GPIO_METHOD"
 log "Listening on PHYSICAL header pin: $COIN_PULSE_PIN"
-log "Coin value per pulse: P$COIN_VALUE"
+log "Coin value per pulse: P$COIN_VALUE (acceptor must send 1 pulse per peso: P5 = 5 pulses, P10 = 10 pulses)"
 log "Pulse debounce: ${DEBOUNCE_MS} ms"
 if [ "$RELAY_ENABLED" = "true" ]; then
     log "Relay/light: ENABLED on physical pin $RELAY_PIN (blink tempo $RELAY_INTENSITY/10 while armed)"
@@ -465,7 +474,7 @@ accept_pulse_edge() {
 # per-pulse restart left a blind gap between pulses (sleep + wait-for-
 # HIGH polling + process start-up + line re-claim, ~250 ms) and every
 # edge arriving in that gap was lost forever.  A 10-peso coin fires 10
-# pulses ~100 ms apart, so only ~4 of them were counted.  With the
+# pulses ~50 ms apart, so only ~4 of them were counted.  With the
 # stream open the whole time, every falling edge is queued by the
 # kernel and read out one by one — no pulse can be missed no matter how
 # fast the train is.
@@ -512,11 +521,26 @@ armed_loop_gpiomon() {
 # from being counted as multiple coins, while still catching rapid
 # multi-pulse trains (each new pulse is a new HIGH→LOW transition).
 # Bounce re-triggers inside DEBOUNCE_MS are resynced but not counted.
+#
+# FIRST-PULSE FIX: prev_state is seeded from a REAL read of the pin on
+# every arm (not assumed HIGH).  After a long idle the line may already
+# be LOW (acceptor idle state / float / stuck), and assuming HIGH would
+# either invent a phantom coin or swallow the first real edge.  Reading
+# once also absorbs any stale level left over from the previous window.
 armed_loop_poll() {
-    local prev_state=1 current_state wait_hi
+    local prev_state current_state wait_hi
+    prev_state=$(gpio_read "$COIN_PULSE_PIN")
+    case "$prev_state" in
+        0|1) ;;
+        *)   prev_state=1 ;;
+    esac
     while coinslot_armed; do
         # Read current pin state (physical pin; lib translates)
         current_state=$(gpio_read "$COIN_PULSE_PIN")
+        case "$current_state" in
+            0|1) ;;
+            *)   current_state="$prev_state" ;;  # transient read error: hold last known, don't invent an edge
+        esac
 
         # Detect falling edge (HIGH -> LOW = coin inserted)
         if [ "$prev_state" = "1" ] && [ "$current_state" = "0" ]; then
@@ -554,8 +578,15 @@ if [ "$GPIO_METHOD" != "none" ]; then
     check_pin_availability
     PIN_AVAILABLE=$?
 
-    # Set pin mode to input with pull-up (physical pin; lib translates)
-    gpio_setup_input "$COIN_PULSE_PIN" "up"
+    # Set pin mode to input with pull-up (physical pin; lib translates).
+    # We check the result here: if the pin cannot be configured at startup
+    # the listener must not continue in a broken state (coins would never
+    # register).  Exit non-zero so systemd Restart=on-failure retries on a
+    # backoff schedule instead of leaving a live-but-blind daemon.
+    if ! gpio_setup_input "$COIN_PULSE_PIN" "up"; then
+        log "ERROR: gpio_setup_input failed for physical pin $COIN_PULSE_PIN - coin detection will not work; exiting for systemd retry"
+        exit 1
+    fi
 
     if [ "$GPIO_METHOD" = "libgpiod" ] || [ "$GPIO_METHOD" = "sysfs" ]; then
         log "NOTE: $GPIO_METHOD cannot enable the internal pull-up; the coin"
@@ -578,9 +609,12 @@ if [ "$GPIO_METHOD" != "none" ]; then
 
     # Outer state machine: IDLE <-> ARMED
     while true; do
-        # IDLE: one cheap file check per second, no GPIO reads at all
+        # IDLE: cheap file checks, no GPIO reads at all — but poll every
+        # 0.2 s (not 1 s) so the gap between "Insert Coin" tap and the
+        # start of edge detection is at most ~200 ms.  The old 1 s sleep
+        # could swallow the first pulse(s) of a fast coin drop.
         if ! coinslot_armed; then
-            sleep 1
+            sleep 0.2
             continue
         fi
 
@@ -588,6 +622,29 @@ if [ "$GPIO_METHOD" != "none" ]; then
         log "Coin slot ARMED - listening for coin pulses on physical pin $COIN_PULSE_PIN ($PIN_LABEL, line $INTERNAL_GPIO)"
         if [ "$RELAY_ENABLED" = "true" ] && [ "$RELAY_PIN" != "$COIN_PULSE_PIN" ]; then
             relay_blink_start
+        fi
+
+        # RE-ARM HYGIENE: the acceptor line may have floated or stuck while
+        # we sat idle (especially after a long no-coin period).  Re-assert
+        # the input + pull-up and drain any stale level so the first real
+        # edge of this window is caught, not the leftover of the last one.
+        #
+        # Retry up to 3 times with a short backoff: a transient pin conflict
+        # (e.g. another driver briefly claiming the line) that clears within
+        # a couple hundred ms should not leave the listener blind.  After 3
+        # failures we give up on this armed window — the next arm attempt
+        # will retry, and if setup keeps failing the startup-level failure
+        # above (or the next re-arm) will exit non-zero for systemd retry.
+        local setup_ok=1
+        for _setup_try in 1 2 3; do
+            if gpio_setup_input "$COIN_PULSE_PIN" "up" 2>/dev/null; then
+                setup_ok=0
+                break
+            fi
+            sleep 0.1
+        done
+        if [ "$setup_ok" != "0" ]; then
+            log "WARNING: gpio_setup_input failed after 3 retries on re-arm (physical pin $COIN_PULSE_PIN) - coin detection may be impaired this window"
         fi
 
         # Re-check on every arm if the pin was busy at startup: the operator

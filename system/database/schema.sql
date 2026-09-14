@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS gpio_config (
     coin_value INTEGER NOT NULL DEFAULT 1,
     pulse_mode VARCHAR(20) NOT NULL DEFAULT 'falling',
     board_model VARCHAR(50) DEFAULT 'auto',
-    debounce_ms INTEGER NOT NULL DEFAULT 50,
+    debounce_ms INTEGER NOT NULL DEFAULT 30,
     relay_enabled BOOLEAN NOT NULL DEFAULT false,
     relay_pin INTEGER NOT NULL DEFAULT 5,
     relay_intensity INTEGER NOT NULL DEFAULT 5,
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS gpio_config (
 
 -- Insert default GPIO config (only if table is empty)
 INSERT INTO gpio_config (pin, coin_value, pulse_mode, debounce_ms)
-SELECT 7, 1, 'falling', 50
+SELECT 7, 1, 'falling', 30
 WHERE NOT EXISTS (SELECT 1 FROM gpio_config LIMIT 1);
 
 -- ============================================
@@ -244,59 +244,7 @@ CREATE TABLE IF NOT EXISTS coin_events (
     detected_at TIMESTAMP DEFAULT NOW(),
     processed BOOLEAN DEFAULT false,
     session_id INTEGER REFERENCES sessions(id),
-    source TEXT NOT NULL DEFAULT 'local_gpio'  -- 'local_gpio' or 'subvendo:<id>'
-);
-
--- ============================================
--- SUB-VENDOS (NodeMCU ESP8266 remote coin slots)
--- ============================================
--- One sub-vendo per portal VLAN. The NodeMCU polls GET /api/subvendo/state
--- (token auth) and reports coin pulses to POST /api/subvendo/coins; coins
--- land in coin_events with source='subvendo:<id>' so they can only ever be
--- credited to a client on that same VLAN.
---
--- Provisioning model: DEVICE-REGISTRATION.
---  - A single shared API token (config.subvendo_token) is burned into all
---    NodeMCU firmware at build time.
---  - On first boot a unit generates a random device_id (stored in EEPROM),
---    then POSTs it + the WiFi SSID it joined to GET /api/subvendo/register.
---  - The server maps SSID -> vlan_iface via the ssid_vlan_map table, binds
---    the unit to that VLAN, and creates a 'pending' row.
---  - An admin reviews Pending units in Admin -> Sub-Vendos and clicks
---    Accept (-> online) or Reject. Online units serve their VLAN; a unit can
---    only be accepted on the VLAN that its SSID maps to.
-CREATE TABLE IF NOT EXISTS sub_vendos (
-    id SERIAL PRIMARY KEY,
-    device_id VARCHAR(32) NOT NULL UNIQUE,      -- NodeMCU-generated unique id
-    name TEXT NOT NULL,                         -- display name (set at acceptance)
-    site TEXT NOT NULL DEFAULT '',              -- barangay / location label
-    vlan_iface TEXT,                            -- portal interface, e.g. 'end0.22' (null until SSID mapped)
-    api_token_hash VARCHAR(64) NOT NULL DEFAULT '', -- sha256(device token), shared secret
-    ssid VARCHAR(64),                           -- WiFi SSID the unit connected on
-    mac VARCHAR(17),                            -- NodeMCU MAC; used for the captive-portal bypass
-    status VARCHAR(12) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','online','offline','rejected')),
-    enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    armed_until BIGINT NOT NULL DEFAULT 0,      -- epoch sec; device polls this
-    window_started_at BIGINT NOT NULL DEFAULT 0, -- epoch sec; coin-window origin
-    total_coins INTEGER NOT NULL DEFAULT 0,
-    last_seen TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
--- one VLAN iface may have many units; many interfaces share the same SSID only across sites
-CREATE INDEX IF NOT EXISTS idx_subvendos_vlan ON sub_vendos(vlan_iface);
-CREATE INDEX IF NOT EXISTS idx_subvendos_status ON sub_vendos(status);
-CREATE INDEX IF NOT EXISTS idx_subvendos_device ON sub_vendos(device_id);
-
--- SSID -> VLAN interface mapping (admin-managed).
--- Lets the server translate a NodeMCU's reported WiFi.SSID() into the portal
--- VLAN iface to bind the unit to.
-CREATE TABLE IF NOT EXISTS ssid_vlan_map (
-    id SERIAL PRIMARY KEY,
-    ssid VARCHAR(64) NOT NULL UNIQUE,           -- WiFi network name
-    vlan_iface VARCHAR(32) NOT NULL,            -- portal interface, e.g. 'end0.22'
-    site VARCHAR(128) NOT NULL DEFAULT '',      -- optional human hint
-    active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    source TEXT NOT NULL DEFAULT 'local_gpio'  -- credited coinslot origin
 );
 
 -- ============================================

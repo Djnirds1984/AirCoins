@@ -369,29 +369,10 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	// client is the legitimate holder. The unprocessed coin_events
 	// are consumed by the transaction below.
 
-	// Resolve which coinslot owns the armed window. SIMPLIFIED MODEL
-	// (v1.25.0): no VLAN isolation — the portal's chosen "subvendo:N" is
-	// honored for any online unit; "gpio"/"auto" keep prior behavior.
+	// The only coinslot on an SBC is the local GPIO listener (Sub-Vendo /
+	// NodeMCU support was removed), so the credited window is always
+	// 'local_gpio' regardless of the (backward-compat) coinslot parameter.
 	source := "local_gpio"
-	iface := resolveVLAN(clientIP)
-	svID, _ := subvendoIDForVLAN(h.DB, iface)
-
-	switch {
-	case req.Coinslot == "gpio":
-		source = "local_gpio"
-	case strings.HasPrefix(req.Coinslot, "subvendo:"):
-		id, _ := strconv.ParseInt(strings.TrimPrefix(req.Coinslot, "subvendo:"), 10, 64)
-		if id > 0 {
-			source = "subvendo:" + strconv.FormatInt(id, 10)
-		}
-	default:
-		// "auto", empty, or unrecognized — prefer any online sub-vendo.
-		if svID > 0 {
-			source = "subvendo:" + strconv.FormatInt(svID, 10)
-		} else if units, err := subvendosForVLAN(h.DB, ""); err == nil && len(units) > 0 {
-			source = "subvendo:" + strconv.FormatInt(units[0].ID, 10)
-		}
-	}
 
 	coins := h.unprocessedWindowCoins(source)
 	if coins.totalMinutes == 0 {

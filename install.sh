@@ -15,7 +15,7 @@ set -e
 # ============================================
 # CONFIGURATION
 # ============================================
-VERSION="1.29.12"
+VERSION="1.29.13"
 INSTALL_DIR="/opt/aircoins"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYSTEM_DIR="$SCRIPT_DIR/system"
@@ -327,13 +327,14 @@ echo -e "${YELLOW}[4/10]${NC} Building Go API server..."
 cd "$SYSTEM_DIR/usr/local/bin/aircoins-api"
 
 # Pick the pre-compiled binary matching this machine: ARM devices run
-# 'aircoins-api', x64 Ubuntu boxes run 'aircoins-api-x64' (no GPIO —
-# coinslots come exclusively from NodeMCU Sub-Vendos there).
+# 'aircoins-api' (has the local GPIO coin listener), x64 Ubuntu boxes run
+# 'aircoins-api-x64' (no GPIO — dev boxes only, coins are simulated via the
+# API/file, no physical coinslot).
 PREBUILT="aircoins-api"
 if [ "$IS_X86" = true ] && [ -f "aircoins-api-x64" ] && \
    file "aircoins-api-x64" 2>/dev/null | grep -q "ELF"; then
     PREBUILT="aircoins-api-x64"
-    echo "  x86_64 detected — using pre-built x64 binary (Sub-Vendo coinslots only)"
+    echo "  x86_64 detected — using pre-built x64 binary (dev mode, no GPIO coinslot)"
 fi
 
 if [ -f "$SYSTEM_DIR/usr/local/bin/aircoins-api/$PREBUILT" ] && \

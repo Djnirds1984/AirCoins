@@ -1,9 +1,16 @@
 ﻿{
-    "version":  "v1.29.12",
-    "release_notes":  "- **Fix: \"Failed to start session\" after Done Paying on multi-vendo / sub-Vendo deployments** â€” The portal now locks onto the coinslot the server *actually* armed (the `/api/coinslot/arm` response echoes the resolved `gpio` or `subvendo:N`) and threads that same slot through the countdown status poll, the disarm call, and the `/api/session/start` call. Previously the status poll and start re-resolved the slot independently, so on boxes with remote Sub-Vendo units the portal could look up coins under a different source than the one inserted into â€” leaving the server with \"no credited coins\" (HTTP 400) at Start. Now arm/status/start all agree on one source.\n- **Fix (diagnostics/self-heal): non-JSON replies to `/api/session/start` are retried once instead of instantly showing the generic failure.** When the lighttpd `error-handler-404` fallback answers a start POST with HTTP 200 + portal HTML â€” the signature of a broken/old `aircoins-api` process (e.g. the corrupted v1.29.9 binary documented below) â€” the portal retries once before reporting. If the API is truly not answering JSON, the error you see is the *real* cause: the Go API isn\u0027t running or is serving HTML, so check `systemctl status aircoins-api` / restore the API binary (see v1.29.10 notes) rather than re-tapping coins.",
-    "sha256":  "827fa867baa164221e6801733b0fd3d884323b70a9f00620a9b78b8d69c76ff9",
-    "tarball":  "releases/aircoins-v1.29.12.tar.gz",
+    "version":  "v1.29.13",
+    "release_notes":  "- **Removal: Sub-Vendo (NodeMCU) support deleted entirely â€” GPIO is the only coinslot.** The SBC\u0027s GPIO coin listener and the NodeMCU sub-vendo feature were fighting over the same coin pipeline: the `auto` coinslot resolution preferred a remote unit over GPIO, coins could be credited under `subvendo:\u003cid\u003e` sources the GPIO-only start path then failed to find, and the admin GPIO master toggle was entangled with the NodeMCU arm/approval lifecycle. Sub-vendo is now gone: the `/api/subvendo/*` device routes, `/api/admin/subvendos` + `/api/admin/ssid-vlan-map` admin routes, `handlers/subvendo.go`, the admin **Sub-Vendos** page and **Settings â†’ SSID/VLAN Map** card, the portal\u0027s \"Select Vendo Machine\" picker, the `firmware/` NodeMCU sketch, and the `sub_vendos` / `ssid_vlan_map` tables (dropped at startup by EnsureSchema and by migrations.sql) are all removed. Arm/status/start now always target `local_gpio`, so Done Paying credits the coins the GPIO listener recorded â€” the GPIO toggle simply starts/stops the listener again.\n- Coinslot API compatibility: `/api/coinslot/arm|status|disarm|options` still accept the old `coinslot` parameter and `options` still returns a `subvendos: []` field, so cached portal pages keep working until they refresh â€” everything resolves to the GPIO coinslot.",
+    "sha256":  "09d519ec255f77209780494862c1cd0cbd6ba429fbd8af9cec05a1f8a905c4e9",
+    "tarball":  "releases/aircoins-v1.29.13.tar.gz",
     "versions":  [
+                     {
+                         "released_at":  "2026-09-14T12:17:46Z",
+                         "sha256":  "09d519ec255f77209780494862c1cd0cbd6ba429fbd8af9cec05a1f8a905c4e9",
+                         "version":  "v1.29.13",
+                         "release_notes":  "- **Removal: Sub-Vendo (NodeMCU) support deleted entirely â€” GPIO is the only coinslot.** The SBC\u0027s GPIO coin listener and the NodeMCU sub-vendo feature were fighting over the same coin pipeline: the `auto` coinslot resolution preferred a remote unit over GPIO, coins could be credited under `subvendo:\u003cid\u003e` sources the GPIO-only start path then failed to find, and the admin GPIO master toggle was entangled with the NodeMCU arm/approval lifecycle. Sub-vendo is now gone: the `/api/subvendo/*` device routes, `/api/admin/subvendos` + `/api/admin/ssid-vlan-map` admin routes, `handlers/subvendo.go`, the admin **Sub-Vendos** page and **Settings â†’ SSID/VLAN Map** card, the portal\u0027s \"Select Vendo Machine\" picker, the `firmware/` NodeMCU sketch, and the `sub_vendos` / `ssid_vlan_map` tables (dropped at startup by EnsureSchema and by migrations.sql) are all removed. Arm/status/start now always target `local_gpio`, so Done Paying credits the coins the GPIO listener recorded â€” the GPIO toggle simply starts/stops the listener again.\n- Coinslot API compatibility: `/api/coinslot/arm|status|disarm|options` still accept the old `coinslot` parameter and `options` still returns a `subvendos: []` field, so cached portal pages keep working until they refresh â€” everything resolves to the GPIO coinslot.",
+                         "tarball":  "releases/aircoins-v1.29.13.tar.gz"
+                     },
                      {
                          "released_at":  "2026-09-14T11:24:23Z",
                          "sha256":  "827fa867baa164221e6801733b0fd3d884323b70a9f00620a9b78b8d69c76ff9",
@@ -31,14 +38,7 @@
                          "version":  "v1.29.9",
                          "release_notes":  "- **Fix: CGI script had Windows CRLF line endings (\"cannot execute: required file not found\")** â€” The rewritten get_gpio_config shipped with CRLF, so its shebang was \"#!/bin/bash\\r\" and Linux refused to run it (lighttpd answered 200 with an empty body; running the script directly printed \"cannot execute: required file not found\"). The script is now LF-only, and build-release.sh strips CR from every packaged Linux script/CGI (with a backup-safe pass over install.sh, recover script and docs) so a Windows edit can never ship a broken script again.",
                          "tarball":  "releases/aircoins-v1.29.9.tar.gz"
-                     },
-                     {
-                         "released_at":  "2026-09-13T02:39:45Z",
-                         "sha256":  "c6cfe5e27aa55b41745c1eaff982c4be57a26c648ec548422f047473113bd517",
-                         "version":  "v1.29.8",
-                         "release_notes":  "- **Fix: OTA updates now self-heal the lighttpd /cgi-bin/ alias** â€” The updater does targeted file replacement and never re-ran install.sh, so devices updated over the air kept the broken lighttpd config (no /cgi-bin/ alias) and the GPIO toggle kept reading portal HTML instead of the CGI. Every update now idempotently ensures `mod_alias` is loaded and `/cgi-bin/` is aliased to `/usr/lib/cgi-bin/` (with config backup + automatic revert if the patched config fails `lighttpd -t`), then lighttpd is restarted.",
-                         "tarball":  "releases/aircoins-v1.29.8.tar.gz"
                      }
                  ],
-    "released_at":  "2026-09-14T11:24:23Z"
+    "released_at":  "2026-09-14T12:17:46Z"
 }

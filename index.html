@@ -756,12 +756,6 @@
             <h2 style="margin-bottom:4px;">Insert Coins</h2>
             <p style="font-size:13px; color:#666; margin-bottom:8px;">Waiting for coin insertion...</p>
 
-            <!-- Vendo / Coinslot selector — hidden unless multiple coinslots are available -->
-            <div id="coinslotPicker" style="display:none; margin-bottom:12px;">
-                <label for="coinslotSelect" style="font-size:13px; color:#888; display:block; margin-bottom:4px;">Select Vendo Machine</label>
-                <select id="coinslotSelect" class="portal-select" style="width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; font-size:15px;"></select>
-            </div>
-
             <!-- 60s Countdown Ring -->
             <div class="gpio-countdown-ring">
                 <svg viewBox="0 0 120 120">
@@ -1017,9 +1011,8 @@
             payTicket: '',
             coinslot: 'auto',
             // The coinslot the SERVER actually armed (from the /arm response),
-            // e.g. 'gpio' or 'subvendo:3'. Sticky so status/start always target
-            // the same slot that was armed, even if the async picker default
-            // resolves to a different unit later.
+            // e.g. 'gpio'. Sticky so status/start always target the same slot
+            // that was armed.
             activeCoinslot: ''
         };
 
@@ -1284,10 +1277,10 @@
                 headers: { 'Content-Type': 'application/json', 'X-Session-Token': getSessionToken() },
                 body: JSON.stringify({ duration_sec: durationSec, coinslot: gpio.coinslot || 'auto' })
             }).then(r => r.json().then(body => {
-                // Lock onto the slot the server actually resolved/armed (e.g.
-                // 'gpio' or 'subvendo:3'), NOT just what we asked for. Every
-                // later poll/start must target this exact slot or a sub-vendo's
-                // coins are looked up under the wrong source and start fails.
+                // Lock onto the slot the server actually armed/locked ('gpio'),
+                // NOT just what we asked for. Every later poll/start must target
+                // this exact slot or the coins are credited under the wrong
+                // source and start fails.
                 if (body && body.coinslot) gpio.activeCoinslot = body.coinslot;
                 return { status: r.status, body: body };
             })).catch(() => null);
@@ -1360,46 +1353,9 @@
             if (gpio.coins.length > 0) updateGpioCoinTotals();
         }
 
-        // Fetch the coinslot choices for the caller's VLAN (GPIO + sub-vendos)
-        // and populate the vendo picker. Hidden unless there are 2+ options.
-        function populateCoinslotOptions() {
-            fetchJSON('/api/coinslot/options?t=' + Date.now())
-                .then(data => {
-                    const picker = document.getElementById('coinslotPicker');
-                    const sel = document.getElementById('coinslotSelect');
-                    if (!picker || !sel) return;
-
-                    const options = [];
-                    if (data && data.gpio) {
-                        options.push({ value: 'gpio', label: 'Main Vendo (GPIO)' });
-                    }
-                    if (data && Array.isArray(data.subvendos)) {
-                        data.subvendos.forEach(function (sv) {
-                            options.push({
-                                value: 'subvendo:' + sv.id,
-                                label: 'Sub-Vendo: ' + sv.name + (sv.status === 'online' ? '' : ' (offline)')
-                            });
-                        });
-                    }
-                    if (data && data.subvendo && !Array.isArray(data.subvendos)) {
-                        // legacy single-object response
-                        options.push({ value: 'subvendo:' + data.subvendo.id, label: 'Sub-Vendo: ' + data.subvendo.name });
-                    }
-
-                    // Show the picker only when more than one choice exists.
-                    if (options.length > 1) {
-                        sel.innerHTML = options.map(o => '<option value="' + o.value + '">' + o.label + '</option>').join('');
-                        sel.onchange = function () { gpio.coinslot = sel.value; };
-                        gpio.coinslot = sel.value || options[0].value;
-                        picker.style.display = 'block';
-                    } else {
-                        picker.style.display = 'none';
-                        gpio.coinslot = 'auto';
-                        if (options.length === 1) gpio.coinslot = options[0].value;
-                    }
-                })
-                .catch(() => { gpio.coinslot = 'auto'; });
-        }
+        // Sub-Vendo (NodeMCU) support was removed: the SBC's GPIO coin
+        // listener is the only coinslot, so there is no vendo picker and
+        // gpio.coinslot stays 'auto' (the server resolves it to GPIO).
 
         function openGpioModal() {
             if (!state.systemOnline) {
@@ -1429,10 +1385,6 @@
 
             // Open modal
             document.getElementById('gpioModal').classList.add('active');
-
-            // Fetch vendo/coinslot options for the caller's VLAN and populate
-            // the picker. Hidden when only one (or zero) options exist.
-            populateCoinslotOptions();
 
             // Play insert-coin audio (user gesture from tap guarantees play() works)
             playAudioSafe(audioInsertCoin);

@@ -58,7 +58,7 @@ func EnsureSchema() {
 		{
 			// v1.17.2 — GPIO pulse debounce setting (migrations.sql 015)
 			"gpio_config.debounce_ms",
-			`ALTER TABLE gpio_config ADD COLUMN IF NOT EXISTS debounce_ms INTEGER NOT NULL DEFAULT 50`,
+			`ALTER TABLE gpio_config ADD COLUMN IF NOT EXISTS debounce_ms INTEGER NOT NULL DEFAULT 30`,
 		},
 		{
 			// v1.18.0 — pre-paid time vouchers (migrations.sql 016)
@@ -124,96 +124,14 @@ func EnsureSchema() {
 			`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS pause_expires_at TIMESTAMPTZ`,
 		},
 		{
-			// v1.23.0 — sub-vendos: device-registration model (shared token + admin approval).
-			// Creates the table for fresh installs AND migrates the legacy v1.22
-			// claim-code table (id, name, site, vlan_iface NOT NULL UNIQUE,
-			// api_token_hash, claim_code, claimed) in place to the new columns.
-			"sub_vendos table",
-			`CREATE TABLE IF NOT EXISTS sub_vendos (
-				id SERIAL PRIMARY KEY,
-				device_id VARCHAR(32) NOT NULL UNIQUE,
-				name TEXT NOT NULL DEFAULT '',
-				site TEXT NOT NULL DEFAULT '',
-				vlan_iface TEXT,
-				ssid VARCHAR(64),
-				status VARCHAR(12) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','online','offline','rejected')),
-				enabled BOOLEAN NOT NULL DEFAULT TRUE,
-				armed_until BIGINT NOT NULL DEFAULT 0,
-				window_started_at BIGINT NOT NULL DEFAULT 0,
-				total_coins INTEGER NOT NULL DEFAULT 0,
-				last_seen TIMESTAMPTZ,
-				created_at TIMESTAMPTZ DEFAULT NOW()
-			)`,
+			// Sub-Vendo (NodeMCU) support was removed. Drop the tables for
+			// existing installs that still carry them; never created on fresh.
+			"drop sub_vendos + ssid_vlan_map",
+			`DROP TABLE IF EXISTS ssid_vlan_map;
+			 DROP TABLE IF EXISTS sub_vendos`,
 		},
 		{
-			// v1.23.0 — migrate a pre-existing sub_vendos table from the old
-			// claim-code schema to the device-registration schema.
-			// NOTE: each statement is its own fix entry so a failure in one
-			// (e.g. index rename) cannot roll back the useful ALTERs before it.
-			"sub_vendos: add device_id",
-			`ALTER TABLE sub_vendos ADD COLUMN IF NOT EXISTS device_id VARCHAR(32)`,
-		},
-		{
-			"sub_vendos: add ssid",
-			`ALTER TABLE sub_vendos ADD COLUMN IF NOT EXISTS ssid VARCHAR(64)`,
-		},
-		{
-			// v1.24.5 — NodeMCU MAC address, used for the captive-portal bypass
-			"sub_vendos: add mac",
-			`ALTER TABLE sub_vendos ADD COLUMN IF NOT EXISTS mac VARCHAR(17)`,
-		},
-		{
-			"sub_vendos: add status",
-			`ALTER TABLE sub_vendos ADD COLUMN IF NOT EXISTS status VARCHAR(12) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','online','offline','rejected'))`,
-		},
-		{
-			"sub_vendos: backfill device_id",
-			`UPDATE sub_vendos SET device_id = 'legacy-' || id::text WHERE device_id IS NULL`,
-		},
-		{
-			"sub_vendos: device_id not null + unique index",
-			`ALTER TABLE sub_vendos ALTER COLUMN device_id SET NOT NULL;
-			 CREATE UNIQUE INDEX IF NOT EXISTS idx_subvendos_device ON sub_vendos(device_id)`,
-		},
-		{
-			"sub_vendos: vlan_iface nullable",
-			`ALTER TABLE sub_vendos ALTER COLUMN vlan_iface DROP NOT NULL`,
-		},
-		{
-			// The legacy table declared vlan_iface as `NOT NULL UNIQUE`, which
-			// creates a UNIQUE CONSTRAINT. That constraint's backing index must
-			// be dropped via DROP CONSTRAINT, NOT DROP INDEX (Postgres refuses
-			// DROP INDEX on a constraint-backed index).
-			"sub_vendos: drop old vlan UNIQUE constraint",
-			`ALTER TABLE sub_vendos DROP CONSTRAINT IF EXISTS sub_vendos_vlan_iface_key`,
-		},
-		{
-			"sub_vendos: drop legacy claim_code",
-			`ALTER TABLE sub_vendos DROP COLUMN IF EXISTS claim_code`,
-		},
-		{
-			"sub_vendos: drop legacy claimed",
-			`ALTER TABLE sub_vendos DROP COLUMN IF EXISTS claimed`,
-		},
-		{
-			"sub_vendos: name defaults",
-			`ALTER TABLE sub_vendos ALTER COLUMN name SET DEFAULT '';
-			 ALTER TABLE sub_vendos ALTER COLUMN name SET NOT NULL`,
-		},
-		{
-			// v1.23.0 — SSID → VLAN map (auto-binds registering units)
-			"ssid_vlan_map table",
-			`CREATE TABLE IF NOT EXISTS ssid_vlan_map (
-				id SERIAL PRIMARY KEY,
-				ssid VARCHAR(64) NOT NULL UNIQUE,
-				vlan_iface VARCHAR(32) NOT NULL,
-				site VARCHAR(128) NOT NULL DEFAULT '',
-				active BOOLEAN NOT NULL DEFAULT TRUE,
-				created_at TIMESTAMPTZ DEFAULT NOW()
-			)`,
-		},
-		{
-			// coin_events origin: local GPIO listener vs sub-vendo unit
+			// coin_events origin: single source is now the local GPIO listener
 			"coin_events.source",
 			`ALTER TABLE coin_events ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'local_gpio';
 			 CREATE INDEX IF NOT EXISTS idx_coin_events_source ON coin_events(source, processed)`,

@@ -81,12 +81,8 @@ for f in install.sh aircoins-recover.sh .env.example index.html admin.html DEPLO
     fi
 done
 
-# Copy NodeMCU firmware (Sub-Vendo units)
-if [ -d "$SCRIPT_DIR/firmware" ]; then
-    mkdir -p "$TARBALL_DIR/firmware"
-    (cd "$SCRIPT_DIR/firmware" && tar cf - .) | (cd "$TARBALL_DIR/firmware" && tar xf -)
-    echo "  ✓ NodeMCU firmware included (firmware/)"
-fi
+# (NodeMCU firmware removed together with Sub-Vendo support — no firmware/
+# directory exists anymore and nothing in the release references it.)
 
 # Copy system/ directory (excluding .env, .git, dev artifacts)
 if command -v rsync &>/dev/null; then

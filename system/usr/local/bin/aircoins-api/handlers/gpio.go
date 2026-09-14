@@ -9,12 +9,25 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 )
 
 type GPIOHandler struct {
 	DB *sql.DB
+}
+
+// hasLocalGPIO reports whether this build has a local hardware GPIO
+// coinslot. SBC builds (arm) do; x86 dev boxes have no GPIO and rely on
+// file/API-simulated coin events. This was previously defined alongside the
+// (now removed) Sub-Vendo support.
+func hasLocalGPIO() bool {
+	switch runtime.GOARCH {
+	case "amd64", "386":
+		return false
+	}
+	return true
 }
 
 // Config handles GPIO configuration (GET and POST)
@@ -33,14 +46,14 @@ func (h *GPIOHandler) getConfig(w http.ResponseWriter, r *http.Request) {
 	var config models.GPIOConfig
 	err := h.DB.QueryRow(`
 		SELECT id, pin, coin_value, pulse_mode, COALESCE(board_model, 'auto'),
-		       COALESCE(debounce_ms, 50),
+		       COALESCE(debounce_ms, 30),
 		       COALESCE(relay_enabled, false), COALESCE(relay_pin, 5),
 		       COALESCE(relay_intensity, 5), updated_at
 		FROM gpio_config ORDER BY id DESC LIMIT 1
 	`).Scan(&config.ID, &config.Pin, &config.CoinValue, &config.PulseMode, &config.BoardModel, &config.DebounceMs, &config.RelayEnabled, &config.RelayPin, &config.RelayIntensity, &config.UpdatedAt)
 
 	if err == sql.ErrNoRows {
-		sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Data: models.GPIOConfig{Pin: 7, CoinValue: 1, PulseMode: "falling", BoardModel: "auto", DebounceMs: 50, RelayEnabled: false, RelayPin: 5, RelayIntensity: 5}})
+		sendJSON(w, http.StatusOK, models.APIResponse{Success: true, Data: models.GPIOConfig{Pin: 7, CoinValue: 1, PulseMode: "falling", BoardModel: "auto", DebounceMs: 30, RelayEnabled: false, RelayPin: 5, RelayIntensity: 5}})
 		return
 	} else if err != nil {
 		log.Printf("Error fetching GPIO config: %v", err)
@@ -80,10 +93,12 @@ func (h *GPIOHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Debounce: edges arriving within this window after a pulse are
-	// contact bounce of the same coin. 0 = keep the 50 ms default;
-	// multi-pulse coins may need it lowered (Admin > Settings > GPIO).
+	// contact bounce of the same coin. 0 = keep the 30 ms default;
+	// fast acceptors (≈50 ms pulse spacing) under-count above that,
+	// so only raise it if one physical pulse double-counts.
+	// (Admin > Settings > GPIO).
 	if req.DebounceMs == 0 {
-		req.DebounceMs = 50
+		req.DebounceMs = 30
 	}
 	if req.DebounceMs < 5 || req.DebounceMs > 1000 {
 		sendJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "Debounce must be between 5 and 1000 ms"})

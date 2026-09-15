@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.21.2
+- **Fix (major): the rates set in Admin > Pricing are now the rates that actually apply** — the coins of an armed window are priced as **ONE inserted total** instead of per pulse. On a pulse-train coin acceptor a P5 coin arrives as 5 x P1 pulses, so the old code credited 5 x the P1 rate (with P1 = 15m a P5 coin was credited **1 hour 15 minutes**) and the P5 / P10 / P50 tiers were **unreachable** no matter what was configured. A P5 coin now credits the P5 tier (e.g. 2 hours) as soon as the inserted total reaches it, and the pausable / pause-expiry rules come from that same tier.
+- **Fix: a coin the rate table does not list uses the last configured rate** — an amount between tiers is credited pro-rata against the highest tier at or below it (P7 with P1 = 15m and P5 = 2h credits 7 x 120 / 5 = 168 minutes instead of nothing or an arbitrary sum), and an amount below every tier uses the lowest (last) configured rate so an unlisted coin never eats the money. `GET /api/pricing?coin=N` now also returns the resolved `tier_coin` / `tier_minutes`.
+- **Fix: the portal's Insert Coin modal now shows the time the session will actually credit** — the coin-window summary (`/api/coinslot/status`) is priced with the same tiered rule, so a P5 coin shows **2:00:00** (the P5 tier) instead of 01:15:00 (5 x the P1 rate). Each listed coin shows the marginal credit it added, so the listed coins add up exactly to the window total.
+- Pricing resolution now lives in one place (`resolveTier` in `handlers/pricing.go`) and is shared by the session credit, the coin-window summary, `GET /api/pricing` and the portal's local preview — with unit tests covering the P1 = 15m / P5 = 2h / P10 = 5h / P50 = 3d tiers.
+
 ## v1.21.1
 - **Voucher printing fixed**: explicit A4 portrait `@page` size (no longer inherits the browser's last-used Landscape setting) and a fixed 2-column print grid, so vouchers fill the page instead of one-per-sheet.
 

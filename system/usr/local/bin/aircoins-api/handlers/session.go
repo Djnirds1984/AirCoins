@@ -206,6 +206,10 @@ type windowCoins struct {
 	count        int
 	totalValue   int
 	totalMinutes int
+	// match is the ONE tier that priced totalValue (see MinutesForAmount). It
+	// carries the credited minutes plus the pause rules, so the session start
+	// path never has to resolve the rate a second time.
+	match PricingMatch
 }
 
 // unprocessedWindowCoins sums the UNPROCESSED coin_events of the current
@@ -244,7 +248,6 @@ func (h *SessionHandler) unprocessedWindowCoins() windowCoins {
 	}
 	defer rows.Close()
 
-	minutesByValue := make(map[int]int)
 	for rows.Next() {
 		var id int64
 		var value int
@@ -253,25 +256,28 @@ func (h *SessionHandler) unprocessedWindowCoins() windowCoins {
 			continue
 		}
 
-		minutes, cached := minutesByValue[value]
-		if !cached {
-			m, perr := MinutesForAmount(h.DB, value)
-			if perr != nil {
-				log.Printf("Error resolving pricing for P%d: %v", value, perr)
-				m = PricingMatch{}
-			}
-			minutes = m.Minutes
-			minutesByValue[value] = minutes
-		}
-
 		coins.ids = append(coins.ids, id)
 		coins.count++
 		coins.totalValue += value
-		coins.totalMinutes += minutes
 	}
 	if err := rows.Err(); err != nil {
 		log.Printf("Error reading coin events: %v", err)
 	}
+
+	// ONE tier prices the accumulated total (see MinutesForAmount) — never the
+	// pulses individually: a P5 coin arrives as 5 x P1 pulses on a pulse-train
+	// acceptor, so pricing each pulse on its own credited 5 x the P1 rate
+	// (e.g. 5 x 15m = 1h15m) and made the P5 / P10 / P50 tiers unreachable.
+	if coins.totalValue > 0 {
+		match, perr := MinutesForAmount(h.DB, coins.totalValue)
+		if perr != nil {
+			log.Printf("Error resolving pricing for P%d: %v", coins.totalValue, perr)
+			return coins
+		}
+		coins.match = match
+		coins.totalMinutes = match.Minutes
+	}
+
 	return coins
 }
 
@@ -362,13 +368,12 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve the pause rules for the purchase: snapshot the matched rate's
-	// pausable flag and expiration window so the session knows whether the
-	// portal may show a Pause button and when a paused session must be
-	// force-expired if the user stays away too long.
-	pricingMatch, perr := MinutesForAmount(h.DB, coins.totalValue)
-	if perr != nil {
-		log.Printf("Error resolving rate rules for P%d: %v", coins.totalValue, perr)
+	// The purchase was already priced by unprocessedWindowCoins: reuse the very
+	// same tier match for the pause rules (pausable flag + pause-expiry window)
+	// so the credited time and the rules always come from one tier. Snapshotting
+	// them here means a later rate edit cannot retro-change this purchase.
+	pricingMatch := coins.match
+	if pricingMatch.MatchedCoin == 0 {
 		pricingMatch = PricingMatch{Pausable: true}
 	}
 

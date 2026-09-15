@@ -222,6 +222,9 @@ func (h *CoinslotHandler) Status(w http.ResponseWriter, r *http.Request) {
 // coinWindowEvent is a single coin detected during the armed window.
 // AgeSec is how long ago the coin was detected (the DB clock is the
 // reference, so no timezone assumptions leak into the response).
+// Minutes is the MARGINAL credit this coin added to the window: the window is
+// priced as one accumulated amount, so the individual coins add up exactly to
+// the window's TotalMinutes.
 type coinWindowEvent struct {
 	ID      int64 `json:"id"`
 	Value   int   `json:"value"`
@@ -244,8 +247,9 @@ func emptyCoinWindow() coinWindow {
 }
 
 // coinsSinceArm aggregates the coin_events rows recorded after armedAt.
-// Minutes come from the pricing table (the same resolution used when the
-// backend credits time), so an unpriced coin is listed with 0 minutes.
+// The window is priced as ONE accumulated amount — the same tier resolution the
+// backend uses to credit time — so the modal shows exactly the time the session
+// will credit (0 minutes when no tier is configured).
 func (h *CoinslotHandler) coinsSinceArm(armedAt int64) coinWindow {
 	window := emptyCoinWindow()
 	if h.DB == nil || armedAt <= 0 {
@@ -276,8 +280,18 @@ func (h *CoinslotHandler) coinsSinceArm(armedAt int64) coinWindow {
 	}
 	defer rows.Close()
 
-	minutesByValue := make(map[int]int)
+	// Resolve the rates ONCE for the whole window and price every pulse against
+	// the accumulated amount — the same rule the session credit uses. Pricing
+	// each pulse on its own would display 5 x the P1 rate for a P5 coin on a
+	// pulse-train acceptor (e.g. 1h15m) while the session credited the P5 tier,
+	// so the modal showed a time the customer never received.
+	tiers, terr := loadActiveTiers(h.DB)
+	if terr != nil {
+		log.Printf("Error loading pricing tiers: %v", terr)
+		tiers = nil
+	}
 
+	runningValue := 0
 	for rows.Next() {
 		var ev coinWindowEvent
 		var ageSec sql.NullInt64
@@ -287,28 +301,27 @@ func (h *CoinslotHandler) coinsSinceArm(armedAt int64) coinWindow {
 		}
 		ev.AgeSec = int(ageSec.Int64)
 
-		minutes, cached := minutesByValue[ev.Value]
-		if !cached {
-			m, perr := MinutesForAmount(h.DB, ev.Value)
-			if perr != nil {
-				log.Printf("Error resolving pricing for P%d: %v", ev.Value, perr)
-				m = PricingMatch{}
-			}
-			minutes = m.Minutes
-			minutesByValue[ev.Value] = minutes
-		}
-		ev.Minutes = minutes
+		// Per-coin minutes are the MARGINAL credit this pulse added, so the
+		// listed coins add up exactly to TotalMinutes.
+		_, before := resolveTier(tiers, runningValue)
+		runningValue += ev.Value
+		_, after := resolveTier(tiers, runningValue)
+		ev.Minutes = after - before
 
 		window.Coins = append(window.Coins, ev)
 		window.Count++
-		window.TotalValue += ev.Value
-		window.TotalMinutes += minutes
+		window.TotalValue = runningValue
 		window.LastID = ev.ID
 	}
 	if err := rows.Err(); err != nil {
 		log.Printf("Error reading coin events: %v", err)
 	}
 
+	// Window total = the credits for the inserted total, tiered and pro-rated
+	// exactly like the session credit (0 when no tier is configured).
+	if _, total := resolveTier(tiers, window.TotalValue); total > 0 {
+		window.TotalMinutes = total
+	}
 	window.TotalSeconds = window.TotalMinutes * 60
 	return window
 }

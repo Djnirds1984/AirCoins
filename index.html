@@ -1008,8 +1008,12 @@
         const PRICING_URL = '/api/pricing';
         const PRICING_REFRESH_INTERVAL = 60000;  // re-read tiers once a minute
 
-        // Mirrors the backend MinutesForAmount(): exact tier, otherwise the
-        // highest configured tier at or below the amount, otherwise 0.
+        // Mirrors the backend MinutesForAmount(): ONE tier is chosen for the
+        // WHOLE inserted amount — the exact tier, otherwise the highest
+        // configured tier at or below it, otherwise the lowest configured tier —
+        // and the credit is pro-rated against it (amount * tierMinutes /
+        // tierCoin). A P5 coin on a pulse-train acceptor therefore previews the
+        // P5 rate instead of 5 x the P1 rate.
         // Informational only — the backend decides what actually gets credited.
         function minutesForAmount(amount) {
             const coin = parseInt(amount, 10);
@@ -1019,14 +1023,31 @@
 
             let bestTier = 0;
             let bestMinutes = 0;
+            let lowestTier = 0;
+            let lowestMinutes = 0;
             Object.keys(state.pricing).forEach(key => {
                 const tier = parseInt(key, 10);
-                if (tier > 0 && tier <= coin && tier > bestTier) {
+                const minutes = state.pricing[key];
+                if (!(tier > 0) || !(minutes > 0)) return;
+                if (lowestTier === 0 || tier < lowestTier) {
+                    lowestTier = tier;
+                    lowestMinutes = minutes;
+                }
+                if (tier <= coin && tier > bestTier) {
                     bestTier = tier;
-                    bestMinutes = state.pricing[key];
+                    bestMinutes = minutes;
                 }
             });
-            return bestMinutes;
+
+            // Amount below every configured tier: credit at the lowest (last)
+            // configured rate, exactly like the backend, instead of nothing.
+            if (bestTier <= 0) {
+                bestTier = lowestTier;
+                bestMinutes = lowestMinutes;
+            }
+            if (bestTier <= 0 || bestMinutes <= 0) return 0;
+
+            return Math.floor((coin * bestMinutes) / bestTier);
         }
 
         function formatMinutes(mins) {

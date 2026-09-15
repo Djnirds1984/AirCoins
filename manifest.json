@@ -1,9 +1,16 @@
 ﻿{
-    "version":  "v1.21.1",
-    "release_notes":  "- **Voucher printing fixed**: explicit A4 portrait `@page` size (no longer inherits the browser\u0027s last-used Landscape setting) and a fixed 2-column print grid, so vouchers fill the page instead of one-per-sheet.",
-    "sha256":  "0ed1ab47baf25b049af69edb5be8652d76c3c6361b7e49fed47fa1cb64c3216a",
-    "tarball":  "releases/aircoins-v1.21.1.tar.gz",
+    "version":  "v1.21.2",
+    "release_notes":  "- **Fix (major): the rates set in Admin \u003e Pricing are now the rates that actually apply** â€” the coins of an armed window are priced as **ONE inserted total** instead of per pulse. On a pulse-train coin acceptor a P5 coin arrives as 5 x P1 pulses, so the old code credited 5 x the P1 rate (with P1 = 15m a P5 coin was credited **1 hour 15 minutes**) and the P5 / P10 / P50 tiers were **unreachable** no matter what was configured. A P5 coin now credits the P5 tier (e.g. 2 hours) as soon as the inserted total reaches it, and the pausable / pause-expiry rules come from that same tier.\n- **Fix: a coin the rate table does not list uses the last configured rate** â€” an amount between tiers is credited pro-rata against the highest tier at or below it (P7 with P1 = 15m and P5 = 2h credits 7 x 120 / 5 = 168 minutes instead of nothing or an arbitrary sum), and an amount below every tier uses the lowest (last) configured rate so an unlisted coin never eats the money. `GET /api/pricing?coin=N` now also returns the resolved `tier_coin` / `tier_minutes`.\n- **Fix: the portal\u0027s Insert Coin modal now shows the time the session will actually credit** â€” the coin-window summary (`/api/coinslot/status`) is priced with the same tiered rule, so a P5 coin shows **2:00:00** (the P5 tier) instead of 01:15:00 (5 x the P1 rate). Each listed coin shows the marginal credit it added, so the listed coins add up exactly to the window total.\n- Pricing resolution now lives in one place (`resolveTier` in `handlers/pricing.go`) and is shared by the session credit, the coin-window summary, `GET /api/pricing` and the portal\u0027s local preview â€” with unit tests covering the P1 = 15m / P5 = 2h / P10 = 5h / P50 = 3d tiers.",
+    "sha256":  "07126ea463996db9067dd3b03fbc824ca8dd90c6a64c765140a2a383ed97a6cb",
+    "tarball":  "releases/aircoins-v1.21.2.tar.gz",
     "versions":  [
+                     {
+                         "released_at":  "2026-09-15T01:11:43Z",
+                         "sha256":  "07126ea463996db9067dd3b03fbc824ca8dd90c6a64c765140a2a383ed97a6cb",
+                         "version":  "v1.21.2",
+                         "release_notes":  "- **Fix (major): the rates set in Admin \u003e Pricing are now the rates that actually apply** â€” the coins of an armed window are priced as **ONE inserted total** instead of per pulse. On a pulse-train coin acceptor a P5 coin arrives as 5 x P1 pulses, so the old code credited 5 x the P1 rate (with P1 = 15m a P5 coin was credited **1 hour 15 minutes**) and the P5 / P10 / P50 tiers were **unreachable** no matter what was configured. A P5 coin now credits the P5 tier (e.g. 2 hours) as soon as the inserted total reaches it, and the pausable / pause-expiry rules come from that same tier.\n- **Fix: a coin the rate table does not list uses the last configured rate** â€” an amount between tiers is credited pro-rata against the highest tier at or below it (P7 with P1 = 15m and P5 = 2h credits 7 x 120 / 5 = 168 minutes instead of nothing or an arbitrary sum), and an amount below every tier uses the lowest (last) configured rate so an unlisted coin never eats the money. `GET /api/pricing?coin=N` now also returns the resolved `tier_coin` / `tier_minutes`.\n- **Fix: the portal\u0027s Insert Coin modal now shows the time the session will actually credit** â€” the coin-window summary (`/api/coinslot/status`) is priced with the same tiered rule, so a P5 coin shows **2:00:00** (the P5 tier) instead of 01:15:00 (5 x the P1 rate). Each listed coin shows the marginal credit it added, so the listed coins add up exactly to the window total.\n- Pricing resolution now lives in one place (`resolveTier` in `handlers/pricing.go`) and is shared by the session credit, the coin-window summary, `GET /api/pricing` and the portal\u0027s local preview â€” with unit tests covering the P1 = 15m / P5 = 2h / P10 = 5h / P50 = 3d tiers.",
+                         "tarball":  "releases/aircoins-v1.21.2.tar.gz"
+                     },
                      {
                          "released_at":  "2026-08-29T09:05:45Z",
                          "sha256":  "0ed1ab47baf25b049af69edb5be8652d76c3c6361b7e49fed47fa1cb64c3216a",
@@ -31,14 +38,7 @@
                          "version":  "v1.20.4",
                          "release_notes":  "**Release date:** August 2026\n\n### Fixed\n- VLAN Management no longer shows working VLANs as \"Down\": VLAN interfaces already live in the kernel but missed by the `ip -d link show type vlan` parse are now recognized by the heal path, and bridge/VLAN interfaces without an IP address report link up via the kernel `LOWER_UP` flag instead of the misleading RFC 2863 operstate.\n\n---",
                          "tarball":  "releases/aircoins-v1.20.4.tar.gz"
-                     },
-                     {
-                         "released_at":  "2026-08-29T08:07:00Z",
-                         "sha256":  "aa7947252d99e8908b018bbb8f7fec422a01fb495817ba6b3771fa0f05a65462",
-                         "version":  "v1.20.3",
-                         "release_notes":  "**Release date:** August 2026\n\n### Changed\n- Pricing tab: duration and pause-expiry inputs now use **Minutes / Hours / Days** unit dropdowns (add form and inline edit row), matching the CCNDS panel layout. Values are converted to minutes/hours on save.\n- Consumable rates: both the expiry input and its unit dropdown are disabled (and forced to 0) when Rate Type is **Consumable**, in the add form and the edit row.\n\n---",
-                         "tarball":  "releases/aircoins-v1.20.3.tar.gz"
                      }
                  ],
-    "released_at":  "2026-08-29T09:05:45Z"
+    "released_at":  "2026-09-15T01:11:43Z"
 }

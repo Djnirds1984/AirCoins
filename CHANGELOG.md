@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.21.4
+
+**Release date:** September 2026
+
+### Changed
+- Version bump to v1.21.4 (build update). Release notes to follow.
+
+---
+
 ## v1.21.3
 - **Feature: DNS separation — WAN DNS is now independent of the hotspot's captive DNS hijack** so that paying clients keep real internet DNS when the box is moved to another ISP or DHCP lease changes.
   - A dedicated dnsmasq forwarder listens on port 5353 and forwards to the gateway's current upstream resolver (`/etc/resolv.conf`, auto-detected from the WAN/default route). Authorized (paying) clients' port 53 traffic is **REDIRECT**'ed to that forwarder instead of DNAT'ed to a frozen `UPSTREAM_DNS` that was embedded into each rule at auth time (the previous behavior left clients with dead DNS whenever the ISP changed).

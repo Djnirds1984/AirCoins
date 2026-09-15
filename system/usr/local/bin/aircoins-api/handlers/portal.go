@@ -28,6 +28,11 @@ const portalConfigPath = "/etc/pisowifi/portals.conf"
 // paying clients). Contract: aircoins-captive-rules add|del <iface> <gateway>
 const captiveRulesPath = "/usr/local/bin/aircoins-captive-rules"
 
+// CaptiveRulesPath is the public constant used by the DNS watcher to invoke
+// aircoins-captive-rules refresh (rebuilds authorized-client DNS rules against
+// the dynamic forwarder).
+const CaptiveRulesPath = captiveRulesPath
+
 const defaultDHCPLease = "12h"
 
 // ============================================

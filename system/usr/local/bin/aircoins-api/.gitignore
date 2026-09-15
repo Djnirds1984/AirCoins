@@ -1,0 +1,4 @@
+# Build artifacts
+aircoins-api-test
+*.exe
+*.test

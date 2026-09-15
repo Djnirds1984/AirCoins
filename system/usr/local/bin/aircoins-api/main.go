@@ -94,6 +94,15 @@ func main() {
 	// without requiring the admin to visit the portal page first.
 	handlers.HealAllPortalsOnBoot()
 
+	// DNS separation: start the DNS forwarder watcher. This ensures
+	// authorized (paying) clients get dynamic WAN DNS (follows
+	// /etc/resolv.conf) instead of a frozen UPSTREAM_DNS, so they keep
+	// internet when the box is moved to another ISP/DHCP. The hotspot's
+	// captive DNS hijack (wildcard) stays on the gateway IP — they are
+	// intentionally separate.
+	handlers.InitDNSWatch(handlers.CaptiveRulesPath)
+	handlers.StartDNSWatcher()
+
 	// Restore saved WAN config on boot: writes systemd-networkd configs
 	// for static/VLAN modes so the WAN settings survive reboots.
 	handlers.RestoreWANOnBoot()
@@ -252,6 +261,11 @@ func main() {
 		}
 	}))
 	mux.Handle("/api/admin/wan/available-vlans", adminProtected(handlers.WANAvailableVLANs))
+
+	// Captive DNS routes — separate WAN DNS (dynamic forwarder) from the
+	// hotspot's captive DNS hijack. Manual refresh + status for admins.
+	mux.Handle("/api/admin/captive/refresh-dns", adminProtected(handlers.RefreshDNSHandler))
+	mux.Handle("/api/admin/captive/status", adminProtected(handlers.CaptiveStatusHandler))
 
 	// Portal server routes (hotspot stack: portal IP + DHCP + DNS hijack
 	// + captive rules on a chosen interface)

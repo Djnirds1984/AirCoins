@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.21.3
+- **Feature: DNS separation — WAN DNS is now independent of the hotspot's captive DNS hijack** so that paying clients keep real internet DNS when the box is moved to another ISP or DHCP lease changes.
+  - A dedicated dnsmasq forwarder listens on port 5353 and forwards to the gateway's current upstream resolver (`/etc/resolv.conf`, auto-detected from the WAN/default route). Authorized (paying) clients' port 53 traffic is **REDIRECT**'ed to that forwarder instead of DNAT'ed to a frozen `UPSTREAM_DNS` that was embedded into each rule at auth time (the previous behavior left clients with dead DNS whenever the ISP changed).
+  - The hotspot's captive DNS hijack (wildcard `address=/#/<gateway>` on the per-VLAN dnsmasq) is **unchanged** and stays on the gateway IP — it is intentionally separate from the WAN forwarder.
+  - `UPSTREAM_DNS` in `/etc/pisowifi/captive.conf` is now **optional** (`UPSTREAM_DNS=` = auto-detect); it remains as a fallback and for backward compatibility, but is **not** embedded into per-MAC rules anymore.
+  - `aircoins-captive-rules` gains `ensure_dns_forwarder` (create + enable + restart the port-5353 forwarder, idempotent — called on `add`, `auth`, and `refresh`), a `refresh` subcommand (recreate the forwarder + rebuild all authorized-client DNS rules against it; heals stale DNAT rules from older versions), and MAC-pattern rule removal (`remove_auth_rules "AA:BB:CC:*"`).
+  - The Go API starts a **DNS watcher** at boot (`handlers.StartDNSWatcher`): one-shot forwarder + rule refresh, then a 60-second poll that re-ensures the forwarder and detects upstream-resolver changes so the rules follow the current ISP without waiting for the admin.
+  - New admin endpoints: `POST /api/admin/captive/refresh-dns` (manual refresh) and `GET /api/admin/captive/status` (forwarder port, detected upstream, running state).
+
 ## v1.21.2
 - **Fix (major): the rates set in Admin > Pricing are now the rates that actually apply** — the coins of an armed window are priced as **ONE inserted total** instead of per pulse. On a pulse-train coin acceptor a P5 coin arrives as 5 x P1 pulses, so the old code credited 5 x the P1 rate (with P1 = 15m a P5 coin was credited **1 hour 15 minutes**) and the P5 / P10 / P50 tiers were **unreachable** no matter what was configured. A P5 coin now credits the P5 tier (e.g. 2 hours) as soon as the inserted total reaches it, and the pausable / pause-expiry rules come from that same tier.
 - **Fix: a coin the rate table does not list uses the last configured rate** — an amount between tiers is credited pro-rata against the highest tier at or below it (P7 with P1 = 15m and P5 = 2h credits 7 x 120 / 5 = 168 minutes instead of nothing or an arbitrary sum), and an amount below every tier uses the lowest (last) configured rate so an unlisted coin never eats the money. `GET /api/pricing?coin=N` now also returns the resolved `tier_coin` / `tier_minutes`.

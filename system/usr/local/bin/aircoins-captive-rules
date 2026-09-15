@@ -251,6 +251,93 @@ enable_forwarding() {
 # the shell script and the Go binary.
 
 # ============================================
+# DNS FORWARDER (WAN DNS, separate from hotspot hijack)
+# ============================================
+# The hotspot portal's own dnsmasq already hijacks all DNS on the VLAN
+# (wildcard address=/#/<gateway> in startPortalDHCP, no-resolv). That is
+# the CAPTIVE DNS and is deliberately self-contained on the gateway IP so
+# it survives ISP/DHCP changes.
+#
+# This separate forwarder serves AUTHORIZED (paying) clients a dynamic
+# upstream DNS that tracks the current WAN resolver, so that when the box
+# is moved to another ISP (different DHCP, different uplink IP) paying
+# clients keep getting real internet DNS instead of being stuck on the
+# frozen $UPSTREAM_DNS hardcoded at auth time.
+#
+# The forwarder is dnsmasq on port 5353, forward-only, upstream =
+# /etc/resolv.conf (auto-detected from the WAN/default route). Clients
+# are routed to it via REDIRECT (port 53 -> 5353 on the gateway), NOT
+# DNAT to a hardcoded IP, so the upstream follows the resolver,
+# not a frozen address.
+
+DNS_FORWARDER_PORT=5353
+DNS_FORWARDER_CONF="/etc/dnsmasq.d/aircoins-forwarder.conf"
+
+# ensure_dns_forwarder: create + enable + (re)start the port-5353 forwarder.
+# Idempotent: safe to call on every add/auth/refresh/boot.
+ensure_dns_forwarder() {
+    mkdir -p /etc/dnsmasq.d 2>/dev/null
+
+    # Minimal forward-only config. Upstream defaults to /etc/resolv.conf
+    # (dnsmasq reads it unless no-resolv). bind-interfaces listens on all
+    # addresses; with no dhcp-range this instance does no DHCP at all.
+    cat > "$DNS_FORWARDER_CONF" <<'CONF'
+# AirCoins dynamic WAN DNS forwarder.
+# Serves authorized (paying) clients a resolver that tracks the current
+# WAN/DHCP upstream, separate from the hotspot's captive DNS hijack.
+# Port 5353, forward-only, upstream from /etc/resolv.conf.
+port=5353
+bind-interfaces
+no-hosts
+cache-size=1000
+log-facility=/var/log/aircoins-dns-forwarder.log
+CONF
+
+    systemctl daemon-reload 2>/dev/null
+
+    # Prefer the instance template dnsmasq@.service if available.
+    if systemctl cat dnsmasq@.service >/dev/null 2>&1; then
+        local svc="dnsmasq@aircoins-forwarder.service"
+        if ! systemctl is-active --quiet "$svc" 2>/dev/null; then
+            systemctl restart "$svc" 2>/dev/null || true
+        fi
+        log "dns forwarder enabled via $svc"
+        return 0
+    fi
+
+    # Standalone: kill any existing aircoins dnsmasq on 5353, restart.
+    pkill -f "dnsmasq.*-C $DNS_FORWARDER_CONF" 2>/dev/null || true
+    sleep 0.2
+    dnsmasq -C "$DNS_FORWARDER_CONF" -x /run/dnsmasq-aircoins-forwarder.pid \
+        --no-daemon 2>/dev/null &
+    log "dns forwarder started standalone on port $DNS_FORWARDER_PORT"
+}
+
+is_dns_forwarder_running() {
+    if systemctl is-active --quiet "dnsmasq@aircoins-forwarder.service" 2>/dev/null; then
+        return 0
+    fi
+    pgrep -f "dnsmasq.*-C $DNS_FORWARDER_CONF" >/dev/null 2>&1
+}
+
+# refresh_dns_forwarder: rewrite config + restart so the upstream follows
+# a changed /etc/resolv.conf (e.g. after the ISP/DHCP changed). Authorized
+# clients keep internet because their REDIRECT target (port 5353) stays the
+# same; only the upstream the forwarder uses changes.
+refresh_dns_forwarder() {
+    ensure_dns_forwarder
+    if systemctl is-active --quiet "dnsmasq@aircoins-forwarder.service" 2>/dev/null; then
+        systemctl restart "dnsmasq@aircoins-forwarder.service" 2>/dev/null || true
+    else
+        pkill -f "dnsmasq.*-C $DNS_FORWARDER_CONF" 2>/dev/null || true
+        sleep 0.2
+        dnsmasq -C "$DNS_FORWARDER_CONF" -x /run/dnsmasq-aircoins-forwarder.pid \
+            --no-daemon 2>/dev/null &
+    fi
+    log "dns forwarder refreshed (upstream now from /etc/resolv.conf)"
+}
+
+# ============================================
 # CAPTIVE RULES - ADD
 # ============================================
 cmd_add() {
@@ -263,6 +350,10 @@ cmd_add() {
     ensure_chain filter "$FWD_CHAIN"
     ensure_hook nat PREROUTING "$NAT_CHAIN"
     ensure_hook filter FORWARD "$FWD_CHAIN"
+
+    # --- DNS forwarder: ensure it exists so authorized clients can be
+    # redirected to a dynamic upstream right away (also called by auth).
+    ensure_dns_forwarder
 
     # --- Capture: send all DNS to the local dnsmasq for this VLAN.
     append_rule nat "$NAT_CHAIN" -i "$iface" -p udp --dport 53 \
@@ -418,9 +509,9 @@ cmd_auth() {
     done
 
     insert_rule nat "$NAT_CHAIN" -p tcp --dport 53 -m mac --mac-source "$mac" \
-        -j DNAT --to-destination "$UPSTREAM_DNS:53"
+        -j REDIRECT --to-ports "$DNS_FORWARDER_PORT"
     insert_rule nat "$NAT_CHAIN" -p udp --dport 53 -m mac --mac-source "$mac" \
-        -j DNAT --to-destination "$UPSTREAM_DNS:53"
+        -j REDIRECT --to-ports "$DNS_FORWARDER_PORT"
 
     insert_rule filter "$FWD_CHAIN" -m mac --mac-source "$mac" -j ACCEPT
 
@@ -428,7 +519,7 @@ cmd_auth() {
     # client gets real internet right away.
     flush_client_conntrack "$mac"
 
-    log "client authorized: $mac (dns -> $UPSTREAM_DNS)"
+    log "client authorized: $mac (dns -> forwarder port $DNS_FORWARDER_PORT -> /etc/resolv.conf)"
 }
 
 cmd_unauth() {
@@ -442,6 +533,52 @@ cmd_unauth() {
     flush_client_conntrack "$mac"
 
     log "client deauthorized: $mac"
+}
+
+# ============================================
+# REFRESH DNS (rebuild authorized-client DNS rules against the forwarder)
+# ============================================
+# Reapplies the REDIRECT-to-forwarder rules for every currently authorized
+# MAC. This is used after the forwarder is restarted or after the WAN
+# changed so that authorized clients continue to get dynamic upstream DNS.
+# Pattern-based removal (remove_auth_rules) handles the case where an old
+# DNAT rule might still exist from a previous version.
+cmd_refresh_dns() {
+    ensure_dns_forwarder
+
+    ensure_chain nat "$NAT_CHAIN"
+    ensure_chain filter "$FWD_CHAIN"
+    ensure_hook nat PREROUTING "$NAT_CHAIN"
+    ensure_hook filter FORWARD "$FWD_CHAIN"
+    enable_forwarding
+
+    # Rebuild the per-MAC authorized rules in known order: RETURN first
+    # (so the capture chain can still hijack *before* authorizing), then
+    # REDIRECT DNS to the dynamic forwarder, then ACCEPT in FORWARD.
+    local mac
+    while IFS= read -r line; do
+        mac=$(echo "$line" | awk '{print $1}')
+        valid_mac "$mac" || continue
+
+        # Remove any existing per-MAC rules (old DNAT or REDIRECT variants)
+        # so a refresh never leaves stale rules.
+        remove_auth_rules "$mac"
+
+        # Re-insert in canonical order.
+        insert_rule nat "$NAT_CHAIN" -m mac --mac-source "$mac" -j RETURN
+        insert_rule nat "$NAT_CHAIN" -p tcp --dport 53 -m mac --mac-source "$mac" \
+            -j REDIRECT --to-ports "$DNS_FORWARDER_PORT"
+        insert_rule nat "$NAT_CHAIN" -p udp --dport 53 -m mac --mac-source "$mac" \
+            -j REDIRECT --to-ports "$DNS_FORWARDER_PORT"
+        insert_rule filter "$FWD_CHAIN" -m mac --mac-source "$mac" -j ACCEPT
+
+        # Drop existing conntrack so the new path takes effect immediately.
+        flush_client_conntrack "$mac"
+    done < <(iptables -t nat -S "$NAT_CHAIN" 2>/dev/null |
+        grep -- '--mac-source' | awk '{for (i = 1; i <= NF; i++)
+            if ($i == "--mac-source") print $(i + 1)}' | sort -u)
+
+    log "dns refresh: rebuilt authorized-client rules for $(iptables -t nat -S "$NAT_CHAIN" 2>/dev/null | grep -- '--mac-source' | awk '{for (i = 1; i <= NF; i++) if ($i == "--mac-source") print $(i + 1)}' | sort -u | wc -l | tr -d ' ') MAC(s) -> forwarder port $DNS_FORWARDER_PORT"
 }
 
 # ============================================
@@ -474,13 +611,19 @@ Usage:
   aircoins-captive-rules del    <iface> <gateway>   Remove the capture rules for a VLAN
   aircoins-captive-rules auth   <mac>               Whitelist a paying client (internet + real DNS)
   aircoins-captive-rules unauth <mac>               Revoke a client's access
+  aircoins-captive-rules refresh                    Rebuild authorized-client DNS rules against the dynamic forwarder
   aircoins-captive-rules status                     Show current rules
 
 Note: Anti-hotspot (TTL=1) is managed by the Go API binary directly.
+      Authorized clients' DNS is redirected to a dynamic forwarder (port
+      5353) that follows /etc/resolv.conf, so they keep internet when the
+      ISP/DHCP changes. The hotspot's captive DNS hijack (wildcard) is
+      intentionally separate and stays on the gateway IP.
 
 Examples:
   aircoins-captive-rules add end0.22 10.0.22.1
   aircoins-captive-rules auth aa:bb:cc:dd:ee:ff
+  aircoins-captive-rules refresh
 EOF
 }
 
@@ -511,6 +654,9 @@ case "${1:-}" in
     unauth)
         [ $# -eq 2 ] || { usage; exit 1; }
         cmd_unauth "$2"
+        ;;
+    refresh)
+        cmd_refresh_dns
         ;;
     status)
         cmd_status
